@@ -113,3 +113,7 @@ Phase 0 does **not** publish, deploy, register webhooks, call third-party servic
 or create Cloudflare/Telegram resources. Tests make no real network requests and
 require no credentials. The blueprint is preserved verbatim under
 [`docs/blueprint/v1/`](docs/blueprint/README.md) and remains authoritative.
+
+## License
+
+Released under the [MIT License](LICENSE).
