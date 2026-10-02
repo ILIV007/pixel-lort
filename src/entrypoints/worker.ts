@@ -13,13 +13,13 @@
  *   path never includes the query string.
  */
 import { parseWorkerConfig } from '../shared/config/phase0';
-import { toAppError } from '../shared/errors/app-error';
 import type { WorkerEnv } from '../shared/types/env';
 import { createLogger, type Logger } from '../observability/logger';
 import { handleQueue } from './queue';
 import { handleScheduled } from './cron';
 import { resolveRequestId, REQUEST_ID_HEADER } from './http/request-context';
 import { routeRequest } from './http/router';
+import { logRequestError } from './http/request-errors';
 import { errorResponse } from './http/responses';
 
 async function handleFetch(request: Request, env: WorkerEnv): Promise<Response> {
@@ -44,11 +44,11 @@ async function handleFetch(request: Request, env: WorkerEnv): Promise<Response> 
     });
     response = await routeRequest(request, env, { requestId, logger });
   } catch (error) {
-    const appError = toAppError(error);
-    logger.error('http.request.failed', {
-      code: appError.code,
-      error,
-    });
+    // Observability policy (ADR-0017): expected 4xx log one concise warn
+    // event; only unexpected 5xx may log at error level. Neither path emits
+    // raw stacks or arbitrary thrown values. The response body is built
+    // separately by the safe serializer and is unchanged.
+    logRequestError(logger, error);
     response = errorResponse(error, requestId);
   }
 

@@ -1,6 +1,6 @@
 # ADR-0008 — Secret classification and phase-scoped fail-closed readiness
 
-- **Status:** Accepted
+- **Status:** Accepted (confirmed by ADR-0014; classification confirmed by ADR-0009)
 - **Phase:** 0
 - **Date:** Phase 0
 
@@ -20,11 +20,12 @@ deployment permanently `not_ready`.
   with its owning roadmap phase, mirroring blueprint §4.
 - Readiness is **fail-closed per feature phase**: a secret gates readiness
   from the phase that consumes it. Phase 0 checks only the Phase-0 config
-  subset (all defaulted, all non-secret). Confirmation question recorded as
-  OD-006.
+  subset (all defaulted, all non-secret). ~~Confirmation question recorded
+  as OD-006.~~ **Confirmed by ADR-0014 (OD-006 closed).**
 - `TARGET_CHANNEL` is classified as non-secret configuration (publicly
   observable username), deviating from the blueprint's secrets list layout;
-  recorded as OD-001 for owner confirmation.
+  ~~recorded as OD-001 for owner confirmation.~~ **Confirmed by ADR-0009
+  (OD-001 closed).**
 
 ## Consequences
 

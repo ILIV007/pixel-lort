@@ -32,8 +32,11 @@ intentionally not started.
 ## Phase 1 — repository, CI, bindings and migrations ⬜
 
 - [ ] D1/KV binding declarations + resource provisioning policy (explicit
-      owner approval).
+      owner approval; planned resource names per ADR-0016).
 - [ ] D1 migrations from preserved `pixel_schema_v1.sql` (append-only files).
+- [ ] `GET /version` with safe build metadata: application version, commit
+      identifier, schema version, deployment environment (ADR-0012);
+      development-safe defaults locally.
 - [ ] Repository layer for D1 access with idempotent writers.
 - [ ] CI extension for migration dry-run checks.
 
@@ -45,11 +48,13 @@ intentionally not started.
 - [ ] Admin identity, atomic permissions, fail-closed authorization.
 - [ ] Deterministic Telegram HTML renderer: escaping, allowlist, length
       enforcement, safe splitting, RTL/bidi, deterministic footer.
-- [ ] `GET /version`; `degraded` readiness semantics.
+- [ ] `degraded` readiness semantics per ADR-0015 (ready/degraded/not_ready).
 
 ## Phase 3 — job/queue framework and idempotency ⬜
 
-- [ ] `pixel-jobs`/`pixel-dlq` queue bindings and envelope schema validation.
+- [ ] `pixel-jobs`/`pixel-dlq` queue bindings (planned resource names per
+      ADR-0016) and envelope schema validation — Zod introduced here
+      (ADR-0010), replacing the Phase-0 ack-all skeleton per ADR-0011.
 - [ ] D1-backed job claim queries with leases; retry policy with full jitter.
 - [ ] Deterministic idempotency keys wired to all externally visible actions.
 - [ ] Cron dispatch of due work (no inline fetching/publishing).

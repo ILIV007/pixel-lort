@@ -17,10 +17,18 @@ digest.
 
 - Secret NAMES are contract (`PixelSecrets` in `src/shared/types/env.ts`);
   the future secret catalog with owning phases lives in
-  `src/shared/config/phase0.ts`.
+  `src/shared/config/phase0.ts`. `TARGET_CHANNEL` is non-secret
+  configuration (ADR-0009) and is intentionally absent from the catalog.
 - `.env.example` contains variable names and empty placeholders only.
 - `npm run scan:secrets` (part of `npm run check`) fails the gate on
-  credential-shaped strings in tracked files and never prints matched content.
+  credential-shaped strings in tracked files and never prints matched
+  content. Coverage includes Telegram, OpenAI-style, Google, AWS, GitHub
+  legacy (`ghp_/gho_/ghu_/ghs_/ghr_`) and fine-grained (`github_pat_`)
+  tokens, Cloudflare user/account tokens (`cfut_`/`cfat_`), Groq keys
+  (`gsk_`), Slack tokens, private-key blocks, and Bearer literals
+  (ADR-0018). An automated self-test (`npm run test:secrets`, also part of
+  `npm run check`) proves detection, placeholder safety, no-value-leak
+  reporting, and non-zero exit on findings.
 
 ## 2. Logging and redaction rules
 
@@ -31,13 +39,23 @@ digest.
   `cookie`, `token`, `apiKey`, `api_key`, `secret`, `password`,
   `telegramBotToken` (plus common variants; see
   `src/shared/security/sensitive-keys.ts`). Over-redaction is preferred.
+- **Fail-safe error logging (ADR-0017):** key-based redaction is NOT the
+  only defense. Error instances found at ANY depth are reduced to safe
+  fields (`errorKind`, `name`, stable `code`, `httpStatus`) by
+  `src/observability/safe-error.ts`. Raw unknown Error messages, stacks,
+  causes, response bodies, and provider payloads are NEVER emitted — even
+  when embedded inside strings under non-sensitive keys. Arbitrary thrown
+  values are never stringified.
 - Never log: request bodies, authorization headers, cookies, full environment
   objects, Telegram update payloads, provider responses.
 - HTTP request logs contain method + path only — **never the query string**.
-- Error stacks may appear in logs (private tail/Workers Logs), NEVER in HTTP
-  responses. Error bodies are produced exclusively by
+- **Failed-request levels (ADR-0017):** expected 4xx application errors log
+  ONE concise `warn` event (code + status); only unexpected 5xx errors log
+  at `error` level. Neither path exposes raw stacks or arbitrary thrown
+  values. The default logger emits no raw stack traces at all.
+- HTTP error BODIES are produced exclusively by
   `src/shared/errors/serialize.ts`: code + safe message + requestId +
-  sanitized details.
+  sanitized details — unchanged by the logging policy.
 - Redaction traversal is depth- and size-bounded against hostile input.
 
 ## 3. Trust boundaries
@@ -58,10 +76,14 @@ implements the related feature (see `docs/ROADMAP.md`).
 
 - Phase 0: no deployments at all. `npm run build` is an offline dry-run.
 - Later phases: preview and production are separate Workers environments with
-  separate resources and separately configured secrets (naming: OD-008).
+  separate resources and separately configured secrets (planned names:
+  Workers `pixel` / `pixel-preview`; resources `pixel-*-production` /
+  `pixel-*-preview` — ADR-0016, closed OD-008). No resources were created in
+  Phase 0 or the correction pass.
 - Production readiness (`/health/ready`) is fail-closed per feature phase:
   missing configuration or secrets for an active feature => `not_ready`
-  (ADR-0008, OD-006).
+  (ADR-0008, approved by ADR-0014). Readiness semantics for
+  `ready/degraded/not_ready` are fixed by ADR-0015.
 - No public debug/mutation endpoints exist in any phase; the Telegram admin
   panel is the only administration UI in v1.
 

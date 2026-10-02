@@ -25,10 +25,13 @@ Implemented in Phase 0:
 - Typed environment/binding contracts (D1, KV, R2, Queues, Workers AI) — declared as
   types and documented placeholders; **no Cloudflare resources exist or are created**.
 - Small Worker-compatible configuration validation with secret-safe failures.
-- Structured logging with mandatory sensitive-key redaction, correlation IDs, clock
-  abstraction, and deterministic idempotency-key primitives (interfaces only).
-- Quality gates: `npm run check` (lint, format, typecheck, tests, secret scan,
-  offline build) and a non-deploying GitHub Actions CI workflow.
+- Structured logging with mandatory sensitive-key redaction, fail-safe error
+  serialization (raw messages/stacks/causes are never emitted — ADR-0017),
+  correlation IDs, clock abstraction, and deterministic idempotency-key
+  primitives (interfaces only).
+- Quality gates: `npm run check` (lint, format, typecheck, tests, secret
+  scanner self-test, secret scan, offline build) and a non-deploying GitHub
+  Actions CI workflow.
 - Full documentation set and preserved blueprint under `docs/blueprint/v1/`.
 
 NOT implemented (by design — later phases):
@@ -63,6 +66,7 @@ For local Workers development later, copy `.dev.vars.example` to `.dev.vars`
 | `npm run format`       | Prettier auto-format                                           |
 | `npm run typecheck`    | `tsc --noEmit` (strict mode)                                   |
 | `npm test`             | Vitest suite executed inside the Workers runtime (workerd)     |
+| `npm run test:secrets` | Secret-scanner self-test (detection, placeholders, exit codes) |
 | `npm run build`        | `wrangler deploy --dry-run --outdir dist` — offline build only |
 | `npm run scan:secrets` | Secret-shape scan over git-tracked files                       |
 | `npm run check`        | Complete Phase 0 quality gate (all of the above)               |
@@ -95,7 +99,8 @@ scripts/          maintenance scripts (secret scan)
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — approved architecture, implemented vs planned
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — phase plan with completion status
-- [`docs/OPEN_DECISIONS.md`](docs/OPEN_DECISIONS.md) — unresolved decisions
+- [`docs/OPEN_DECISIONS.md`](docs/OPEN_DECISIONS.md) — decision log (Phase-0
+  items OD-001..OD-008 closed; history preserved)
 - [`docs/DECISIONS/`](docs/DECISIONS/index.md) — architecture decision records (ADRs)
 - [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) — secret boundaries and logging rules
 - [`AGENTS.md`](AGENTS.md) — standing instructions for coding agents

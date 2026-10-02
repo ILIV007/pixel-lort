@@ -1,6 +1,6 @@
 # ADR-0004 — Structured JSON-line logging with mandatory key redaction
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by ADR-0017)
 - **Phase:** 0
 - **Date:** Phase 0
 
@@ -23,8 +23,10 @@ warn/error`, consumed by `wrangler tail` / Workers Logs.
   Over-redaction is preferred over leakage.
 - Bounded traversal (depth ≤ 6, entries ≤ 100) so hostile structures cannot
   exhaust CPU.
-- `fields.error` values serialize to `{name, message, stack}` — logs only,
-  never HTTP responses.
+- ~~`fields.error` values serialize to `{name, message, stack}` — logs only,
+  never HTTP responses.~~ **Superseded by ADR-0017:** error values are
+  fail-safe serialized (name + stable code + HTTP status only); raw
+  messages, stacks, and causes are never emitted.
 - Injected `clock`/`sink` make logging deterministic in tests.
 
 ## Consequences

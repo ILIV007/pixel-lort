@@ -8,7 +8,7 @@
  *
  * Bodies are intentionally tiny and carry no configuration inventory.
  * Future phases will extend readiness checks (webhook secret, DB, queue)
- * and add `degraded` semantics (OD-007).
+ * and add `degraded` semantics per ADR-0015 (closed OD-007).
  */
 import { parseWorkerConfig } from '../../../shared/config/phase0';
 import type { WorkerEnv } from '../../../shared/types/env';

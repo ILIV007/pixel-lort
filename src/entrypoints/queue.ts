@@ -27,6 +27,10 @@ export async function handleQueue(
   for (const message of batch.messages) {
     // Phase 0: acknowledge immediately. Claim/lease/idempotent processing
     // replaces this in the job framework phase (docs/ROADMAP.md phase 3).
+    // Constraint (ADR-0011): this ack-all placeholder is approved ONLY for
+    // the non-deployed Phase 0 skeleton; it MUST be replaced before any real
+    // queue consumer is bound or deployed. No intermediate deployment with
+    // ack-all behavior is allowed.
     message.ack();
   }
 }

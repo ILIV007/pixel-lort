@@ -80,6 +80,22 @@ describe('redactValue', () => {
     expect(Object.keys(outObject).length).toBe(101);
     expect(outObject[TRUNCATED_MARKER]).toBe(REDACTED_MARKER);
   });
+
+  it('collapses Error instances at ANY depth to fail-safe fields', () => {
+    // Marker embedded in the error message; deliberately NOT token-shaped.
+    const embedded = 'SECRET-NESTED-ERROR-VALUE';
+    const input = { outer: [new Error(`boom with ${embedded}`)], keep: 1 };
+    const output = redactValue(input) as Record<string, unknown>;
+
+    const item = (output['outer'] as Array<Record<string, unknown>>)[0]!;
+    expect(item['errorKind']).toBe('error');
+    expect(item['name']).toBe('Error');
+    expect(item['message']).toBeUndefined();
+    expect(item['stack']).toBeUndefined();
+    expect(item['cause']).toBeUndefined();
+    expect(output['keep']).toBe(1);
+    expect(JSON.stringify(output)).not.toContain(embedded);
+  });
 });
 
 describe('redactFields', () => {

@@ -1,6 +1,6 @@
 # ADR-0007 — Phase 0 cron/queue handlers are typed no-ops that ack-all
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by ADR-0011)
 - **Phase:** 0
 - **Date:** Phase 0
 
@@ -21,7 +21,9 @@ business workflow and no resources exist that could deliver events.
   placeholder.
 - The replacement semantics (D1 claim with lease, explicit per-message
   ack/retry, idempotency keys) are defined by blueprint §7 and are tracked
-  for roadmap phase 3 (OD-003).
+  for roadmap phase 3 (OD-003, closed by ADR-0011: ack-all is approved ONLY
+  for the non-deployed Phase 0 skeleton and MUST be replaced before any real
+  queue consumer is bound or deployed).
 
 ## Consequences
 

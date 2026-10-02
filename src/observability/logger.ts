@@ -1,14 +1,16 @@
 /**
  * Structured logging interface and JSON-line implementation.
  *
- * Rules (docs/SECURITY_MODEL.md):
+ * Rules (docs/SECURITY_MODEL.md, ADR-0017):
  * - This module is the ONLY code allowed to write to console in Worker code.
  * - Every line is a single JSON object: { ts, level, msg, ...fields }.
  * - Fields are REDACTED before serialization; sensitive keys never reach the
  *   sink even if a caller passes them by mistake.
- * - Error values passed as `fields.error` are serialized to
- *   { name, message, stack } for internal logs. Stacks are log-only and must
- *   never be copied into HTTP responses.
+ * - FAIL-SAFE ERROR POLICY: Error instances found at ANY depth are reduced to
+ *   safe fields (name, stable AppError code, HTTP status). Raw unknown Error
+ *   messages, stacks, causes, response bodies, and provider payloads are
+ *   NEVER emitted — key-based redaction alone cannot catch secrets embedded
+ *   inside error strings.
  * - Request bodies, authorization headers, cookies, tokens, and full
  *   environment objects must never be passed to the logger by callers.
  */
@@ -58,26 +60,6 @@ function defaultSink(level: LogLevel, line: string): void {
   }
 }
 
-/** Serialize an unknown thrown value for logs (never for HTTP responses). */
-export function serializeError(value: unknown, depth: number = 0): Record<string, unknown> {
-  if (value instanceof Error) {
-    const out: Record<string, unknown> = { name: value.name, message: value.message };
-    if (depth < 3) {
-      if (typeof value.stack === 'string') {
-        out.stack = value.stack;
-      }
-      if (value.cause !== undefined && value.cause !== null) {
-        out.cause = serializeError(value.cause, depth + 1);
-      }
-    }
-    return out;
-  }
-  if (typeof value === 'string') {
-    return { value };
-  }
-  return { value: Object.prototype.toString.call(value) };
-}
-
 class JsonLineLogger implements Logger {
   constructor(
     private readonly minLevel: LogLevel,
@@ -110,11 +92,9 @@ class JsonLineLogger implements Logger {
     if (levelRank(level) < levelRank(this.minLevel)) {
       return;
     }
-    let safeFields: LogFields = fields ?? {};
-    if (safeFields['error'] !== undefined) {
-      safeFields = { ...safeFields, error: serializeError(safeFields['error']) };
-    }
-    const merged = redactFields({ ...this.base, ...safeFields });
+    // redactFields handles BOTH sensitive keys and fail-safe error fields
+    // (Errors at any depth collapse to safe summaries — ADR-0017).
+    const merged = redactFields({ ...this.base, ...(fields ?? {}) });
     const line = JSON.stringify({
       ts: new Date(this.clock.now()).toISOString(),
       level,

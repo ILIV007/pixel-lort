@@ -1,16 +1,23 @@
 /**
  * Value redaction for structured logs.
  *
- * Walks arbitrary log fields and replaces values whose KEYS look sensitive
- * (see shared/security/sensitive-keys.ts). Walking is bounded by depth and
- * key count so hostile or accidental huge objects cannot blow the CPU/memory
- * budget of a Worker invocation.
+ * Walks arbitrary log fields and:
+ * 1. Replaces ERROR instances (at any depth) with fail-safe summaries —
+ *    never message, stack, or cause (see observability/safe-error.ts and
+ *    ADR-0017). Key-based redaction alone cannot catch secrets embedded
+ *    inside error strings.
+ * 2. Replaces values whose KEYS look sensitive (see
+ *    shared/security/sensitive-keys.ts) with a redaction marker.
  *
- * Redaction is key-based: values of sensitive keys are never inspected,
- * transformed, truncated, or logged — they are replaced wholesale.
+ * Walking is bounded by depth and key count so hostile or accidental huge
+ * objects cannot blow the CPU/memory budget of a Worker invocation.
+ *
+ * Redaction is fail-safe by default: values of sensitive keys are never
+ * inspected, transformed, truncated, or logged — they are replaced wholesale.
  */
 import { isSensitiveKeyName } from '../shared/security/sensitive-keys';
 import type { LogFields } from './logger';
+import { toSafeErrorFields } from './safe-error';
 
 export const REDACTED_MARKER = '[REDACTED]';
 export const TRUNCATED_MARKER = '[TRUNCATED]';
@@ -21,6 +28,11 @@ const MAX_ENTRIES = 100;
 export function redactValue(value: unknown, depth: number = 0): unknown {
   if (value === null || typeof value !== 'object') {
     return value;
+  }
+  // Fail-safe error handling BEFORE any structural walk: an Error at any
+  // depth collapses to safe fields, never message/stack/cause (ADR-0017).
+  if (value instanceof Error) {
+    return toSafeErrorFields(value);
   }
   if (depth >= MAX_DEPTH) {
     return TRUNCATED_MARKER;

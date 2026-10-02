@@ -8,7 +8,9 @@
  * The future secret catalog documents the full secret contract from the
  * blueprint with the phase that starts consuming each secret. Secrets are
  * NOT validated in Phase 0 — fail-closed readiness for a given secret is
- * enforced from the phase that actually uses it (ADR-0008, OD-006).
+ * enforced from the phase that actually uses it (ADR-0008, approved by
+ * ADR-0014). TARGET_CHANNEL is intentionally ABSENT: it is non-secret
+ * configuration per ADR-0009.
  */
 import { defineConfigSpec, type ConfigSpec } from './spec';
 import { validateConfig, type ConfigValidationResult } from './validate';
@@ -85,6 +87,10 @@ function isEnvironment(value: unknown): value is Environment {
  * Future secret catalog — names, owning phase, and purpose. This is the typed
  * mirror of blueprint §4 so readiness gating can be wired phase-by-phase.
  * Values never exist in source; see docs/SECURITY_MODEL.md.
+ *
+ * NOTE (ADR-0009): TARGET_CHANNEL is NOT in this catalog — the public channel
+ * username is non-secret configuration and will be validated as plain config
+ * in the phase that consumes it.
  */
 export interface FutureSecretDescriptor {
   readonly name: string;
@@ -112,12 +118,8 @@ export const FUTURE_SECRET_CATALOG: readonly FutureSecretDescriptor[] = [
     phase: 2,
     description: 'Owner Telegram user ID for fail-closed admin bootstrapping.',
   },
-  {
-    name: 'TARGET_CHANNEL',
-    required: true,
-    phase: 2,
-    description: 'Target channel username (@pixellort); classified non-secret, see OD-001.',
-  },
+  // TARGET_CHANNEL is intentionally absent: non-secret configuration
+  // (publicly observable username) per ADR-0009 — never a secret.
   {
     name: 'YOUTUBE_API_KEY',
     required: true,

@@ -14,9 +14,10 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:secrets": "node scripts/scan-secrets.selftest.mjs",
     "build": "wrangler deploy --dry-run --outdir dist",
     "scan:secrets": "node scripts/scan-secrets.mjs",
-    "check": "npm run lint && npm run format:check && npm run typecheck && npm run test && npm run scan:secrets && npm run build"
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm run test && npm run test:secrets && npm run scan:secrets && npm run build"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
@@ -26,6 +27,7 @@
     "globals": "^16.5.0",
     "prettier": "^3.9.9",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.0",
     "vitest": "^4.1.11",
     "wrangler": "^4.147.0"
   }

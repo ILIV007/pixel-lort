@@ -97,8 +97,9 @@ types, required/optional with defaults, secret classification. Failures
 identify field names and reasons only — never values — so misconfiguration
 cannot leak secrets. Phase 0 validates only the health-foundation subset;
 the full secret catalog is documented with owning phases
-(`FUTURE_SECRET_CATALOG`) and will gate readiness from its owning phase
-(ADR-0008, OD-006).
+(`FUTURE_SECRET_CATALOG`, from which TARGET_CHANNEL is intentionally absent
+per ADR-0009) and gates readiness from its owning phase (ADR-0008, approved
+by ADR-0014).
 
 ### 3.5 Observability (`src/observability/`)
 
@@ -107,8 +108,11 @@ the full secret catalog is documented with owning phases
 - Key-based redaction before serialization (sensitive names include:
   `authorization`, `cookie`, `token`, `apiKey`, `api_key`, `secret`,
   `password`, `telegramBotToken` and variants), depth/size bounded.
-- Error serialization for logs only (name/message/stack); stacks never reach
-  HTTP responses.
+- Fail-safe error logging (ADR-0017): Error instances at any depth collapse
+  to safe fields (name, stable code, HTTP status) via
+  `src/observability/safe-error.ts`; raw messages, stacks, and causes are
+  never emitted. Expected 4xx requests log one concise warn event; only
+  unexpected 5xx log at error level.
 
 ### 3.6 Shared primitives (`src/shared/`)
 

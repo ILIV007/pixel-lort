@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createLogger, type LogFields } from '../../src/observability/logger';
+import { toSafeErrorFields } from '../../src/observability/safe-error';
 import { REDACTED_MARKER } from '../../src/observability/redaction';
+import { AppError } from '../../src/shared/errors/app-error';
 import { fixedClock } from '../../src/shared/time/clock';
 
 interface CapturedLine {
@@ -133,18 +135,13 @@ describe('logger behavior', () => {
     expect(parsed['extra']).toBe('value');
   });
 
-  it('serializes error values with name/message/stack but redacts fields', () => {
+  it('redacts sensitive keys placed next to error fields', () => {
     const { lines, sink } = capture();
     const logger = createLogger({ level: 'debug', clock: fixedClock(), sink });
-    const error = new Error('boom');
 
-    logger.error('failed', { error, botToken: 'should-not-appear' });
+    logger.error('failed', { error: new Error('boom'), botToken: 'should-not-appear' });
 
     const parsed = lines[0]!.parsed;
-    const serialized = parsed['error'] as Record<string, unknown>;
-    expect(serialized['name']).toBe('Error');
-    expect(serialized['message']).toBe('boom');
-    expect(typeof serialized['stack']).toBe('string');
     expect(parsed['botToken']).toBe(REDACTED_MARKER);
     expect(JSON.stringify(parsed)).not.toContain('should-not-appear');
   });
@@ -163,5 +160,104 @@ describe('logger behavior', () => {
     logger.info('deep', { tree: cursor });
     const serialized = JSON.stringify(lines[0]!.parsed);
     expect(serialized).toContain('[TRUNCATED]');
+  });
+});
+
+describe('fail-safe error logging (ADR-0017)', () => {
+  /** Marker embedded inside error strings. Deliberately NOT token-shaped. */
+  const EMBEDDED = 'SECRET-VALUE-embedded-in-error';
+
+  it('never emits a raw Error message', () => {
+    const { lines, sink } = capture();
+    const logger = createLogger({ level: 'debug', clock: fixedClock(), sink });
+
+    logger.error('failed', { error: new Error(`provider request failed using ${EMBEDDED}`) });
+
+    const line = lines[0]!;
+    const serialized = JSON.stringify(line.parsed);
+    expect(serialized).not.toContain(EMBEDDED);
+    const errFields = line.parsed['error'] as Record<string, unknown>;
+    expect(errFields['errorKind']).toBe('error');
+    expect(errFields['name']).toBe('Error');
+    expect(errFields['message']).toBeUndefined();
+    expect(errFields['stack']).toBeUndefined();
+    expect(errFields['cause']).toBeUndefined();
+  });
+
+  it('never emits Error stacks, even when the stack contains a secret', () => {
+    const { lines, sink } = capture();
+    const logger = createLogger({ level: 'debug', clock: fixedClock(), sink });
+    const error = new Error('failure');
+    error.stack = `Error: failure\n    at handler (${EMBEDDED}:1:1)`;
+
+    logger.error('failed', { error });
+
+    const serialized = JSON.stringify(lines[0]!.parsed);
+    expect(serialized).not.toContain(EMBEDDED);
+    expect(serialized).not.toContain('at handler');
+    const errFields = lines[0]!.parsed['error'] as Record<string, unknown>;
+    expect(errFields['stack']).toBeUndefined();
+  });
+
+  it('never emits Error.cause chains', () => {
+    const { lines, sink } = capture();
+    const logger = createLogger({ level: 'debug', clock: fixedClock(), sink });
+    const inner = new Error(`inner failure with ${EMBEDDED}`);
+    const outer = new Error(`outer failure with ${EMBEDDED}`, { cause: inner });
+
+    logger.error('failed', { error: outer });
+
+    const serialized = JSON.stringify(lines[0]!.parsed);
+    expect(serialized).not.toContain(EMBEDDED);
+    expect(serialized).not.toContain('cause');
+    expect(serialized).not.toContain('inner failure');
+  });
+
+  it('reduces AppError to kind, name, code, and HTTP status only', () => {
+    const { lines, sink } = capture();
+    const logger = createLogger({ level: 'debug', clock: fixedClock(), sink });
+    const error = new AppError('service_unavailable', {
+      message: `custom override with ${EMBEDDED}`,
+      details: { provider: 'primary' },
+    });
+
+    logger.error('failed', { error });
+
+    const errFields = lines[0]!.parsed['error'] as Record<string, unknown>;
+    expect(errFields).toEqual({
+      errorKind: 'app_error',
+      name: 'AppError',
+      code: 'service_unavailable',
+      httpStatus: 503,
+    });
+    // Custom message and details are dropped: fail-safe by default.
+    expect(JSON.stringify(lines[0]!.parsed)).not.toContain(EMBEDDED);
+    expect(JSON.stringify(lines[0]!.parsed)).not.toContain('primary');
+  });
+
+  it('neutralizes Error instances nested at ANY depth', () => {
+    const { lines, sink } = capture();
+    const logger = createLogger({ level: 'debug', clock: fixedClock(), sink });
+
+    logger.error('failed', {
+      wrapper: { list: [new Error(`deep failure with ${EMBEDDED}`)] },
+    });
+
+    const serialized = JSON.stringify(lines[0]!.parsed);
+    expect(serialized).not.toContain(EMBEDDED);
+    const wrapper = lines[0]!.parsed['wrapper'] as Record<string, unknown>;
+    const item = (wrapper['list'] as Array<Record<string, unknown>>)[0]!;
+    expect(item['errorKind']).toBe('error');
+    expect(item['message']).toBeUndefined();
+  });
+
+  it('toSafeErrorFields never stringifies non-Error thrown values', () => {
+    expect(toSafeErrorFields(`raw thrown string with ${EMBEDDED}`)).toEqual({
+      errorKind: 'unexpected',
+      name: 'UnknownThrownValue',
+      typeName: '[object String]',
+    });
+    expect(JSON.stringify(toSafeErrorFields({ hidden: EMBEDDED }))).not.toContain(EMBEDDED);
+    expect(toSafeErrorFields(42)).toMatchObject({ errorKind: 'unexpected' });
   });
 });

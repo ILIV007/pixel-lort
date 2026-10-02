@@ -49,7 +49,8 @@ export interface PixelConfig {
   /**
    * Target channel username (e.g. "@pixellort").
    * Classified as non-secret config because the channel username is publicly
-   * observable; see ADR-0008 / OPEN_DECISIONS OD-001 for the recorded decision.
+   * observable; decided in ADR-0009 (closed OD-001) — stays OUTSIDE
+   * PixelSecrets and the future secret catalog.
    */
   readonly TARGET_CHANNEL: string;
 }

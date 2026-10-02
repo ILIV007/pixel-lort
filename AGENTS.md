@@ -32,8 +32,11 @@ working in this repository. It is intentionally terse and version-stable.
   source, fixtures, docs, logs, commit messages, or generated reports.
 - Never log or print: authorization headers, cookies, tokens, request bodies,
   full environment objects, Telegram update payloads, or provider responses.
-- All log fields pass through the redaction layer (`src/observability/`).
-  Do not bypass `src/observability/logger.ts` with `console.*` (lint-enforced).
+- All log fields pass through the redaction layer (`src/observability/`),
+  which also FAIL-SAFE serializes Error instances (name + stable code +
+  HTTP status only; raw messages/stacks/causes are never emitted —
+  ADR-0017). Do not bypass `src/observability/logger.ts` with `console.*`
+  (lint-enforced).
 - Errors returned over HTTP must flow through
   `src/shared/errors/serialize.ts` — safe, minimal, no stacks.
 - No query-string secrets. No public mutation/debug endpoints. Fail closed on
@@ -45,7 +48,7 @@ working in this repository. It is intentionally terse and version-stable.
 Run and pass the complete gate:
 
 ```bash
-npm run check   # lint + format:check + typecheck + test + scan:secrets + build
+npm run check   # lint + format:check + typecheck + test + test:secrets + scan:secrets + build
 ```
 
 - Tests must run offline (fixtures/mocks only; no real network calls).
