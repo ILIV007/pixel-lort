@@ -33,3 +33,5 @@ in [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md).
 All Phase-0 open decisions (OD-001..OD-008) are now **closed**; see
 [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md) for the preserved history. An
 ADR is written only when a decision is actually made.
+
+- [ADR-0023: Provision isolated Cloudflare preview infrastructure](adr-0023-preview-cloudflare-infrastructure.md)

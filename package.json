@@ -16,11 +16,15 @@
     "test": "vitest run",
     "test:db": "vitest run tests/integration/d1-schema.test.ts tests/integration/db-boundary.test.ts",
     "test:secrets": "node scripts/scan-secrets.selftest.mjs",
-    "build": "wrangler deploy --dry-run --outdir dist",
+    "build": "wrangler deploy --dry-run --env=\"\" --outdir dist",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "db:migrations:list": "wrangler d1 migrations list DB --local",
     "db:migrations:apply": "wrangler d1 migrations apply DB --local",
-    "check": "npm run lint && npm run format:check && npm run typecheck && npm run test && npm run test:secrets && npm run scan:secrets && npm run build"
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm run test && npm run test:secrets && npm run scan:secrets && npm run build",
+    "db:migrations:list:preview": "wrangler d1 migrations list DB --env preview --remote",
+    "db:migrations:apply:preview": "wrangler d1 migrations apply DB --env preview --remote",
+    "deploy:preview": "node scripts/deploy-preview.mjs",
+    "build:preview": "wrangler deploy --dry-run --env preview --outdir dist/preview"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
