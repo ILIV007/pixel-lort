@@ -1,0 +1,31 @@
+# Architecture Decision Records — index
+
+ADRs record decisions **actually made** during this project. Phase 0 ADRs
+(including the correction pass of 2026-10-02) are listed below. Statuses:
+Accepted / Amended / Superseded. Resolved open questions keep their history
+in [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md).
+
+| ADR                                                     | Title                                                                             | Status                           |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------- |
+| [ADR-0001](adr-0001-toolchain.md)                       | Toolchain: npm, Node 22, TypeScript strict, ESLint flat + Prettier                | Accepted                         |
+| [ADR-0002](adr-0002-repository-layout.md)               | Modular-monolith repository layout and blueprint mapping                          | Accepted                         |
+| [ADR-0003](adr-0003-zero-runtime-dependencies.md)       | Zero runtime dependencies in Phase 0; hand-rolled config validation               | Accepted                         |
+| [ADR-0004](adr-0004-structured-logging.md)              | Structured JSON-line logging with mandatory key redaction                         | Accepted (amended by ADR-0017)   |
+| [ADR-0005](adr-0005-environment-contract.md)            | Two-tier environment contract; commented binding placeholders                     | Accepted                         |
+| [ADR-0006](adr-0006-phase0-http-surface.md)             | Phase 0 HTTP surface: strict allowlist routing                                    | Accepted                         |
+| [ADR-0007](adr-0007-cron-queue-noop.md)                 | Phase 0 cron/queue handlers are typed no-ops that ack-all                         | Accepted (amended by ADR-0011)   |
+| [ADR-0008](adr-0008-secret-classification-readiness.md) | Secret classification and phase-scoped fail-closed readiness                      | Accepted (confirmed by ADR-0014) |
+| [ADR-0009](adr-0009-target-channel-non-secret.md)       | TARGET_CHANNEL is non-secret configuration (closes OD-001)                        | Accepted                         |
+| [ADR-0010](adr-0010-zod-phase-3.md)                     | Zod introduced in Phase 3 for envelope contracts (closes OD-002)                  | Accepted                         |
+| [ADR-0011](adr-0011-queue-ack-all-phase0-only.md)       | Queue ack-all approved ONLY for the non-deployed Phase 0 skeleton (closes OD-003) | Accepted                         |
+| [ADR-0012](adr-0012-version-endpoint-phase-1.md)        | /version endpoint lands in Phase 1 with safe build metadata (closes OD-004)       | Accepted                         |
+| [ADR-0013](adr-0013-nodejs-compat-deferred.md)          | nodejs_compat stays disabled for now (closes OD-005)                              | Accepted                         |
+| [ADR-0014](adr-0014-phase-scoped-readiness-approved.md) | Phase-scoped fail-closed readiness is approved (closes OD-006)                    | Accepted                         |
+| [ADR-0015](adr-0015-readiness-semantics.md)             | Readiness semantics: ready / degraded / not_ready (closes OD-007)                 | Accepted                         |
+| [ADR-0016](adr-0016-environment-naming.md)              | Environment naming: separate preview and production resources (closes OD-008)     | Accepted                         |
+| [ADR-0017](adr-0017-failsafe-error-logging.md)          | Fail-safe error logging and 4xx/5xx observability policy                          | Accepted (amends ADR-0004)       |
+| [ADR-0018](adr-0018-secret-scanner-coverage.md)         | Secret scanner coverage and automated self-test in the gate                       | Accepted                         |
+
+All Phase-0 open decisions (OD-001..OD-008) are now **closed**; see
+[`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md) for the preserved history. An
+ADR is written only when a decision is actually made.

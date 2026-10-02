@@ -1,0 +1,26 @@
+# Pixel — local development secrets template (.dev.vars)
+#
+# Copy to `.dev.vars` for `wrangler dev`. `.dev.vars` is git-ignored and must
+# never be committed. Values below are intentionally left EMPTY — fill them in
+# locally only if the phase you are working on actually requires them.
+# See docs/SECURITY_MODEL.md for the secret boundary rules.
+
+# --- Non-secret (local overrides) ----------------------------------------------
+# ENVIRONMENT=development
+# LOG_LEVEL=debug
+# APP_VERSION=0.0.0-dev
+
+# --- Secrets (names only; leave empty unless your phase requires them) ----------
+# BOT_TOKEN=
+# WEBHOOK_SECRET=
+# OWNER_TELEGRAM_ID=
+# TARGET_CHANNEL=
+# GEMINI_API_KEY=
+# GROQ_API_KEY=
+# YOUTUBE_API_KEY=
+# REDDIT_CLIENT_ID=
+# REDDIT_CLIENT_SECRET=
+# IGDB_CLIENT_ID=
+# IGDB_CLIENT_SECRET=
+# GITHUB_TOKEN=
+# BLUESKY_APP_PASSWORD=

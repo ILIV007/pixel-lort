@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build and test output
+dist/
+coverage/
+*.tsbuildinfo
+
+# Wrangler local state
+.wrangler/
+
+# Local environment files — NEVER commit real configuration or secrets.
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+!.env.example
+!.dev.vars.example
+
+# Logs and OS artifacts
+*.log
+.DS_Store

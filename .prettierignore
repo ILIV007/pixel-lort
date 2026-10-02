@@ -1,0 +1,11 @@
+# Auto-generated and build output
+node_modules/
+dist/
+coverage/
+.wrangler/
+
+# Lockfile is maintained by npm; formatting it adds review noise.
+package-lock.json
+
+# Blueprint is preserved verbatim — see docs/blueprint/README.md.
+docs/blueprint/
