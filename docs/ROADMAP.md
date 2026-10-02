@@ -155,3 +155,12 @@ DB --remote`) after provisioning, by or with explicit approval of the
       and, if fully compatible, adopt the supported ESLint major in a
       dedicated tooling-maintenance slice — NOT inside a feature/correction
       phase (recorded during the Phase 1A correction pass).
+
+### Phase 1B — Preview infrastructure provisioning
+
+- [x] Provision isolated D1 database `pixel-db-preview`.
+- [x] Add Wrangler `preview` environment and real D1 binding.
+- [ ] Apply migration 0001 to remote preview D1.
+- [ ] Deploy and verify `pixel-preview`.
+- [ ] Connect the GitHub repository through Cloudflare Workers Builds.
+- [ ] Keep production infrastructure unprovisioned until its release gate.

@@ -79,4 +79,30 @@
   //
   // Phase 6 (AI adapters) — Workers AI binding:
   // "ai": { "binding": "AI" }
+
+  // ---------------------------------------------------------------------------
+  // Phase 1B — provisioned preview environment.
+  // Production remains unprovisioned until a later release gate.
+  // APP_COMMIT is overridden with the exact Git SHA at deploy time.
+  // ---------------------------------------------------------------------------
+  "env": {
+    "preview": {
+      "name": "pixel-preview",
+      "vars": {
+        "APP_VERSION": "1.1.0",
+        "ENVIRONMENT": "preview",
+        "LOG_LEVEL": "info",
+        "APP_COMMIT": "local-dev",
+        "SCHEMA_VERSION": "1",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "pixel-db-preview",
+          "database_id": "0212653a-b989-4953-9179-ddc01899c7f2",
+          "migrations_dir": "migrations",
+        },
+      ],
+    },
+  },
 }

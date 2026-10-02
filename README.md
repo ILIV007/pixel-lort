@@ -164,3 +164,21 @@ authoritative.
 ## License
 
 Released under the [MIT License](LICENSE).
+
+## Preview infrastructure
+
+Phase 1B provisions an isolated Cloudflare preview environment:
+
+- Worker: `pixel-preview`
+- D1: `pixel-db-preview`
+- Wrangler environment: `preview`
+
+Authenticated operator commands:
+
+```bash
+npm run db:migrations:list:preview
+npm run db:migrations:apply:preview
+npm run deploy:preview
+```
+
+`deploy:preview` injects the exact Git commit into `APP_COMMIT`. Cloudflare credentials must exist only in the operator environment and must never be committed.
