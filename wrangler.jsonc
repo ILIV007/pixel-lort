@@ -24,18 +24,36 @@
   },
 
   // ---------------------------------------------------------------------------
+  // Phase 1A — D1 binding declaration (LOCAL PLACEHOLDER ONLY, ADR-0019).
+  //
+  // This declaration enables LOCAL development and offline test tooling
+  // (`wrangler d1 migrations` against local SQLite state, and the
+  // vitest/workerd D1 test environment). NO Cloudflare resource exists or is
+  // created: `database_id` is a syntactic placeholder until Phase 1B
+  // provisioning, and remote migration commands remain documentation-only in
+  // Phase 1A (docs/ROADMAP.md). Production/preview resource names are fixed
+  // by ADR-0016: pixel-db-production | pixel-db-preview.
+  // ---------------------------------------------------------------------------
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pixel-db-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+
+  // ---------------------------------------------------------------------------
   // Future bindings (planned — declared per phase, never before their phase).
   // The typed contract for all of these lives in src/shared/types/env.ts.
   // Planned RESOURCE names (ADR-0016): production `*-production`, preview
-  // `*-preview` (Workers: `pixel` / `pixel-preview`). NOTHING is created or
-  // bound during Phase 0; creation requires explicit owner approval.
+  // `*-preview` (Workers: `pixel` / `pixel-preview`). NOTHING beyond the
+  // Phase 1A local D1 placeholder above is created or bound; creation
+  // requires explicit owner approval.
   // ---------------------------------------------------------------------------
   //
-  // Phase 1 (repository, bindings and migrations) — D1 database:
-  // "d1_databases": [
-  //   { "binding": "DB", "database_name": "pixel-db-production", "database_id": "<assigned-at-creation>" }
-  //   // preview environment: "database_name": "pixel-db-preview"
-  // ],
+  // Phase 1B (resource provisioning) — real D1 resources replace the local
+  // placeholder above per ADR-0016.
   //
   // Phase 1 (repository, bindings and migrations) — KV cache namespace:
   // "kv_namespaces": [

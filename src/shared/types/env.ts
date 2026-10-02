@@ -81,12 +81,20 @@ export interface PixelSecrets {
 export type PixelEnv = PixelBindings & PixelConfig & PixelSecrets;
 
 /**
- * Phase 0 worker environment: exactly the vars declared in wrangler.jsonc.
- * All fields optional-with-validated-defaults so a bare runtime (and tests
- * without any configuration) still boot safely.
+ * Phase 0/1A worker environment: the vars declared in wrangler.jsonc plus the
+ * Phase 1A local D1 placeholder binding (ADR-0019; no Cloudflare resource
+ * exists). All fields optional-with-validated-defaults so a bare runtime (and
+ * tests without any configuration) still boot safely.
  */
 export interface WorkerEnv {
   readonly APP_VERSION?: string;
   readonly ENVIRONMENT?: string;
   readonly LOG_LEVEL?: string;
+  /**
+   * D1 binding, declared in wrangler.jsonc starting Phase 1A as a LOCAL
+   * placeholder (no resource created — ADR-0019). Optional: runtimes and
+   * tests without D1 keep working in offline mode; when the binding IS
+   * present, readiness additionally verifies schema health (ADR-0021).
+   */
+  readonly DB?: D1Database;
 }

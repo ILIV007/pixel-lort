@@ -25,6 +25,7 @@ in [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md).
 | [ADR-0016](adr-0016-environment-naming.md)              | Environment naming: separate preview and production resources (closes OD-008)     | Accepted                         |
 | [ADR-0017](adr-0017-failsafe-error-logging.md)          | Fail-safe error logging and 4xx/5xx observability policy                          | Accepted (amends ADR-0004)       |
 | [ADR-0018](adr-0018-secret-scanner-coverage.md)         | Secret scanner coverage and automated self-test in the gate                       | Accepted                         |
+| [ADR-0019](adr-0019-d1-schema-migration.md)             | D1 schema migration 0001 and application schema metadata                          | Accepted                         |
 
 All Phase-0 open decisions (OD-001..OD-008) are now **closed**; see
 [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md) for the preserved history. An
