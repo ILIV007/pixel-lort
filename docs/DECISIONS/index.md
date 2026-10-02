@@ -26,6 +26,9 @@ in [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md).
 | [ADR-0017](adr-0017-failsafe-error-logging.md)          | Fail-safe error logging and 4xx/5xx observability policy                          | Accepted (amends ADR-0004)       |
 | [ADR-0018](adr-0018-secret-scanner-coverage.md)         | Secret scanner coverage and automated self-test in the gate                       | Accepted                         |
 | [ADR-0019](adr-0019-d1-schema-migration.md)             | D1 schema migration 0001 and application schema metadata                          | Accepted                         |
+| [ADR-0020](adr-0020-version-contract.md)                | /version contract and build/schema metadata configuration                         | Accepted                         |
+| [ADR-0021](adr-0021-phase1a-readiness.md)               | Phase 1A readiness behavior for schema health                                     | Accepted                         |
+| [ADR-0022](adr-0022-d1-observability.md)                | D1 observability and error-mapping rules                                          | Accepted                         |
 
 All Phase-0 open decisions (OD-001..OD-008) are now **closed**; see
 [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md) for the preserved history. An

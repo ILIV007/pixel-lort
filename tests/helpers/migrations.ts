@@ -25,7 +25,9 @@ export interface AppliedMigration {
 }
 
 /** Ordered migration list — append-only, mirrors migrations/ directory. */
-export const MIGRATIONS: readonly AppliedMigration[] = [{ id: '0001_initial_schema', sql: migration0001 }];
+export const MIGRATIONS: readonly AppliedMigration[] = [
+  { id: '0001_initial_schema', sql: migration0001 },
+];
 
 /** Strip `--` comment lines and split into non-empty statements. */
 export function splitSqlStatements(sql: string): string[] {
@@ -54,9 +56,7 @@ export async function applyMigrations(db: D1Database): Promise<void> {
     return;
   }
   for (const migration of MIGRATIONS) {
-    const statements = splitSqlStatements(migration.sql).map((statement) =>
-      db.prepare(statement),
-    );
+    const statements = splitSqlStatements(migration.sql).map((statement) => db.prepare(statement));
     await db.batch(statements);
   }
 }

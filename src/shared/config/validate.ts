@@ -11,7 +11,8 @@
  */
 import type { ConfigSpec } from './spec';
 
-export type ConfigIssueReason = 'missing_required' | 'invalid_enum';
+export type ConfigIssueReason =
+  'missing_required' | 'invalid_enum' | 'invalid_format' | 'invalid_value';
 
 export interface ConfigIssue {
   readonly field: string;
@@ -91,6 +92,17 @@ export function validateConfig(
         });
         continue;
       }
+    }
+
+    if (field.pattern !== undefined && !field.pattern.test(raw)) {
+      // Fail-safe: an invalid value is never coerced into the default; the
+      // issue carries the field name and expected shape only, never the value.
+      issues.push({
+        field: field.name,
+        reason: 'invalid_format',
+        note: 'value does not match the required format',
+      });
+      continue;
     }
 
     config[field.name] = raw;

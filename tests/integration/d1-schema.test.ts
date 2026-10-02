@@ -172,7 +172,18 @@ describe('schema contracts', () => {
           `INSERT INTO claims (id, story_id, claim_type, subject, predicate, object_text, confidence, status, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind('claim-orphan', 'no-such-story', 'release_date', 'Game X', 'releases_on', '2026-12-01', 50, 'unverified', 1, 1)
+        .bind(
+          'claim-orphan',
+          'no-such-story',
+          'release_date',
+          'Game X',
+          'releases_on',
+          '2026-12-01',
+          50,
+          'unverified',
+          1,
+          1,
+        )
         .run(),
     ).rejects.toThrow(/FOREIGN KEY/i);
 
@@ -358,7 +369,18 @@ describe('schema contracts', () => {
         `INSERT INTO claims (id, story_id, claim_type, subject, predicate, object_text, confidence, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind('claim-flow', 'story-flow', 'release_date', 'Game', 'releases_on', '2026-12-01', 80, 'unverified', 30, 30)
+      .bind(
+        'claim-flow',
+        'story-flow',
+        'release_date',
+        'Game',
+        'releases_on',
+        '2026-12-01',
+        80,
+        'unverified',
+        30,
+        30,
+      )
       .run();
     await db
       .prepare(

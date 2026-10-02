@@ -55,12 +55,12 @@ Phase 1A — provisioning happens separately in Phase 1B (names per ADR-0016).
 
 ## Alternatives considered
 
-- *Embedding the schema in TypeScript constants* — rejected: duplicates the
+- _Embedding the schema in TypeScript constants_ — rejected: duplicates the
   blueprint and invites drift; the migration file must stay the single
   executable source.
-- *Adopting an ORM/query builder* — rejected by the phase packet: D1 access
+- _Adopting an ORM/query builder_ — rejected by the phase packet: D1 access
   stays a thin typed boundary in Phase 1A.
-- *Relying on wrangler's `d1_migrations` table as application metadata* —
+- _Relying on wrangler's `d1_migrations` table as application metadata_ —
   rejected: it is tooling bookkeeping (file names), not an application
   contract; coupling readiness to it would break the separation between
   design-time tooling and runtime schema expectations.

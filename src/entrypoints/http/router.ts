@@ -8,6 +8,7 @@
 import { AppError } from '../../shared/errors/app-error';
 import type { WorkerEnv } from '../../shared/types/env';
 import { handleHealth, handleHealthLive, handleHealthReady } from './handlers/health';
+import { handleVersion } from './handlers/version';
 import type { RequestIdResolution } from './request-context';
 import type { Logger } from '../../observability/logger';
 
@@ -33,6 +34,9 @@ export async function routeRequest(
   }
   if (method === 'GET' && path === '/health/ready') {
     return handleHealthReady(env, ctx);
+  }
+  if (method === 'GET' && path === '/version') {
+    return handleVersion(env, ctx);
   }
 
   // Uniformly reject unknown paths and unsupported methods.

@@ -21,6 +21,11 @@
     "APP_VERSION": "0.0.0-phase0",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
+    // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
+    // replaced by the real commit identifier at deploy time in later phases;
+    // SCHEMA_VERSION is validated as a strict positive decimal integer.
+    "APP_COMMIT": "local-dev",
+    "SCHEMA_VERSION": "1",
   },
 
   // ---------------------------------------------------------------------------
