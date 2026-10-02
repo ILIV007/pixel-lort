@@ -36,7 +36,7 @@ describe('GET /version via SELF', () => {
       'environment',
       'schemaVersion',
     ]);
-    expect(body['applicationVersion']).toBe('0.0.0-phase0');
+    expect(body['applicationVersion']).toBe('1.1.0');
     expect(body['commit']).toBe('local-dev');
     expect(body['schemaVersion']).toBe(1);
     expect(body['environment']).toBe('development');
@@ -70,6 +70,24 @@ describe('GET /version — fail-closed metadata handling', () => {
         { logger: silentLogger() },
       ),
     ).toThrowError(expect.objectContaining({ code: 'config_invalid' }));
+  });
+
+  it('throws config_invalid when the preview placeholder guard triggers', () => {
+    expect(() =>
+      handleVersion(
+        { ENVIRONMENT: 'preview', APP_COMMIT: 'local-dev' },
+        { logger: silentLogger() },
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'config_invalid' }));
+  });
+
+  it('throws config_invalid for an uncontrolled commit string outside development', () => {
+    expect(() =>
+      handleVersion(
+        { ENVIRONMENT: 'preview', APP_COMMIT: 'not-a-commit' },
+        { logger: silentLogger() },
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'config_invalid', status: 503 }));
   });
 
   it('serves the version contract with local defaults when fields are absent', () => {

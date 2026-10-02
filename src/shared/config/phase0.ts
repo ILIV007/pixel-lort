@@ -16,6 +16,12 @@ import { defineConfigSpec, type ConfigSpec } from './spec';
 import { validateConfig, type ConfigValidationResult } from './validate';
 import { DEFAULT_LOG_LEVEL, isLogLevel, type LogLevel } from '../types/log-level';
 
+/**
+ * The approved Phase 1A application version (kept in sync with package.json
+ * and wrangler.jsonc — see handoff/PHASE_01A_HANDOFF.md).
+ */
+export const DEFAULT_APP_VERSION = '1.1.0';
+
 export const KNOWN_ENVIRONMENTS = ['development', 'preview', 'production'] as const;
 export type Environment = (typeof KNOWN_ENVIRONMENTS)[number];
 
@@ -46,8 +52,8 @@ export const PHASE_0_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
     type: 'string',
     required: false,
     secret: false,
-    default: '0.0.0-phase0',
-    description: 'Build/version marker reported by /health.',
+    default: DEFAULT_APP_VERSION,
+    description: 'Build/version marker reported by /health and /version.',
     phase: 0,
   },
 ]);
@@ -73,7 +79,7 @@ export function parseWorkerConfig(env: Readonly<Record<string, unknown>>): {
   const config: WorkerConfig = {
     ENVIRONMENT: isEnvironment(c['ENVIRONMENT']) ? c['ENVIRONMENT'] : 'development',
     LOG_LEVEL: isLogLevel(c['LOG_LEVEL']) ? c['LOG_LEVEL'] : DEFAULT_LOG_LEVEL,
-    APP_VERSION: typeof c['APP_VERSION'] === 'string' ? c['APP_VERSION'] : '0.0.0-phase0',
+    APP_VERSION: typeof c['APP_VERSION'] === 'string' ? c['APP_VERSION'] : DEFAULT_APP_VERSION,
   };
 
   return { config, result };

@@ -46,6 +46,9 @@ export interface DbExecutor {
   /**
    * Execute statements as ONE atomic D1 batch (implicit transaction):
    * if any statement fails, the whole batch is rolled back.
+   *
+   * An EMPTY statement list is a documented safe no-op: it resolves to `[]`
+   * without calling D1 and without throwing.
    */
   batch(statements: readonly DbStatement[]): Promise<readonly DbQueryMeta[]>;
 }
@@ -63,6 +66,14 @@ function prepareBound(db: D1Database, statement: DbStatement): D1PreparedStateme
   return params.length > 0 ? prepared.bind(...params) : prepared;
 }
 
+/**
+ * Create a typed D1 executor.
+ *
+ * Implementation note: all operations are CLOSURES captured over the `db`
+ * binding — no operation dispatches through `this`. Every method can be
+ * safely destructured (e.g. `const { first } = createDbExecutor(db)`) or
+ * passed as a standalone function reference without changing behavior.
+ */
 export function createDbExecutor(db: D1Database, options: DbExecutorOptions = {}): DbExecutor {
   const clock = options.clock ?? systemClock;
   const logger = options.logger;
@@ -75,65 +86,72 @@ export function createDbExecutor(db: D1Database, options: DbExecutorOptions = {}
     logger?.warn(event, { errorCode, durationMs });
   }
 
-  return {
-    async query<T>(statement: DbStatement): Promise<DbRows<T>> {
-      const startedAt = clock.now();
-      try {
-        const response = await prepareBound(db, statement).all<T>();
-        const durationMs = clock.now() - startedAt;
-        const meta: DbQueryMeta = {
-          durationMs,
-          changes: response.meta.changes ?? 0,
-        };
-        logSuccess('db.query.ok', { durationMs, rowCount: response.results.length });
-        return { rows: response.results, meta };
-      } catch (error) {
-        const mapped = toDbAppError(error);
-        logFailure('db.query.failed', mapped.code, clock.now() - startedAt);
-        throw mapped;
-      }
-    },
+  async function query<T>(statement: DbStatement): Promise<DbRows<T>> {
+    const startedAt = clock.now();
+    try {
+      const response = await prepareBound(db, statement).all<T>();
+      const durationMs = clock.now() - startedAt;
+      const meta: DbQueryMeta = {
+        durationMs,
+        changes: response.meta.changes ?? 0,
+      };
+      logSuccess('db.query.ok', { durationMs, rowCount: response.results.length });
+      return { rows: response.results, meta };
+    } catch (error) {
+      const mapped = toDbAppError(error);
+      logFailure('db.query.failed', mapped.code, clock.now() - startedAt);
+      throw mapped;
+    }
+  }
 
-    async first<T>(statement: DbStatement): Promise<T | null> {
-      const { rows } = await this.query<T>(statement);
-      return rows.length > 0 ? (rows[0] ?? null) : null;
-    },
+  // Lexical reference to `query` — deliberately NOT `this.query` — so that
+  // destructured/extracted method references keep working.
+  async function first<T>(statement: DbStatement): Promise<T | null> {
+    const { rows } = await query<T>(statement);
+    return rows.length > 0 ? (rows[0] ?? null) : null;
+  }
 
-    async run(statement: DbStatement): Promise<DbQueryMeta> {
-      const startedAt = clock.now();
-      try {
-        const response = await prepareBound(db, statement).run();
-        const durationMs = clock.now() - startedAt;
-        const meta: DbQueryMeta = {
-          durationMs,
-          changes: response.meta.changes ?? 0,
-        };
-        logSuccess('db.run.ok', { durationMs, changes: meta.changes });
-        return meta;
-      } catch (error) {
-        const mapped = toDbAppError(error);
-        logFailure('db.run.failed', mapped.code, clock.now() - startedAt);
-        throw mapped;
-      }
-    },
+  async function run(statement: DbStatement): Promise<DbQueryMeta> {
+    const startedAt = clock.now();
+    try {
+      const response = await prepareBound(db, statement).run();
+      const durationMs = clock.now() - startedAt;
+      const meta: DbQueryMeta = {
+        durationMs,
+        changes: response.meta.changes ?? 0,
+      };
+      logSuccess('db.run.ok', { durationMs, changes: meta.changes });
+      return meta;
+    } catch (error) {
+      const mapped = toDbAppError(error);
+      logFailure('db.run.failed', mapped.code, clock.now() - startedAt);
+      throw mapped;
+    }
+  }
 
-    async batch(statements: readonly DbStatement[]): Promise<readonly DbQueryMeta[]> {
-      const startedAt = clock.now();
-      try {
-        const prepared = statements.map((statement) => prepareBound(db, statement));
-        const responses = await db.batch(prepared);
-        const durationMs = clock.now() - startedAt;
-        const metas: DbQueryMeta[] = responses.map((response) => ({
-          durationMs,
-          changes: response.meta.changes ?? 0,
-        }));
-        logSuccess('db.batch.ok', { durationMs, statementCount: metas.length });
-        return metas;
-      } catch (error) {
-        const mapped = toDbAppError(error);
-        logFailure('db.batch.failed', mapped.code, clock.now() - startedAt);
-        throw mapped;
-      }
-    },
-  };
+  async function batch(statements: readonly DbStatement[]): Promise<readonly DbQueryMeta[]> {
+    // Documented empty-batch no-op: nothing to execute, nothing to roll back,
+    // no D1 round trip, no error (ADR-0022 boundary semantics).
+    if (statements.length === 0) {
+      return [];
+    }
+    const startedAt = clock.now();
+    try {
+      const prepared = statements.map((statement) => prepareBound(db, statement));
+      const responses = await db.batch(prepared);
+      const durationMs = clock.now() - startedAt;
+      const metas: DbQueryMeta[] = responses.map((response) => ({
+        durationMs,
+        changes: response.meta.changes ?? 0,
+      }));
+      logSuccess('db.batch.ok', { durationMs, statementCount: metas.length });
+      return metas;
+    } catch (error) {
+      const mapped = toDbAppError(error);
+      logFailure('db.batch.failed', mapped.code, clock.now() - startedAt);
+      throw mapped;
+    }
+  }
+
+  return { query, first, run, batch };
 }

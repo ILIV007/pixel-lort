@@ -43,6 +43,21 @@ Phase 1A — provisioning happens separately in Phase 1B (names per ADR-0016).
    commands remain documentation-only until Phase 1B provisioning.
 5. **Append-only migrations.** Applied migration files are never edited or
    reordered (AGENTS.md §6); future changes append `0002_*.sql` and newer.
+6. **Test migration helper is future-safe test infrastructure (Phase 1A
+   correction).** `tests/helpers/migrations.ts` applies migrations
+   INCREMENTALLY against the application `schema_version`: every descriptor
+   carries its target version; only versions greater than the observed
+   version are applied, in strict ascending order; re-running at the latest
+   version is a no-op; structurally invalid plans (duplicates,
+   non-ascending, non-positive, gapped) are rejected BEFORE any database
+   access; each pending migration runs as ONE atomic batch, so a failed
+   migration rolls back completely. This keeps test databases upgradeable
+   when a future migration is appended (appended migrations can never be
+   silently skipped in tests). The helper remains TEST INFRASTRUCTURE ONLY:
+   remote migration bookkeeping stays with `wrangler d1 migrations`
+   (`d1_migrations`), which the helper never touches. Synthetic descriptors
+   used to prove the upgrade path live in `tests/fixtures/` and are never
+   shipped as real migration files.
 
 ## Consequences
 

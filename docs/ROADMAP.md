@@ -58,6 +58,14 @@ intentionally not started.
       commands (`db:migrations:list`, `db:migrations:apply`); remote
       migration commands are documentation-only in Phase 1A. **No Cloudflare
       resource was created and no remote migration was executed.**
+- [x] Phase 1A review corrections: application version aligned to the
+      approved `1.1.0` everywhere (package/wrangler//version/docs);
+      future-safe INCREMENTAL test-migration helper (version-aware, plan
+      validation, synthetic version-2 fixture — still test infrastructure
+      only); closure-based `DbExecutor` (destructure-safe `first`, safe
+      empty-batch no-op); APP_COMMIT trust rules extended to preview
+      (placeholder rejected, hexadecimal Git commit ID 7–64 required outside
+      development) per ADR-0020.
 
 ## Phase 1B — resource provisioning (owner-executed) ⬜
 
@@ -139,3 +147,11 @@ DB --remote`) after provisioning, by or with explicit approval of the
 ## Phase 13 — production rollout ⬜
 
 - [ ] `safe_auto` → `auto` staged rollout with final default `AUTO`.
+
+## Tooling maintenance backlog ⬜
+
+- [ ] ESLint major evaluation: the pinned ESLint 9.x release used by the
+      quality gate prints an end-of-support warning during `npm ci`. Evaluate
+      and, if fully compatible, adopt the supported ESLint major in a
+      dedicated tooling-maintenance slice — NOT inside a feature/correction
+      phase (recorded during the Phase 1A correction pass).

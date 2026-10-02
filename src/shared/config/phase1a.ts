@@ -7,9 +7,17 @@
  *   integer string (pattern-validated — no silent coercion; an invalid value
  *   makes readiness fail safely instead of falling back, per ADR-0021).
  *
+ * APP_COMMIT trust rules (ADR-0020):
+ * - `development` may use the local placeholder `local-dev`;
+ * - `preview` and `production` MUST reject `local-dev` and MUST carry a
+ *   hexadecimal Git commit identifier of 7–64 characters, so /version never
+ *   exposes an arbitrary uncontrolled string;
+ * - every other non-empty APP_COMMIT value must match the same safe hex
+ *   pattern in ALL environments (including development).
+ *
  * Local development-safe defaults are documented in `.env.example` and
- * wrangler.jsonc. The local APP_COMMIT placeholder is invalid in production
- * (fail-closed guard below).
+ * wrangler.jsonc. The local APP_COMMIT placeholder is invalid in preview and
+ * production (fail-closed guard below).
  */
 import { defineConfigSpec, type ConfigSpec } from './spec';
 import { validateConfig, type ConfigIssue, type ConfigValidationResult } from './validate';
@@ -18,8 +26,15 @@ import type { Environment } from './phase0';
 /** The approved Phase 1A schema version (migration 0001 — ADR-0019). */
 export const EXPECTED_SCHEMA_VERSION = 1;
 
-/** Local-development placeholder commit identifier (never valid in production). */
+/** Local-development placeholder commit identifier (invalid outside development). */
 export const DEFAULT_APP_COMMIT = 'local-dev';
+
+/**
+ * Safe Git commit-identifier format: hexadecimal, 7 (short SHA) to 64
+ * (SHA-512/BLAKE3-class) characters. Case-insensitive; values are reported
+ * verbatim, never normalized.
+ */
+export const GIT_COMMIT_ID_PATTERN = /^[0-9a-f]{7,64}$/i;
 
 export const PHASE_1A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
   {
@@ -71,12 +86,24 @@ export function parseDataFoundationConfig(
 } {
   let result = validateConfig(env, PHASE_1A_CONFIG_SPEC);
 
-  if (environment === 'production' && result.config['APP_COMMIT'] === DEFAULT_APP_COMMIT) {
-    result = withIssue(result, {
-      field: 'APP_COMMIT',
-      reason: 'invalid_value',
-      note: 'the local development placeholder is not valid in production',
-    });
+  const commit = result.config['APP_COMMIT'];
+  if (typeof commit === 'string' && commit !== '') {
+    if (commit === DEFAULT_APP_COMMIT && environment !== 'development') {
+      // The local placeholder may never reach preview or production.
+      result = withIssue(result, {
+        field: 'APP_COMMIT',
+        reason: 'invalid_value',
+        note: 'the local development placeholder is only valid in the development environment',
+      });
+    } else if (commit !== DEFAULT_APP_COMMIT && !GIT_COMMIT_ID_PATTERN.test(commit)) {
+      // Any controlled value must be a Git commit identifier — /version must
+      // never expose an arbitrary uncontrolled string (ADR-0020).
+      result = withIssue(result, {
+        field: 'APP_COMMIT',
+        reason: 'invalid_format',
+        note: 'APP_COMMIT must be a hexadecimal Git commit identifier of 7-64 characters',
+      });
+    }
   }
 
   if (!result.ok) {
@@ -97,8 +124,8 @@ export function parseDataFoundationConfig(
     };
   }
 
-  const commit = result.config['APP_COMMIT'];
-  if (typeof commit !== 'string' || commit === '') {
+  const configCommit = result.config['APP_COMMIT'];
+  if (typeof configCommit !== 'string' || configCommit === '') {
     return {
       config: null,
       result: withIssue(result, {
@@ -110,7 +137,7 @@ export function parseDataFoundationConfig(
   }
 
   return {
-    config: { APP_COMMIT: commit, schemaVersion: parsed },
+    config: { APP_COMMIT: configCommit, schemaVersion: parsed },
     result,
   };
 }

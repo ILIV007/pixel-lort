@@ -64,6 +64,34 @@ describe('DbExecutor — typed execution', () => {
     expect(absent).toBeNull();
   });
 
+  it('first() survives destructuring (no dependence on method binding)', async () => {
+    // The executor is closure-based: extracting the method must not detach it
+    // from its database binding or change behavior.
+    const { first } = createDbExecutor(db);
+    const row = await first<{ one: number }>({ sql: 'SELECT 42 AS one' });
+    expect(row?.one).toBe(42);
+    const absent = await first<{ one: number }>({ sql: 'SELECT 42 AS one WHERE 1 = 0' });
+    expect(absent).toBeNull();
+  });
+
+  it('batch([]) resolves to [] without calling D1 and without throwing', async () => {
+    // A stub D1Database whose prepare/batch would explode if touched: the
+    // documented empty-batch no-op must short-circuit before any D1 call.
+    const untouchedDb = {
+      prepare: () => {
+        throw new Error('prepare must not be called for an empty batch');
+      },
+      batch: () => {
+        throw new Error('D1 batch must not be called for an empty statement list');
+      },
+    } as unknown as D1Database;
+    const isolatedExecutor = createDbExecutor(untouchedDb);
+
+    await expect(isolatedExecutor.batch([])).resolves.toEqual([]);
+    // The real binding behaves identically.
+    await expect(executor.batch([])).resolves.toEqual([]);
+  });
+
   it('run() reports change counts for mutations', async () => {
     const meta = await executor.run(createSourceRow('src-exec-1'));
     expect(meta.changes).toBe(1);

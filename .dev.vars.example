@@ -8,7 +8,7 @@
 # --- Non-secret (local overrides) ----------------------------------------------
 # ENVIRONMENT=development
 # LOG_LEVEL=debug
-# APP_VERSION=0.0.0-dev
+# APP_VERSION=1.1.0
 
 # --- Secrets (names only; leave empty unless your phase requires them) ----------
 # BOT_TOKEN=
