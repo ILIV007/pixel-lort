@@ -1,0 +1,54 @@
+// wrangler.jsonc — Cloudflare Workers configuration for Pixel.
+//
+// PHASE 0 BOUNDARY (docs/ROADMAP.md):
+//   - No Cloudflare resources are created or bound during Phase 0.
+//   - No deployments are performed from this repository during Phase 0.
+//   - Future bindings are documented below as commented placeholders with the
+//     exact binding names fixed by the blueprint (docs/blueprint/v1/).
+//
+// Secret values must NEVER appear in this file. Use `wrangler secret put <NAME>`
+// (or the dashboard) for deployed secrets and a git-ignored `.dev.vars` file for
+// local development. See docs/SECURITY_MODEL.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pixel",
+  "main": "src/entrypoints/worker.ts",
+  "compatibility_date": "2025-09-15",
+  "observability": {
+    "enabled": true,
+  },
+  "vars": {
+    "APP_VERSION": "0.0.0-phase0",
+    "ENVIRONMENT": "development",
+    "LOG_LEVEL": "info",
+  },
+
+  // ---------------------------------------------------------------------------
+  // Future bindings (planned — declared per phase, never before their phase).
+  // The typed contract for all of these lives in src/shared/types/env.ts.
+  // ---------------------------------------------------------------------------
+  //
+  // Phase 1 (repository, bindings and migrations) — D1 database:
+  // "d1_databases": [
+  //   { "binding": "DB", "database_name": "pixel-db", "database_id": "<assigned-at-creation>" }
+  // ],
+  //
+  // Phase 1 (repository, bindings and migrations) — KV cache namespace:
+  // "kv_namespaces": [
+  //   { "binding": "CACHE", "id": "<assigned-at-creation>" }
+  // ],
+  //
+  // Phase 3 (job/queue framework) — Queues producer + consumer with DLQ:
+  // "queues": {
+  //   "producers": [{ "binding": "JOBS", "queue": "pixel-jobs" }],
+  //   "consumers": [{ "queue": "pixel-jobs", "dead_letter_queue": "pixel-dlq" }]
+  // },
+  //
+  // Phase 7 (media engine) — R2 bucket for temporary rights-cleared media:
+  // "r2_buckets": [
+  //   { "binding": "MEDIA", "bucket_name": "pixel-media" }
+  // ],
+  //
+  // Phase 6 (AI adapters) — Workers AI binding:
+  // "ai": { "binding": "AI" }
+}

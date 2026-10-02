@@ -1,0 +1,32 @@
+{
+  "name": "pixel",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pixel — Persian-language autonomous Telegram gaming editorial agent for the PIXEL LORT channel (@pixellort). Cloudflare Workers foundation.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm run test && npm run scan:secrets && npm run build"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20261002.1",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.5.0",
+    "prettier": "^3.9.9",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.147.0"
+  }
+}
