@@ -24,6 +24,13 @@ export interface ConfigFieldSpec {
   readonly allowed?: readonly string[];
   /** Applied when the field is absent or empty. */
   readonly default?: string;
+  /**
+   * Optional strict format for string fields (e.g. positive integer syntax).
+   * A value that fails the pattern is an `invalid_format` issue — it is NEVER
+   * replaced by the default (no silent coercion); the default applies only
+   * when the field is absent or empty.
+   */
+  readonly pattern?: RegExp;
   /** Human-readable description for docs and error notes. */
   readonly description: string;
   /** Roadmap phase that starts consuming this field (0 = already active). */

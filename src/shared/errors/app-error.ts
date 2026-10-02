@@ -21,6 +21,12 @@ export const APP_ERROR_CODES = [
   'internal_error',
   'service_unavailable',
   'config_invalid',
+  // D1/database boundary errors (Phase 1A) — stable codes for mapped D1
+  // failures; raw driver messages are classified internally and never
+  // surfaced (see src/adapters/db/d1-errors.ts and docs/SECURITY_MODEL.md).
+  'db_constraint_violation',
+  'db_schema_invalid',
+  'db_query_failed',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];
@@ -36,6 +42,9 @@ export const HTTP_STATUS_BY_CODE: Readonly<Record<AppErrorCode, number>> = {
   internal_error: 500,
   service_unavailable: 503,
   config_invalid: 503,
+  db_constraint_violation: 409,
+  db_schema_invalid: 503,
+  db_query_failed: 500,
 };
 
 /**
@@ -52,6 +61,9 @@ export const DEFAULT_ERROR_MESSAGES: Readonly<Record<AppErrorCode, string>> = {
   internal_error: 'Internal Server Error',
   service_unavailable: 'Service Unavailable',
   config_invalid: 'Service Configuration Invalid',
+  db_constraint_violation: 'Database Constraint Violation',
+  db_schema_invalid: 'Database Schema Invalid',
+  db_query_failed: 'Database Query Failed',
 };
 
 export interface AppErrorOptions {

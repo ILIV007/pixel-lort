@@ -47,6 +47,16 @@ export interface PixelConfig {
   /** Build/version marker reported by /health. */
   readonly APP_VERSION: string;
   /**
+   * Commit identifier reported by GET /version (Phase 1A, ADR-0020).
+   * Non-secret build metadata; the local placeholder is invalid in production.
+   */
+  readonly APP_COMMIT: string;
+  /**
+   * Expected D1 schema version, validated as a strict positive decimal
+   * integer string (Phase 1A, ADR-0019/0020).
+   */
+  readonly SCHEMA_VERSION: string;
+  /**
    * Target channel username (e.g. "@pixellort").
    * Classified as non-secret config because the channel username is publicly
    * observable; decided in ADR-0009 (closed OD-001) — stays OUTSIDE
@@ -81,12 +91,31 @@ export interface PixelSecrets {
 export type PixelEnv = PixelBindings & PixelConfig & PixelSecrets;
 
 /**
- * Phase 0 worker environment: exactly the vars declared in wrangler.jsonc.
- * All fields optional-with-validated-defaults so a bare runtime (and tests
- * without any configuration) still boot safely.
+ * Phase 0/1A worker environment: the vars declared in wrangler.jsonc plus the
+ * Phase 1A local D1 placeholder binding (ADR-0019; no Cloudflare resource
+ * exists). All fields optional-with-validated-defaults so a bare runtime (and
+ * tests without any configuration) still boot safely.
  */
 export interface WorkerEnv {
   readonly APP_VERSION?: string;
   readonly ENVIRONMENT?: string;
   readonly LOG_LEVEL?: string;
+  /**
+   * Commit identifier (Phase 1A build metadata, ADR-0020). Optional with a
+   * validated local default; invalid values fail readiness closed.
+   */
+  readonly APP_COMMIT?: string;
+  /**
+   * Expected D1 schema version as a strict positive decimal integer string
+   * (Phase 1A, ADR-0019). Optional with a validated local default; invalid
+   * values fail readiness closed — never silently coerced.
+   */
+  readonly SCHEMA_VERSION?: string;
+  /**
+   * D1 binding, declared in wrangler.jsonc starting Phase 1A as a LOCAL
+   * placeholder (no resource created — ADR-0019). Optional: runtimes and
+   * tests without D1 keep working in offline mode; when the binding IS
+   * present, readiness additionally verifies schema health (ADR-0021).
+   */
+  readonly DB?: D1Database;
 }

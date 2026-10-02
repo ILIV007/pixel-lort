@@ -1,11 +1,21 @@
-import { expect, describe, it } from 'vitest';
-import { SELF } from 'cloudflare:test';
+import { beforeEach, expect, describe, it } from 'vitest';
+import { SELF, env } from 'cloudflare:test';
+import { applyMigrations } from '../helpers/migrations';
 
 /**
- * Integration tests for the Phase 0 HTTP surface, executed through the real
- * worker entrypoint inside workerd (SELF). No network access occurs; SELF
- * dispatches in-process.
+ * Integration tests for the Phase 0/1A HTTP surface, executed through the
+ * real worker entrypoint inside workerd (SELF). No network access occurs;
+ * SELF dispatches in-process.
+ *
+ * Phase 1A: the environment now includes the local D1 placeholder binding
+ * (ADR-0019), so readiness verifies schema health against the applied
+ * migrations — every test applies the migration set to its isolated storage
+ * scope first.
  */
+
+beforeEach(async () => {
+  await applyMigrations(env.DB);
+});
 
 describe('GET /health', () => {
   it('returns a healthy JSON summary', async () => {
@@ -46,7 +56,7 @@ describe('GET /health/live', () => {
 });
 
 describe('GET /health/ready', () => {
-  it('returns ready with the Phase 0 config surface', async () => {
+  it('returns ready with the Phase 0/1A config surface and healthy schema', async () => {
     const res = await SELF.fetch('https://example.com/health/ready');
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;

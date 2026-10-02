@@ -1,10 +1,10 @@
 # Roadmap
 
-Phase order follows blueprint §26 ("Roadmap implementation order"). Only
-**Phase 0** items are marked complete; everything else is pending and
+Phase order follows blueprint §26 ("Roadmap implementation order"). Phases
+**0** and **1A** are marked complete; everything else is pending and
 intentionally not started.
 
-## Phase 0 — product/config freeze + repository foundation ✅ (current)
+## Phase 0 — product/config freeze + repository foundation ✅
 
 - [x] Extract and preserve the blueprint under `docs/blueprint/v1/` (verbatim).
 - [x] Repository foundation: `package.json`, lockfile, strict `tsconfig.json`,
@@ -29,16 +29,58 @@ intentionally not started.
 - [x] Documentation: README, AGENTS, ARCHITECTURE, ROADMAP, OPEN_DECISIONS,
       ADRs, SECURITY_MODEL, SECURITY, CONTRIBUTING.
 
-## Phase 1 — repository, CI, bindings and migrations ⬜
+## Phase 1A — D1 data foundation and version contract ✅ (current)
 
-- [ ] D1/KV binding declarations + resource provisioning policy (explicit
-      owner approval; planned resource names per ADR-0016).
-- [ ] D1 migrations from preserved `pixel_schema_v1.sql` (append-only files).
-- [ ] `GET /version` with safe build metadata: application version, commit
-      identifier, schema version, deployment environment (ADR-0012);
-      development-safe defaults locally.
-- [ ] Repository layer for D1 access with idempotent writers.
-- [ ] CI extension for migration dry-run checks.
+- [x] Versioned D1 migration `migrations/0001_initial_schema.sql` converted
+      from the preserved blueprint schema: 27 approved tables, 29 approved
+      indexes, all constraints; application `schema_metadata` table added
+      (ADR-0019). Blueprint SQL remains the immutable design reference.
+- [x] Application schema metadata mechanism: schema version, migration
+      identifier, application timestamp — clearly distinct from Wrangler's
+      `d1_migrations` bookkeeping (ADR-0019).
+- [x] Migration tests on the Cloudflare vitest/workerd D1 test environment:
+      isolated local D1, migrations applied atomically, table/index sets,
+      foreign keys, uniqueness rules, representative flows (append-only test
+      files; no Cloudflare account or credentials).
+- [x] Smallest useful D1 access boundary (`src/adapters/db/`): typed
+      execution, atomic batches, schema health query, safe D1 error mapping
+      (ADR-0022). No repositories, no ORM-style framework.
+- [x] `GET /version` with safe build metadata: application version, commit
+      identifier, schema version, deployment environment (ADR-0012/0020);
+      development-safe defaults locally; fail-closed on invalid metadata.
+- [x] `APP_COMMIT` / `SCHEMA_VERSION` typed non-secret configuration with
+      strict validation (no silent coercion) and `.env.example` / wrangler
+      vars / environment types updated (ADR-0020).
+- [x] `GET /health/ready` Phase 1A extension: `not_ready` on invalid
+      metadata or failed schema health when a D1 binding is present; offline
+      development without a D1 resource stays ready (ADR-0021).
+- [x] Local D1 placeholder binding declaration + documented local migration
+      commands (`db:migrations:list`, `db:migrations:apply`); remote
+      migration commands are documentation-only in Phase 1A. **No Cloudflare
+      resource was created and no remote migration was executed.**
+- [x] Phase 1A review corrections: application version aligned to the
+      approved `1.1.0` everywhere (package/wrangler//version/docs);
+      future-safe INCREMENTAL test-migration helper (version-aware, plan
+      validation, synthetic version-2 fixture — still test infrastructure
+      only); closure-based `DbExecutor` (destructure-safe `first`, safe
+      empty-batch no-op); APP_COMMIT trust rules extended to preview
+      (placeholder rejected, hexadecimal Git commit ID 7–64 required outside
+      development) per ADR-0020.
+
+## Phase 1B — resource provisioning (owner-executed) ⬜
+
+- [ ] Owner-approved Cloudflare resource provisioning per ADR-0016 naming:
+      `pixel-db-production` / `pixel-db-preview` (and later KV/Queues/R2 in
+      their owning phases).
+- [ ] Replace the local D1 placeholder binding with real environment
+      bindings (preview/production configurations).
+- [ ] First remote migration application (`wrangler d1 migrations apply
+DB --remote`) after provisioning, by or with explicit approval of the
+      project owner.
+- [ ] Repository layer for D1 access with idempotent writers (Phase 2+ work
+      follows the schema boundary fixed in Phase 1A).
+- [ ] CI extension for migration dry-run checks, if still appropriate after
+      provisioning.
 
 ## Phase 2 — Telegram webhook, auth, RBAC and renderer ⬜
 
@@ -105,3 +147,11 @@ intentionally not started.
 ## Phase 13 — production rollout ⬜
 
 - [ ] `safe_auto` → `auto` staged rollout with final default `AUTO`.
+
+## Tooling maintenance backlog ⬜
+
+- [ ] ESLint major evaluation: the pinned ESLint 9.x release used by the
+      quality gate prints an end-of-support warning during `npm ci`. Evaluate
+      and, if fully compatible, adopt the supported ESLint major in a
+      dedicated tooling-maintenance slice — NOT inside a feature/correction
+      phase (recorded during the Phase 1A correction pass).
