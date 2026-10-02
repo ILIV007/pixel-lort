@@ -24,7 +24,7 @@
     "db:migrations:list:preview": "wrangler d1 migrations list DB --env preview --remote",
     "db:migrations:apply:preview": "wrangler d1 migrations apply DB --env preview --remote",
     "deploy:preview": "node scripts/deploy-preview.mjs",
-    "build:preview": "wrangler deploy --dry-run --env preview --outdir dist-preview"
+    "build:preview": "wrangler deploy --dry-run --env preview --outdir dist/preview"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

@@ -160,7 +160,7 @@ DB --remote`) after provisioning, by or with explicit approval of the
 
 - [x] Provision isolated D1 database `pixel-db-preview`.
 - [x] Add Wrangler `preview` environment and real D1 binding.
-- [ ] Apply migration 0001 to remote preview D1.
-- [ ] Deploy and verify `pixel-preview`.
+- [x] Apply migration 0001 to remote preview D1.
+- [x] Deploy and verify `pixel-preview`.
 - [ ] Connect the GitHub repository through Cloudflare Workers Builds.
 - [ ] Keep production infrastructure unprovisioned until its release gate.

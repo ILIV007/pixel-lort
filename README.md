@@ -182,3 +182,5 @@ npm run deploy:preview
 ```
 
 `deploy:preview` injects the exact Git commit into `APP_COMMIT`. Cloudflare credentials must exist only in the operator environment and must never be committed.
+
+Preview health endpoint: `https://pixel-preview.pixellort.workers.dev/health/ready`
