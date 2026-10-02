@@ -41,7 +41,7 @@ boundaries map onto it as follows:
 | `src/entrypoints`   | `interfaces/*` (webhook, queue, cron)                               | **implemented (skeleton)**   |
 | `src/domain`        | `domain/*` (story, editorial, publication, source, media, identity) | planned                      |
 | `src/application`   | `application/*` (commands, queries, workflows)                      | planned                      |
-| `src/adapters`      | `infrastructure/*` + `connectors/*`                                 | planned                      |
+| `src/adapters`      | `infrastructure/*` + `connectors/*`                                 | **db boundary (Phase 1A)**   |
 | `src/editorial`     | rendering, Persian normalization, prompt contracts                  | planned                      |
 | `src/admin`         | private Telegram screens, RBAC, sessions                            | planned                      |
 | `src/observability` | logging, redaction, correlation                                     | **implemented (foundation)** |
@@ -67,25 +67,27 @@ One default export with three typed handlers:
 
 ### 3.2 HTTP surface (allowlist)
 
-| Route               | Behavior                                        | Status      |
-| ------------------- | ----------------------------------------------- | ----------- |
-| `GET /health`       | Small JSON health summary (no secret inventory) | implemented |
-| `GET /health/live`  | Static liveness                                 | implemented |
-| `GET /health/ready` | `ready`/`not_ready` only; reasons to logs       | implemented |
-| everything else     | Uniform safe JSON 404 (paths and methods)       | implemented |
+| Route               | Behavior                                                              | Status      |
+| ------------------- | --------------------------------------------------------------------- | ----------- |
+| `GET /health`       | Small JSON health summary (no secret inventory)                       | implemented |
+| `GET /health/live`  | Static liveness                                                       | implemented |
+| `GET /health/ready` | `ready`/`not_ready` only; reasons to logs; Phase 1A schema health     | implemented |
+| `GET /version`      | Four safe build/schema fields (ADR-0020); fail-closed on bad metadata | implemented |
+| everything else     | Uniform safe JSON 404 (paths and methods)                             | implemented |
 
 Planned additions per blueprint §5 (not implemented): `POST /telegram/webhook`
-with constant-time secret validation and body caps; `GET /version` with
-build/schema versions; `degraded` readiness semantics. Tracked in
-`docs/ROADMAP.md` and `docs/OPEN_DECISIONS.md`.
+with constant-time secret validation and body caps; `degraded` readiness
+semantics. Tracked in `docs/ROADMAP.md`.
 
 ### 3.3 Environment contract (`src/shared/types/env.ts`)
 
-- `WorkerEnv` — what the Worker consumes today (wrangler.jsonc vars only).
+- `WorkerEnv` — what the Worker consumes today: wrangler.jsonc vars plus the
+  optional Phase 1A local D1 placeholder binding `DB` (ADR-0019; no resource
+  exists — optional so bare runtimes and unit tests boot without D1).
 - `PixelBindings` — future binding contract with blueprint names:
   `DB` (D1), `CACHE` (KV), `JOBS` (Queue producer), `MEDIA` (R2), `AI`
-  (Workers AI). None are bound in Phase 0; wrangler.jsonc documents the exact
-  future binding declarations as comments.
+  (Workers AI). Only the local D1 placeholder is declared; everything else
+  is documented as comments in wrangler.jsonc.
 - `PixelSecrets` — secret names per blueprint §4. Values exist only in
   Cloudflare secrets / local `.dev.vars`.
 - `QueueEnvelope` — type-only contract for future queue messages.
@@ -116,7 +118,9 @@ by ADR-0014).
 
 ### 3.6 Shared primitives (`src/shared/`)
 
-- `AppError` with stable codes → HTTP statuses and safe default messages.
+- `AppError` with stable codes → HTTP statuses and safe default messages
+  (extended in Phase 1A with D1 boundary codes: `db_constraint_violation`,
+  `db_schema_invalid`, `db_query_failed`).
 - Safe error serialization (`toPublicErrorBody`) — the only path from a
   thrown value to an HTTP error body.
 - Correlation/request IDs with strict input validation.
@@ -125,16 +129,42 @@ by ADR-0014).
   framework phase.
 - Clock abstraction (`systemClock`, `fixedClock`) for deterministic tests.
 
+### 3.7 Data foundation (Phase 1A — ADR-0019/0020/0021/0022)
+
+- **Migration:** `migrations/0001_initial_schema.sql` — verbatim port of the
+  blueprint schema (27 tables, 29 indexes, all CHECK/FK/UNIQUE constraints)
+  plus the application `schema_metadata` table. The blueprint's
+  `PRAGMA foreign_keys = ON` is not ported (D1 enforces foreign keys by
+  default; proven by tests). Migrations are append-only.
+- **Schema metadata:** `schema_metadata` (key/value/updated_at_ms) records
+  `schema_version` (= 1), `migration_id`, `applied_at` — the runtime contract
+  used by readiness; distinct from Wrangler's `d1_migrations` bookkeeping.
+- **D1 boundary (`src/adapters/db/`):** typed `DbExecutor`
+  (query/first/run/atomic batch), safe D1 error classification into stable
+  AppError codes, and the schema health query. Logs only stable operation
+  names, durations, result counts, and error codes — never SQL text,
+  parameters, or rows (ADR-0022). No repositories, no ORM.
+- **Version contract:** `GET /version` (ADR-0020) backed by `APP_COMMIT` and
+  `SCHEMA_VERSION` config (strict positive-integer validation, no silent
+  coercion, production placeholder guard).
+- **Readiness:** `/health/ready` verifies schema health whenever a D1
+  binding is present; offline development without a binding stays ready
+  (ADR-0021).
+
 ## 4. Testing approach
 
 - Vitest with the Cloudflare-supported Workers pool: tests execute inside
-  workerd via wrangler.jsonc (no bindings → no resources → no credentials).
-- Entry-integration tests use `cloudflare:test` `SELF`; unit tests call
-  handlers directly with typed mocks.
+  workerd via wrangler.jsonc. The local D1 placeholder binding gives tests an
+  isolated local D1 database — no resources, no credentials, no network.
+- Entry-integration tests use `cloudflare:test` `SELF`; D1 tests apply
+  migrations atomically through `tests/helpers/migrations.ts` (statement
+  split + `db.batch`, since D1 `exec` cannot run multi-line statements);
+  unit tests call handlers directly with typed mocks.
 - No test performs a real network request.
 
-## 5. Non-goals in Phase 0
+## 5. Non-goals in Phase 1A
 
 Source connectors, story/evidence engine, AI adapters, renderer, media
-pipeline, publisher, Telegram admin panel, D1 schema, deployments, Cloudflare
-resource creation, webhook registration — all planned, none implemented.
+pipeline, publisher, Telegram admin panel, D1 repositories/business queries,
+deployments, Cloudflare resource creation, webhook registration, remote
+migrations — all planned, none implemented.

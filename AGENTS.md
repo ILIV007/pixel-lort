@@ -25,6 +25,14 @@ working in this repository. It is intentionally terse and version-stable.
   KV is cache/lock storage only — never authoritative state.
 - Queues are at-least-once: consumers must be idempotent; externally visible
   actions require deterministic idempotency keys (`src/shared/ids/`).
+- **D1 rules (Phase 1A+):** all D1 access goes through the typed boundary in
+  `src/adapters/db/` (ADR-0022). Never log SQL text or bind parameters
+  (they may carry user/source content) and never log full rows. Batches are
+  atomic — rely on that for multi-write idempotency. Applied migration files
+  in `migrations/` are append-only; application schema metadata lives in the
+  `schema_metadata` table and is distinct from Wrangler's `d1_migrations`
+  bookkeeping (ADR-0019). Remote migration commands require explicit owner
+  instruction and an approved Phase 1B binding.
 
 ## 3. Security and secret rules — non-negotiable
 

@@ -53,6 +53,14 @@ digest.
   ONE concise `warn` event (code + status); only unexpected 5xx errors log
   at `error` level. Neither path exposes raw stacks or arbitrary thrown
   values. The default logger emits no raw stack traces at all.
+- **Database observability (ADR-0022, Phase 1A):** all D1 access flows
+  through `src/adapters/db/`. Logs carry ONLY stable operation names,
+  durations, result counts, and stable error codes. SQL text and bind
+  parameters are NEVER logged (parameters may carry user or source content);
+  full rows are NEVER logged. D1 driver errors are classified into stable
+  codes (`db_constraint_violation`, `db_schema_invalid`,
+  `db_query_failed`); raw driver messages are never surfaced or serialized,
+  and migration errors never print secrets or environment objects.
 - HTTP error BODIES are produced exclusively by
   `src/shared/errors/serialize.ts`: code + safe message + requestId +
   sanitized details — unchanged by the logging policy.
