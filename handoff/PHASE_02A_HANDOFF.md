@@ -25,10 +25,12 @@ initial administration foundation on branch `phase/02a-telegram-ingress`.
 | 3   | `217e29a`       | feat: add admin authorization and command contracts |
 | 4   | `6476131`       | feat: add Telegram API client boundary              |
 | 5   | `3ccb791`       | test: cover Telegram security and idempotency       |
-| 6   | _(this commit)_ | docs: document Phase 2A Telegram foundation         |
+| 6   | `f78906b`       | docs: document Phase 2A Telegram foundation         |
+| 7   | `93860e3`       | test: drop unused helper from the admin flow suite  |
+| 8   | _(this commit)_ | docs: record final Phase 2A commit list             |
 
-Diff base for review: `git diff --stat 446f3f1..HEAD` (also recorded below in
-§11).
+Commit 7 is a one-line lint fixup flagged by the clean-environment quality
+gate run (no behavioral change).
 
 ## 3. Implemented Telegram contracts
 
