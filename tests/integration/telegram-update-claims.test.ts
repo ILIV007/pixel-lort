@@ -46,11 +46,11 @@ describe('claimTelegramUpdate — lifecycle', () => {
     expect(row?.received_at).toBe(NOW);
   });
 
-  it('reports a duplicate when the same update_id is claimed again', async () => {
+  it('reports an in-flight claim when the same update_id is claimed again', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 7002, NOW);
     const second = await claimTelegramUpdate(executor, 7002, NOW + 5_000);
-    expect(second).toEqual({ kind: 'duplicate', existingStatus: 'claimed' });
+    expect(second).toEqual({ kind: 'in_flight' });
   });
 
   it('transitions claimed -> processed and reports the terminal state on re-claim', async () => {
@@ -66,10 +66,10 @@ describe('claimTelegramUpdate — lifecycle', () => {
     expect(row?.processed_at).toBe(NOW + 10);
 
     const redelivery = await claimTelegramUpdate(executor, 7003, NOW + 20_000);
-    expect(redelivery).toEqual({ kind: 'duplicate', existingStatus: 'processed' });
+    expect(redelivery).toEqual({ kind: 'already_processed' });
   });
 
-  it('transitions claimed -> failed and keeps the failure observable', async () => {
+  it('transitions claimed -> failed and keeps the failure observable and RECLAIMABLE', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 7004, NOW);
     await expect(markTelegramUpdateFailed(executor, 7004, NOW + 10)).resolves.toBe(true);
@@ -80,9 +80,10 @@ describe('claimTelegramUpdate — lifecycle', () => {
     });
     expect(row?.status).toBe('failed');
 
-    // Duplicate redelivery of a failed update is acknowledged, not reprocessed.
+    // A failed update is NOT terminal: redelivery reclaims it atomically
+    // (ADR-0027) so a retryable failure can never permanently lose it.
     const redelivery = await claimTelegramUpdate(executor, 7004, NOW + 20_000);
-    expect(redelivery).toEqual({ kind: 'duplicate', existingStatus: 'failed' });
+    expect(redelivery).toEqual({ kind: 'reclaimed' });
   });
 
   it('never overwrites a terminal state with the guarded transitions', async () => {
@@ -110,26 +111,19 @@ describe('concurrent duplicate claims', () => {
     ]);
 
     const winners = results.filter((r) => r.kind === 'claimed');
-    const losers = results.filter((r) => r.kind === 'duplicate');
+    const losers = results.filter((r) => r.kind === 'in_flight');
     expect(winners).toHaveLength(1);
     expect(losers).toHaveLength(2);
-    for (const loser of losers) {
-      if (loser.kind !== 'duplicate') continue;
-      expect(loser.existingStatus).toBe('claimed');
-    }
   });
 });
 
 describe('duplicate delivery through the worker webhook', () => {
   it('acknowledges the second delivery of the same update without reprocessing', async () => {
+    // A noop update (channel_post) completes offline without a Bot API
+    // client, so the full duplicate path is observable end to end.
     const body = JSON.stringify({
       update_id: 7200,
-      message: {
-        message_id: 21,
-        chat: { id: 1000000001 },
-        from: { id: 1000000001 },
-        text: '/status',
-      },
+      channel_post: { message_id: 21, chat: { id: -100123 } },
     });
 
     const first = await worker.fetch(

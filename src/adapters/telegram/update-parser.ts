@@ -43,6 +43,11 @@ export interface ParsedMessageFields {
   readonly text?: string;
   /** Lowercase command word (e.g. "start") when the text starts with a bot command. */
   readonly command?: string;
+  /**
+   * Lowercase target username when the command explicitly addressed a bot
+   * ("/status@some_bot"); absent for unqualified commands.
+   */
+  readonly commandTarget?: string;
 }
 
 export interface ParsedCallbackFields {
@@ -92,23 +97,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** A successfully extracted bot command with its optional explicit target. */
+export interface ParsedBotCommand {
+  /** Lowercase command word (e.g. "status"). */
+  readonly command: string;
+  /** Lowercase target username for "/cmd@target"; absent when unqualified. */
+  readonly targetUsername?: string;
+}
+
 /**
- * Extract the bot command word from message text.
- * Accepts "/command" and "/command@botname" forms; the command word is
- * normalized to lowercase and must satisfy the conservative length bound.
- * Returns undefined for anything else (including malformed commands —
- * those are simply not commands).
+ * Extract the bot command from message text.
+ * Accepts "/command" and "/command@botname" forms; the command word and the
+ * optional target username are normalized to lowercase and must satisfy the
+ * conservative length bounds. Returns undefined for anything else (including
+ * malformed commands — those are simply not commands).
  */
-export function extractBotCommand(text: string): string | undefined {
+export function extractBotCommand(text: string): ParsedBotCommand | undefined {
   if (!text.startsWith('/')) {
     return undefined;
   }
-  const match = /^\/([A-Za-z0-9_]{1,32})(?:@[A-Za-z0-9_]{1,64})?(?=\s|$)/.exec(text);
+  const match = /^\/([A-Za-z0-9_]{1,32})(?:@([A-Za-z0-9_]{1,64}))?(?=\s|$)/.exec(text);
   if (match === null) {
     return undefined;
   }
   const command = match[1];
-  return command === undefined ? undefined : command.toLowerCase();
+  if (command === undefined) {
+    return undefined;
+  }
+  const target = match[2];
+  return {
+    command: command.toLowerCase(),
+    ...(target !== undefined ? { targetUsername: target.toLowerCase() } : {}),
+  };
 }
 
 function boundedText(value: unknown): string | undefined {
@@ -160,6 +180,7 @@ function parseMessageLike(
   const chat = payload['chat'];
   const from = payload['from'];
   const text = boundedText(payload['text']);
+  const parsedCommand = text === undefined ? undefined : extractBotCommand(text);
   return {
     kind,
     updateId,
@@ -167,7 +188,8 @@ function parseMessageLike(
     chatId: isRecord(chat) ? toSafeInteger(chat['id']) : undefined,
     fromUserId: isRecord(from) ? toSafeInteger(from['id'], { min: 1 }) : undefined,
     text,
-    command: text === undefined ? undefined : extractBotCommand(text),
+    command: parsedCommand?.command,
+    commandTarget: parsedCommand?.targetUsername,
   };
 }
 

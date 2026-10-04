@@ -37,6 +37,17 @@ describe('parseTelegramUpdate — supported kinds', () => {
     expect(result.update.fromUserId).toBe(1000000001);
     expect(result.update.text).toBe('/status');
     expect(result.update.command).toBe('status');
+    expect(result.update.commandTarget).toBeUndefined();
+  });
+
+  it('parses an explicitly targeted command with its target username', () => {
+    const result = parseTelegramUpdate(
+      messageUpdate({ text: '/status@Pixel_Admin_Bot extra args' }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.update.kind !== 'message') return;
+    expect(result.update.command).toBe('status');
+    expect(result.update.commandTarget).toBe('pixel_admin_bot');
   });
 
   it('parses an edited_message identically to a message', () => {
@@ -195,14 +206,30 @@ describe('parseTelegramUpdate — string bounds', () => {
 
 describe('extractBotCommand', () => {
   it('extracts and lowercases the command word', () => {
-    expect(extractBotCommand('/status')).toBe('status');
-    expect(extractBotCommand('/STATUS')).toBe('status');
-    expect(extractBotCommand('/Help text after')).toBe('help');
+    expect(extractBotCommand('/status')).toEqual({ command: 'status' });
+    expect(extractBotCommand('/STATUS')).toEqual({ command: 'status' });
+    expect(extractBotCommand('/Help text after')).toEqual({ command: 'help' });
   });
 
-  it('strips a @botname target suffix', () => {
-    expect(extractBotCommand('/status@pixel_admin_bot')).toBe('status');
-    expect(extractBotCommand('/start@PixelBot extra')).toBe('start');
+  it('preserves the @botname target suffix, lowercased', () => {
+    expect(extractBotCommand('/status@pixel_admin_bot')).toEqual({
+      command: 'status',
+      targetUsername: 'pixel_admin_bot',
+    });
+    expect(extractBotCommand('/start@PixelBot extra')).toEqual({
+      command: 'start',
+      targetUsername: 'pixelbot',
+    });
+    expect(extractBotCommand('/STATUS@Pixel_Admin_Bot')).toEqual({
+      command: 'status',
+      targetUsername: 'pixel_admin_bot',
+    });
+  });
+
+  it('omits the target for unqualified commands', () => {
+    const parsed = extractBotCommand('/version');
+    expect(parsed).toEqual({ command: 'version' });
+    expect(parsed?.targetUsername).toBeUndefined();
   });
 
   it('returns undefined for non-commands and malformed commands', () => {

@@ -94,7 +94,7 @@ function buildDeps(overrides: Partial<TelegramIngressDeps> = {}): TelegramIngres
         ownerTelegramId: OWNER_ID,
         lookup: createAdminRoleLookup(executor),
       }),
-    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.0' }),
+    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.1' }),
     botApi: overrides.botApi,
     clock: overrides.clock ?? fixedClock(NOW),
     logger: overrides.logger ?? captureLogger().logger,
@@ -145,7 +145,7 @@ describe('duplicate deliveries never execute the command twice', () => {
 });
 
 describe('failed processing is observable and never falsely processed', () => {
-  it('marks failed when authorization lookup throws (transient internal failure)', async () => {
+  it('marks failed and propagates 503 when authorization lookup throws (transient failure)', async () => {
     const { client, sends } = countingClient();
     const executor = createDbExecutor(env.DB);
     const failingAuthorization = {
@@ -157,7 +157,11 @@ describe('failed processing is observable and never falsely processed', () => {
       buildDeps({ executor, authorization: failingAuthorization, botApi: client }),
     );
 
-    await expect(ingress.processUpdate(ownerCommand(9010, '/status'))).resolves.toBe('failed');
+    // Retryable (unknown/internal) failures propagate 503 semantics — the
+    // webhook never falsely acknowledges them (ADR-0027).
+    await expect(ingress.processUpdate(ownerCommand(9010, '/status'))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
     const row = await executor.first<{ status: string }>({
       sql: 'SELECT status FROM telegram_updates WHERE update_id = ?',
       params: [9010],
@@ -175,7 +179,9 @@ describe('failed processing is observable and never falsely processed', () => {
     });
     const ingress = createTelegramIngress(buildDeps({ executor: failingExecutor, botApi: client }));
 
-    await expect(ingress.processUpdate(ownerCommand(9011, '/status'))).resolves.toBe('failed');
+    await expect(ingress.processUpdate(ownerCommand(9011, '/status'))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
     const row = await createDbExecutor(env.DB).first<{ status: string }>({
       sql: 'SELECT status FROM telegram_updates WHERE update_id = ?',
       params: [9011],
@@ -184,19 +190,38 @@ describe('failed processing is observable and never falsely processed', () => {
     expect(row?.status).toBe('claimed');
   });
 
-  it('marks failed (not processed) when the Bot API call throws', async () => {
+  it('marks failed and propagates 503 (not processed) when the Bot API throws retryably', async () => {
     const { client } = countingClient({
       failWith: new TelegramApiError('telegram_rate_limited', { retryAfterMs: 5000 }),
     });
     const executor = createDbExecutor(env.DB);
     const ingress = createTelegramIngress(buildDeps({ executor, botApi: client }));
 
-    await expect(ingress.processUpdate(ownerCommand(9012, '/status'))).resolves.toBe('failed');
+    await expect(ingress.processUpdate(ownerCommand(9012, '/status'))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
     const row = await executor.first<{ status: string }>({
       sql: 'SELECT status FROM telegram_updates WHERE update_id = ?',
       params: [9012],
     });
     expect(row?.status).toBe('failed');
+  });
+
+  it('acknowledges a permanent Bot API failure with a failed row and no exception', async () => {
+    const { client, sends } = countingClient({
+      failWith: new TelegramApiError('telegram_bad_request'),
+    });
+    const executor = createDbExecutor(env.DB);
+    const ingress = createTelegramIngress(buildDeps({ executor, botApi: client }));
+
+    // Permanent: resolved (200 semantics — no infinite Telegram retry loop).
+    await expect(ingress.processUpdate(ownerCommand(9013, '/status'))).resolves.toBe('failed');
+    const row = await executor.first<{ status: string }>({
+      sql: 'SELECT status FROM telegram_updates WHERE update_id = ?',
+      params: [9013],
+    });
+    expect(row?.status).toBe('failed');
+    expect(sends).toHaveLength(0);
   });
 });
 

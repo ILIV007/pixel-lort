@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   createBotApiClient,
   DEFAULT_TELEGRAM_API_TIMEOUT_MS,
-  MAX_TELEGRAM_RESPONSE_CHARS,
+  MAX_TELEGRAM_RESPONSE_BYTES,
   TelegramApiError,
 } from '../../src/adapters/telegram/bot-api-client';
-import { escapeTelegramHtml } from '../../src/admin/telegram-html';
+import { escapeTelegramHtml, type TelegramSafeHtml } from '../../src/admin/telegram-html';
+import type { AppError } from '../../src/shared/errors/app-error';
 import { createLogger, type LogSink } from '../../src/observability/logger';
 
 /**
@@ -269,7 +270,7 @@ describe('createBotApiClient — transport failures', () => {
       () => textResponse('not json at all'),
       () => jsonResponse({ unexpected: true }),
       () => jsonResponse({ ok: true, result: 'not-a-message' }),
-      () => textResponse('x'.repeat(MAX_TELEGRAM_RESPONSE_CHARS + 1)),
+      () => textResponse('x'.repeat(MAX_TELEGRAM_RESPONSE_BYTES + 1)),
     ]) {
       const client = createBotApiClient({
         botToken: FAKE_TOKEN,
@@ -290,6 +291,270 @@ describe('createBotApiClient — transport failures', () => {
     });
     expect(client).toBeDefined();
     expect(DEFAULT_TELEGRAM_API_TIMEOUT_MS).toBe(10_000);
+  });
+});
+
+describe('createBotApiClient — bounded response reading (ADR-0028)', () => {
+  it('rejects an oversized STREAMED response without Content-Length', async () => {
+    // Streamed body: no content-length header exists — the byte cap must be
+    // enforced by the reader itself (never by trusting declarations).
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('x'.repeat(600_000)));
+        controller.enqueue(new TextEncoder().encode('x'.repeat(600_000)));
+        controller.close();
+      },
+    });
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () => new Response(stream, { status: 200 }),
+    });
+    const error = (await client.sendMessage({ chatId: CHAT_ID, text: TEXT }).then(
+      () => null,
+      (e: unknown) => e as TelegramApiError,
+    )) as TelegramApiError;
+    expect(error?.code).toBe('telegram_response_invalid');
+  });
+
+  it('rejects a lying Content-Length once the streamed bytes cross the cap', async () => {
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () =>
+        new Response(textResponse('x'.repeat(MAX_TELEGRAM_RESPONSE_BYTES + 1)).body, {
+          status: 200,
+          headers: { 'content-length': '5' },
+        }),
+    });
+    const error = (await client.sendMessage({ chatId: CHAT_ID, text: TEXT }).then(
+      () => null,
+      (e: unknown) => e as TelegramApiError,
+    )) as TelegramApiError;
+    expect(error?.code).toBe('telegram_response_invalid');
+  });
+
+  it('rejects an oversized declared Content-Length before reading the body', async () => {
+    let bodyRead = false;
+    // A minimal Response stand-in so the declared header survives exactly as
+    // the client would see it from a hostile server (workerd strips a
+    // mismatched content-length on stream bodies, which would hide the
+    // early-rejection path under test). The flag is set on .body ACCESS:
+    // ReadableStream pull callbacks fire eagerly on construction, so only
+    // a getter proves the client never even acquired the stream.
+    const hostileResponse = {
+      status: 200,
+      headers: new Headers({ 'content-length': '99999999' }),
+      get body(): ReadableStream<Uint8Array> {
+        bodyRead = true;
+        return new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{}'));
+            controller.close();
+          },
+        });
+      },
+    } as unknown as Response;
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () => hostileResponse,
+    });
+    const error = (await client.sendMessage({ chatId: CHAT_ID, text: TEXT }).then(
+      () => null,
+      (e: unknown) => e as TelegramApiError,
+    )) as TelegramApiError;
+    expect(error?.code).toBe('telegram_response_invalid');
+    expect(bodyRead).toBe(false);
+  });
+
+  it('rejects an invalid (non-integer) declared Content-Length', async () => {
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () =>
+        new Response(textResponse('ok').body, {
+          status: 200,
+          headers: { 'content-length': 'abc' },
+        }),
+    });
+    const error = (await client.sendMessage({ chatId: CHAT_ID, text: TEXT }).then(
+      () => null,
+      (e: unknown) => e as TelegramApiError,
+    )) as TelegramApiError;
+    expect(error?.code).toBe('telegram_response_invalid');
+  });
+
+  it('accepts a response at the exact byte limit', async () => {
+    const envelope = JSON.stringify({ ok: true, result: { message_id: 77 } });
+    const padded = `${envelope}${' '.repeat(MAX_TELEGRAM_RESPONSE_BYTES - envelope.length)}`;
+    expect(new TextEncoder().encode(padded).length).toBe(MAX_TELEGRAM_RESPONSE_BYTES);
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () => new Response(padded, { status: 200 }),
+    });
+    await expect(client.sendMessage({ chatId: CHAT_ID, text: TEXT })).resolves.toEqual({
+      messageId: 77,
+    });
+  });
+
+  it('rejects malformed UTF-8 in the response as invalid', async () => {
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () => new Response(new Uint8Array([0x7b, 0xff, 0x7d]), { status: 200 }),
+    });
+    const error = (await client.sendMessage({ chatId: CHAT_ID, text: TEXT }).then(
+      () => null,
+      (e: unknown) => e as TelegramApiError,
+    )) as TelegramApiError;
+    expect(error?.code).toBe('telegram_response_invalid');
+  });
+
+  it('maps a mid-stream response failure to a retryable network error', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new Error('truncated'));
+      },
+    });
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () => new Response(stream, { status: 200 }),
+    });
+    const error = (await client.sendMessage({ chatId: CHAT_ID, text: TEXT }).then(
+      () => null,
+      (e: unknown) => e as TelegramApiError,
+    )) as TelegramApiError;
+    expect(error?.code).toBe('telegram_network_error');
+    expect(error?.retryable).toBe(true);
+  });
+
+  it('keeps retry_after parsing bounded and safe on the 429 error path', async () => {
+    // Oversized 429 payload: the error classification survives (with no
+    // retry_after) — the bounded reader must not mask or leak the body.
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () =>
+        new Response('x'.repeat(MAX_TELEGRAM_RESPONSE_BYTES + 1), { status: 429 }),
+    });
+    const error = (await client.sendMessage({ chatId: CHAT_ID, text: TEXT }).then(
+      () => null,
+      (e: unknown) => e as TelegramApiError,
+    )) as TelegramApiError;
+    expect(error?.code).toBe('telegram_rate_limited');
+    expect(error?.retryable).toBe(true);
+    expect(error?.retryAfterMs).toBeUndefined();
+  });
+
+  it('never logs response bodies on success or error paths', async () => {
+    const { lines, logger } = captureLogger();
+    const RESPONSE_CANARY = 'RESPONSE-BODY-CANARY-مخفی';
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () => textResponse(RESPONSE_CANARY), // malformed JSON body
+      logger,
+    });
+    await client.sendMessage({ chatId: CHAT_ID, text: TEXT }).catch(() => {});
+    const everything = lines.map((l) => JSON.stringify(l)).join('\n');
+    expect(everything).not.toContain(RESPONSE_CANARY);
+    expect(everything).not.toContain('مخفی');
+  });
+});
+
+describe('createBotApiClient — redirect safety (ADR-0028)', () => {
+  it('explicitly sends redirect: "error" on every request', async () => {
+    const inits: RequestInit[] = [];
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async (_url, init) => {
+        inits.push(init ?? {});
+        const method = String(_url).split('/').pop();
+        if (method === 'getMe') {
+          return jsonResponse({ ok: true, result: { id: 42, username: 'pixel_admin_bot' } });
+        }
+        return jsonResponse({ ok: true, result: { message_id: 1 } });
+      },
+    });
+    await client.getMe();
+    await client.sendMessage({ chatId: CHAT_ID, text: TEXT });
+    expect(inits.length).toBe(2);
+    for (const init of inits) {
+      expect(init['redirect']).toBe('error');
+    }
+  });
+
+  it('maps a redirected response to a retryable network error without leaking the token or URL', async () => {
+    const { lines, logger } = captureLogger();
+    // Simulate workerd's redirect failure: the raw error may carry the
+    // redirect target and even the original URL (with the embedded token).
+    const hostileFetch = async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.redirect !== 'error') {
+        return jsonResponse({ ok: true, result: true });
+      }
+      throw new Error(
+        `redirect from https://api.telegram.org/bot${FAKE_TOKEN}/sendMessage to https://evil.example.com/?leak=${FAKE_TOKEN}`,
+      );
+    };
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: hostileFetch,
+      logger,
+    });
+    const error = (await client.sendMessage({ chatId: CHAT_ID, text: TEXT }).then(
+      () => null,
+      (e: unknown) => e as TelegramApiError,
+    )) as TelegramApiError;
+    expect(error?.code).toBe('telegram_network_error');
+    expect(error?.retryable).toBe(true);
+    // The error surface (message + JSON serialization) never contains the
+    // token or any URL.
+    const serialized = JSON.stringify({
+      message: error?.message,
+      code: error?.code,
+      name: error?.name,
+    });
+    expect(serialized).not.toContain(FAKE_TOKEN);
+    expect(serialized).not.toContain('api.telegram.org');
+    expect(serialized).not.toContain('evil.example.com');
+    // And the logger (fail-safe policy) never emits them either.
+    const everything = lines.map((l) => JSON.stringify(l)).join('\n');
+    expect(everything).not.toContain(FAKE_TOKEN);
+    expect(everything).not.toContain('api.telegram.org');
+    expect(everything).not.toContain('evil.example.com');
+  });
+});
+
+describe('createBotApiClient — runtime Telegram-safe HTML gate (ADR-0029)', () => {
+  it('rejects a forged TelegramSafeHtml value BEFORE fetch is called', async () => {
+    let fetchCalls = 0;
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        return jsonResponse({ ok: true, result: { message_id: 1 } });
+      },
+    });
+    // Forged cast: compile-time branding bypassed, runtime gate must hold.
+    const forged =
+      '<a href="https://example.com/" onmouseover="alert(1)">hi</a>' as unknown as TelegramSafeHtml;
+    const error = await client.sendMessage({ chatId: CHAT_ID, text: forged }).then(
+      () => null,
+      (e: unknown) => e as AppError,
+    );
+    expect(error).not.toBeNull();
+    expect(error?.code).toBe('internal_error');
+    expect(fetchCalls).toBe(0);
+  });
+
+  it('applies the same runtime gate to editMessageText', async () => {
+    let fetchCalls = 0;
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        return jsonResponse({ ok: true, result: true });
+      },
+    });
+    const forged = '<b>not actually safe<script>' as unknown as TelegramSafeHtml;
+    await expect(
+      client.editMessageText({ chatId: CHAT_ID, messageId: 3, text: forged }),
+    ).rejects.toMatchObject({ code: 'internal_error' });
+    expect(fetchCalls).toBe(0);
   });
 });
 

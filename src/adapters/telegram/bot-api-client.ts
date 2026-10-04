@@ -5,6 +5,15 @@
  * - injectable fetch implementation (tests NEVER touch the network);
  * - strict timeout via AbortSignal (single attempt — NO automatic retries,
  *   hence no retry storm; callers decide policy from the error class);
+ * - `redirect: "error"` on every request — a redirected Bot API response is
+ *   a transport failure, mapped to a retryable network error without ever
+ *   exposing the token or the request URL;
+ * - BOUNDED response reading (shared bounded-stream reader): an early,
+ *   untrusted Content-Length check plus a strict byte cap enforced while
+ *   streaming (the stream is CANCELLED once the cap is crossed) — the full
+ *   response is never buffered before the limit is applied. Applied to the
+ *   success path AND the error/429 payload path; response bodies are never
+ *   logged;
  * - Telegram errors mapped into stable application error codes with an
  *   explicit retryable/permanent classification;
  * - `retry_after` parsed SAFELY (integer seconds 1..3600) when provided;
@@ -12,10 +21,20 @@
  *   the method name and a stable code only, and error messages are authored
  *   constants (raw Telegram descriptions are inspected for classification
  *   and otherwise discarded);
+ * - runtime Telegram-safe HTML gate: `sendMessage`/`editMessageText`
+ *   re-validate their text with `isSafeTelegramHtml` even though the type
+ *   is branded — a forged cast cannot bypass the runtime boundary;
  * - HTML parse mode is set by the callers via the typed inputs; MarkdownV2
  *   is deliberately not implemented (blueprint: HTML is the safe default).
  */
-import type { TelegramSafeHtml } from '../../admin/telegram-html';
+import { isSafeTelegramHtml, type TelegramSafeHtml } from '../../admin/telegram-html';
+import { AppError } from '../../shared/errors/app-error';
+import {
+  BoundedReadError,
+  decodeUtf8Strict,
+  parseContentLengthHeader,
+  readStreamBounded,
+} from '../../shared/http/bounded-reader';
 import type { Logger } from '../../observability/logger';
 
 export type TelegramApiErrorCode =
@@ -104,8 +123,8 @@ export interface TelegramBotApiClient {
 }
 
 export const DEFAULT_TELEGRAM_API_TIMEOUT_MS = 10_000;
-/** Bounded response size (defense against oversized/hostile responses). */
-export const MAX_TELEGRAM_RESPONSE_CHARS = 1_000_000;
+/** Strict byte cap on any single Telegram API response (stream-enforced). */
+export const MAX_TELEGRAM_RESPONSE_BYTES = 1_000_000;
 /** Conservative retry_after bound: 1 second .. 1 hour. */
 const MIN_RETRY_AFTER_SECONDS = 1;
 const MAX_RETRY_AFTER_SECONDS = 3600;
@@ -148,6 +167,39 @@ function classifyHttpStatus(status: number): TelegramApiErrorCode {
   return 'telegram_bad_request';
 }
 
+/**
+ * Read a Telegram response body under the strict byte cap (ADR-0028):
+ * - declared Content-Length is checked early when present, but never
+ *   trusted as the only check;
+ * - the body is STREAMED with the byte limit — reading stops and the stream
+ *   is cancelled as soon as the cap is crossed (the full body is never
+ *   buffered first);
+ * - decoding is strict UTF-8 (malformed sequences are response-invalid);
+ * - mid-stream transport failures are network errors (retryable).
+ * Content is never logged; only stable error codes leave this boundary.
+ */
+async function readResponseBounded(response: Response): Promise<string> {
+  const declared = parseContentLengthHeader(
+    response.headers.get('content-length'),
+    MAX_TELEGRAM_RESPONSE_BYTES,
+  );
+  if (declared.kind === 'invalid' || declared.kind === 'oversized') {
+    throw new TelegramApiError('telegram_response_invalid');
+  }
+  try {
+    const bytes = await readStreamBounded(response.body, MAX_TELEGRAM_RESPONSE_BYTES);
+    return decodeUtf8Strict(bytes);
+  } catch (error) {
+    if (error instanceof BoundedReadError) {
+      if (error.reason === 'stream_read_failed') {
+        throw new TelegramApiError('telegram_network_error', { cause: error });
+      }
+      throw new TelegramApiError('telegram_response_invalid', { cause: error });
+    }
+    throw error;
+  }
+}
+
 export function createBotApiClient(options: BotApiClientOptions): TelegramBotApiClient {
   const { botToken, logger } = options;
   const fetchImpl = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
@@ -170,6 +222,10 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
+        // A redirected Bot API response is a transport anomaly: fail it at
+        // the fetch layer instead of following (which could leak the token
+        // into a redirect target). Never expose the URL in errors.
+        redirect: 'error',
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
@@ -189,11 +245,7 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
     }
 
     // 2xx: parse the bounded JSON envelope { ok, result, ... }.
-    const text = await response.text();
-    if (text.length > MAX_TELEGRAM_RESPONSE_CHARS) {
-      logger?.warn('telegram.api.error', { method, code: 'telegram_response_invalid' });
-      throw new TelegramApiError('telegram_response_invalid');
-    }
+    const text = await readResponseBounded(response);
     let envelope: unknown;
     try {
       envelope = JSON.parse(text);
@@ -228,19 +280,31 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
     return parsed;
   }
 
+  /** Bounded 429/error payload read — failures only mean "no retry_after". */
   async function readRetryAfterMs(response: Response): Promise<number | undefined> {
     try {
-      const text = await response.text();
-      if (text.length > MAX_TELEGRAM_RESPONSE_CHARS) {
-        return undefined;
-      }
+      const text = await readResponseBounded(response);
       const body: unknown = JSON.parse(text);
       if (!isRecord(body)) return undefined;
       const parameters = isRecord(body['parameters']) ? body['parameters'] : undefined;
       return safeRetryAfterMs(parameters?.['retry_after']);
     } catch {
+      // An unreadable/unbounded error payload never masks the classified
+      // status error; retry_after is best-effort and stays bounded.
       return undefined;
     }
+  }
+
+  /**
+   * RUNTIME safety gate (ADR-0029): the branded type is compile-time only.
+   * A forged cast must be rejected here — before any fetch is made — as a
+   * deterministic internal error (permanent, no retry).
+   */
+  function requireSafeHtml(text: TelegramSafeHtml): TelegramSafeHtml {
+    if (!isSafeTelegramHtml(text)) {
+      throw new AppError('internal_error');
+    }
+    return text;
   }
 
   function parseSentMessage(result: unknown): TelegramSentMessage | null {
@@ -269,7 +333,7 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
         'sendMessage',
         {
           chat_id: input.chatId,
-          text: input.text,
+          text: requireSafeHtml(input.text),
           parse_mode: 'HTML',
           disable_web_page_preview: input.disableLinkPreview ?? true,
         },
@@ -283,7 +347,7 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
         {
           chat_id: input.chatId,
           message_id: input.messageId,
-          text: input.text,
+          text: requireSafeHtml(input.text),
           parse_mode: 'HTML',
         },
         (result) => {

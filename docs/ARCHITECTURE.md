@@ -151,51 +151,73 @@ by ADR-0014).
   binding is present; offline development without a binding stays ready
   (ADR-0021).
 
-### 3.8 Telegram ingress and admin foundation (Phase 2A — ADR-0024/0025/0026)
+### 3.8 Telegram ingress and admin foundation (Phase 2A — ADR-0024/0025/0026/0027/0028/0029)
 
 **HTTP edge** (`src/entrypoints/http/handlers/telegram-webhook.ts`):
 `POST /telegram/webhook` exists only behind the fail-closed
 `TELEGRAM_INGRESS_ENABLED` flag with a fully valid Phase 2 configuration; a
 disabled or misconfigured ingress is a uniform unknown route. Request
 lifecycle: timing-safe secret verification (fresh-key HMAC-SHA256 via Web
-Crypto) -> JSON content type -> 64 KiB body cap (declared + actual bytes) ->
+Crypto) -> JSON content type -> TRUE bounded body reading (ADR-0028: strict
+Content-Length pre-check, then a streamed byte cap at 64 KiB that stops and
+cancels after the first chunk crossing the limit; strict UTF-8 decode) ->
 strict JSON parse -> bounded Update parse. Rejections carry stable reason
 codes and never echo values.
 
 **Update parsing** (`src/adapters/telegram/update-parser.ts`): small explicit
 parser for `message` / `edited_message` / `callback_query` (no Zod — ADR-0010
 boundary). Safe-integer numerics only; strings bounded by omission; 64-byte
-callback data limit; unknown kinds classified `unsupported`.
+callback data limit; unknown kinds classified `unsupported`; bot commands
+carry their optional lowercased target username (`/cmd@bot`) in
+`commandTarget`.
 
 **Durable idempotency** (`src/application/telegram-ingress.ts` +
-`src/adapters/telegram/update-claims.ts`): update_id is the claim boundary;
-`claimed -> processed | failed` guarded transitions; duplicates acknowledged
-without reprocessing; concurrent claims produce exactly one winner; D1 is
-the only dedup authority (ADR-0025).
+`src/adapters/telegram/update-claims.ts`): update_id is the claim boundary
+with FOUR outcomes (ADR-0027): `claimed` (new), `reclaimed` (atomic
+`failed -> claimed`, exactly one concurrent winner), `already_processed`
+(terminal, ack), `in_flight` (owned elsewhere, ack). Retryable processing
+failures mark the row `failed` and propagate HTTP 503 semantics so Telegram
+redelivery reclaims them; permanent failures mark `failed` and answer 200.
+`claimed -> processed | failed` transitions stay guarded; `processed` is
+never reclaimable; D1 is the only dedup authority (ADR-0025/0027).
 
 **Authorization** (`src/admin/roles.ts`, `src/admin/authorization.ts`,
 `src/adapters/telegram/admin-lookup.ts`): owner bootstrap via
 `OWNER_TELEGRAM_ID` plus active D1 admins; six approved roles with the
 verbatim `pixel_admin_map_v1.json` permission map; numeric user IDs only;
-fail closed everywhere.
+fail closed everywhere. A denial is a handled action, not a failure.
 
 **Command routing** (`src/admin/command-router.ts`): allowlist /start /help
 /status /version; output is a TYPED action (`send_message` / `answer_callback`
 / `noop` / `denied`) — never an immediate fetch; unauthorized senders get a
-minimal fixed Persian denial; outside-allowlist commands are ignored.
+minimal fixed Persian denial; outside-allowlist commands are ignored;
+explicitly-targeted commands (`/cmd@bot`) execute only for the configured
+expected username (case-insensitive) and are otherwise ignored with the
+stable `command_for_other_bot` reason (no expected username is wired in
+Phase 2A — every explicit target is ignored, fail closed).
 
 **Bot API boundary** (`src/adapters/telegram/bot-api-client.ts`): typed
 getMe / sendMessage / editMessageText / answerCallbackQuery; injectable
-fetch; strict timeout; single attempt (no retries); retryable/permanent
-error classification with safe `retry_after` parsing; token and bodies never
-logged. Without `BOT_TOKEN` the pipeline runs in documented OFFLINE mode
-(actions skipped).
+fetch; strict timeout; single attempt (no retries); `redirect: "error"`;
+bounded 1 MiB response streaming on success and error/429 paths (ADR-0028);
+retryable/permanent error classification with safe `retry_after` parsing;
+runtime Telegram-safe HTML gate before every text-bearing call (a forged
+cast cannot bypass it); token and bodies never logged. Without `BOT_TOKEN`
+the pipeline runs in documented OFFLINE mode: noop actions complete, OUTBOUND
+actions fail retryably as `service_unavailable` (never silently skipped and
+acked — ADR-0027).
 
 **Admin contracts** (`src/admin/telegram-html.ts`,
 `src/admin/callback-tokens.ts`, `src/adapters/telegram/action-tokens.ts`):
-Telegram-safe HTML escaper/builder plus a bounded structural validator;
-`a:<base64url_token>` callback contract (≤ 64 bytes) with the
-`admin_action_tokens` single-use, user-bound repository boundary.
+Telegram-safe HTML escaper/builder; link targets validated by URL parsing
+(https only, no credentials, no hazard characters), canonicalized, and
+attribute-escaped before interpolation, with the validator accepting exactly
+builder-shaped hrefs (ADR-0029); `a:<base64url_token>` callback contract
+(≤ 64 bytes) with the `admin_action_tokens` single-use, user-bound
+repository boundary; issue/consume inputs validated BEFORE any database
+access (positive safe-integer user ids and timestamps, future expiry, token
+shape, approved permissions only, bounded action descriptors, JSON-object
+payload) and never echo rejected values.
 
 ## 4. Testing approach
 

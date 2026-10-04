@@ -326,3 +326,151 @@ numbers, or run the command in the extracted artifact).
 Single artifact: `pixel-lort-phase02a-v1.2.0.zip` (full working tree +
 complete `.git` history at the ZIP root; excludes node_modules, dist,
 .wrangler, coverage, credentials, local env files, and temporary files).
+
+---
+
+# Correction round — v1.2.1 (Phase 2A correction review: CHANGES REQUIRED)
+
+## C1. Scope and authority
+
+Alexios' Phase 2A correction review (verdict CHANGES REQUIRED) against
+branch `phase/02a-telegram-ingress` at HEAD `8f23b42` (base
+`446f3f14865a1ce57871f50d1979fbe5494a1e4a`, version 1.2.0, 341/341 tests).
+This round implements the six required fixes in ONE focused correction
+commit, bumps the artifact version to **1.2.1**, and adds ADR-0027/0028/0029.
+Sections 1–14 above document the original v1.2.0 round and are preserved.
+
+## C2. FIX 1 — Prevent permanent update loss (ADR-0027)
+
+- The claim boundary now returns FOUR outcomes: `claimed` (new INSERT),
+  `reclaimed` (atomic `failed -> claimed`, guarded UPDATE with
+  `processed_at` reset — exactly one concurrent winner), `already_processed`
+  (terminal — ack, never reprocessed), `in_flight` (owned by another
+  delivery — ack as duplicate).
+- Processing failures are classified RETRYABLE vs PERMANENT at the ingress:
+  `TelegramApiError.retryable` is authoritative for API errors; DB and
+  service-availability codes are retryable; deterministic application
+  rejections (`config_invalid`, `internal_error` HTML-gate, 4xx-class codes)
+  are permanent; UNKNOWN errors default RETRYABLE (a wrong retryable guess
+  is bounded — durable claims prevent double processing — while a wrong
+  permanent guess loses the update).
+- RETRYABLE failure → row marked `failed` (best effort, observable) and a
+  safe AppError with HTTP 503 semantics PROPAGATES — the webhook never
+  answers 200, so Telegram redelivery reclaims and retries. PERMANENT
+  failure → row marked `failed`, webhook answers 200 (no infinite retry
+  loop); logs carry only update_id, stable event, error code, and the
+  retryable flag.
+- Authorization denial is a handled typed action, never a failure.
+- Missing Bot API client: noop actions complete (offline-safe); OUTBOUND
+  actions fail retryably as `service_unavailable` — BOT_TOKEN absence can
+  never falsely produce successful processing.
+- **No migration 0002** — the existing `status` column is sufficient.
+
+## C3. FIX 2 — True bounded webhook body reading (ADR-0028)
+
+- New shared primitive `src/shared/http/bounded-reader.ts`:
+  `readStreamBounded` reads the request BYTE stream up to the 64 KiB cap,
+  stops consuming and CANCELS the reader immediately after the first chunk
+  crossing the cap (allocation bounded by cap + one chunk — the complete
+  body is never buffered first).
+- Content-Length is an early, untrusted gate only: digits-only declarations
+  within the cap pass, oversized/huge declarations → 413 before any read,
+  invalid/negative/non-integer → safe 400 (`invalid_content_length`).
+- Strict UTF-8 decoding (fatal): malformed sequences → safe 400, never
+  silent U+FFFD replacement. Body content is never logged.
+
+## C4. FIX 3 — Hardened Telegram HTML links (ADR-0029)
+
+- The href shape regex is replaced by URL PARSING (`safeHrefCanonical`):
+  protocol exactly `https:`, non-empty hostname, no username/password
+  credentials, no control characters, and no attribute-hazard characters
+  (`"`, `'`, `<`, `>`, backtick) in input or canonical form; malformed URLs
+  rejected.
+- `telegramLink` interpolates the CANONICAL form after HTML-attribute
+  escaping (`&`→`&amp;` etc.), so raw `&` and hazard characters can never
+  break out of the attribute; Persian text, query parameters, fragments,
+  and Unicode URLs keep working (percent-encoded canonical form).
+- `isSafeTelegramHtml` accepts EXACTLY builder-shaped hrefs: the attribute
+  value must decode (exact entity set) to a URL-safe target AND be its
+  canonical attribute escaping — forged values, raw hazards, and
+  non-canonical entities fail.
+- The Bot API client re-runs `isSafeTelegramHtml` at runtime before
+  `sendMessage`/`editMessageText` — a forged TypeScript cast cannot bypass
+  the boundary; rejection throws deterministic `internal_error` BEFORE any
+  fetch.
+
+## C5. FIX 4 — True bounded Telegram API response reading (ADR-0028)
+
+- Every Bot API request is sent with `redirect: "error"`; redirect failures
+  map to the retryable network-error class without exposing the token,
+  request URL, or redirect target.
+- Declared Content-Length is checked early when present (invalid or
+  oversized → `telegram_response_invalid` before any read) and is never the
+  only check: the response is STREAMED under `MAX_TELEGRAM_RESPONSE_BYTES`
+  (1 MiB) with immediate cancellation after the cap is crossed — applied to
+  the success path AND the error/429 payload path.
+- Strict UTF-8 response decoding; mid-stream transport failures → retryable
+  `telegram_network_error`; `retry_after` parsing stays bounded and safe
+  (an unreadable payload only means "no retry_after"). Response bodies are
+  never logged.
+
+## C6. FIX 5 — Bot command target safety
+
+- The parser preserves the optional lowercased target username
+  (`/status@some_bot` → `commandTarget`) in the parsed command contract.
+- The routing context carries an optional `expectedBotUsername`; a command
+  with an explicit target executes only on a case-insensitive match and
+  otherwise returns noop with the stable `command_for_other_bot` reason.
+  No expected username is wired in Phase 2A (no live getMe), so EVERY
+  explicitly-targeted command is ignored — fail closed.
+
+## C7. FIX 6 — Action-token input validation
+
+- `issueActionToken`/`consumeActionToken` validate BEFORE any database
+  access: positive safe-integer `telegramUserId`; positive safe-integer
+  timestamps with `expiresAtMs` strictly after `nowMs`; token format per the
+  approved callback contract; permission restricted to the approved
+  admin-map set (owner wildcard included); bounded action descriptor shape;
+  bounded `targetType`/`targetId`; bounded payload that must parse as a
+  JSON OBJECT (never arrays/scalars/malformed).
+- Rejections never echo the offending value; a unit suite proves the D1
+  stub is untouched for every invalid input class.
+
+## C8. Version and documentation
+
+- Version bumped consistently to **1.2.1**: package.json, package-lock.json
+  (via npm tooling), wrangler.jsonc (root + preview), config defaults
+  (`DEFAULT_APP_VERSION`), test helpers, `/version` expectations, and
+  documentation.
+- ADR-0027 (retryable reclaim), ADR-0028 (bounded stream reading), ADR-0029
+  (HTML URL safety boundary) added and indexed; ADR-0025/0026 marked
+  amended.
+- README.md, docs/ARCHITECTURE.md (§3.8), docs/SECURITY_MODEL.md (trust
+  boundary + new prohibited practices), docs/ROADMAP.md (Phase 2A section),
+  and this handoff updated.
+
+## C9. Verification (correction round)
+
+- Clean-environment gate: `rm -rf node_modules dist .wrangler && npm ci &&
+npm run check` — exit 0 (lint, prettier, strict typecheck, tests, secret
+  self-test, secret scan, offline dry-run build). `npm run test:db` green.
+- Suite totals: **417 tests in 33 files, all passing** (v1.2.0 baseline was
+  341 tests in 30 files; the correction adds 3 new test files and extends 8
+  existing suites). All new FIX categories are covered; Phase 1A/0 suites
+  unchanged and green. New suites:
+  `tests/integration/telegram-update-reclaim.test.ts`,
+  `tests/unit/bounded-reader.test.ts`,
+  `tests/unit/action-token-validation.test.ts`.
+- Secret scanner: 151 files scanned, 0 findings; scanner self-test 10/10.
+- Dry-run build: OK (offline `wrangler deploy --dry-run`).
+- No deployment, no push, no webhook registration, no resource creation, no
+  remote migration, no credentials, no live Telegram traffic.
+
+## C10. Correction commit
+
+| Round        | Commit          | Subject                                                 |
+| ------------ | --------------- | ------------------------------------------------------- |
+| v1.2.1 (fix) | _(this commit)_ | fix: harden Telegram ingress reliability and boundaries |
+
+Ancestry: `446f3f1` (authoritative main) → `8f23b42` (v1.2.0 head) → this
+commit. No history rewritten.

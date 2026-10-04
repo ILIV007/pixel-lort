@@ -13,7 +13,11 @@ const OWNER: ActorResolution = { kind: 'authorized', role: 'owner' };
 const VIEWER: ActorResolution = { kind: 'authorized', role: 'viewer' };
 const UNAUTHORIZED: ActorResolution = { kind: 'unauthorized' };
 
-const router = createCommandRouter({ applicationVersion: '1.2.0' });
+const router = createCommandRouter({ applicationVersion: '1.2.1' });
+const targetedRouter = createCommandRouter({
+  applicationVersion: '1.2.1',
+  expectedBotUsername: 'Pixel_Admin_Bot',
+});
 
 function message(overrides: Partial<ParsedUpdate> = {}): ParsedUpdate {
   return {
@@ -104,15 +108,68 @@ describe('authorization outcomes', () => {
 describe('response content', () => {
   it('interpolates the escaped application version into /version and /status', () => {
     const versionAction = asSent(router.route(message({ command: 'version' }), OWNER));
-    expect(versionAction.text).toContain('1.2.0');
+    expect(versionAction.text).toContain('1.2.1');
 
     const statusAction = asSent(router.route(message({ command: 'status' }), OWNER));
-    expect(statusAction.text).toContain('1.2.0');
+    expect(statusAction.text).toContain('1.2.1');
   });
 
   it('does not echo sender-controlled content', () => {
     const action = asSent(router.route(message({ text: '/start hostile-content' }), OWNER));
     expect(action.text).not.toContain('hostile-content');
+  });
+});
+
+describe('bot command target safety', () => {
+  it('accepts an unqualified command', () => {
+    const action = targetedRouter.route(message({ command: 'status', text: '/status' }), OWNER);
+    expect(action.type).toBe('send_message');
+  });
+
+  it('accepts a command addressed to the configured bot (case-insensitive)', () => {
+    const action = targetedRouter.route(
+      message({
+        command: 'status',
+        commandTarget: 'PIXEL_admin_bot',
+        text: '/status@PIXEL_admin_bot',
+      }),
+      OWNER,
+    );
+    expect(action.type).toBe('send_message');
+  });
+
+  it('ignores a command addressed to another bot', () => {
+    const action = targetedRouter.route(
+      message({
+        command: 'status',
+        commandTarget: 'some_other_bot',
+        text: '/status@some_other_bot',
+      }),
+      OWNER,
+    );
+    expect(action).toEqual({ type: 'noop', reason: 'command_for_other_bot' });
+  });
+
+  it('ignores an explicitly targeted command when no expected username is configured', () => {
+    // Phase 2A offline wiring: no username source, so every explicit target
+    // is treated as another bot's command (fail closed).
+    const action = router.route(
+      message({ command: 'status', commandTarget: 'pixel_admin_bot' }),
+      OWNER,
+    );
+    expect(action).toEqual({ type: 'noop', reason: 'command_for_other_bot' });
+  });
+
+  it("gives no feedback for another bot's command regardless of authorization", () => {
+    const update = message({
+      command: 'status',
+      commandTarget: 'some_other_bot',
+      text: '/status@some_other_bot',
+    });
+    expect(targetedRouter.route(update, UNAUTHORIZED)).toEqual({
+      type: 'noop',
+      reason: 'command_for_other_bot',
+    });
   });
 });
 

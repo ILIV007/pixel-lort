@@ -34,7 +34,7 @@ export {
   createBotApiClient,
   TelegramApiError,
   DEFAULT_TELEGRAM_API_TIMEOUT_MS,
-  MAX_TELEGRAM_RESPONSE_CHARS,
+  MAX_TELEGRAM_RESPONSE_BYTES,
   type TelegramBotApiClient,
   type TelegramApiErrorCode,
   type TelegramSentMessage,

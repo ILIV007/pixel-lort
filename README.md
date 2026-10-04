@@ -20,42 +20,59 @@ secure, fully OFFLINE Telegram ingress and the initial admin
 foundation — no Telegram credentials exist, no webhook is registered, and no
 live Telegram call can occur.**
 
-Implemented in Phase 2A:
+Implemented in Phase 2A (as corrected in v1.2.1):
 
 - `POST /telegram/webhook` behind a fail-closed ingress flag
   (`TELEGRAM_INGRESS_ENABLED`, ships `false` everywhere): timing-safe shared
   secret verification (fresh-key HMAC-SHA256 via Web Crypto), JSON
-  content-type enforcement, 64 KiB body cap, strict JSON parsing, stable
-  rejection reason codes; correlation IDs and security headers retained
-  (ADR-0024). A disabled or misconfigured ingress behaves like an unknown
-  route.
+  content-type enforcement, TRUE bounded 64 KiB body reading (streamed byte
+  cap with early Content-Length checks — ADR-0028), strict UTF-8 and JSON
+  parsing, stable rejection reason codes; correlation IDs and security
+  headers retained (ADR-0024). A disabled or misconfigured ingress behaves
+  like an unknown route.
 - Bounded Telegram Update parser (message / edited_message / callback_query)
   with safe-integer numerics, bounded strings, the 64-byte callback data
-  limit, and crash-free classification of unknown update kinds.
-- Durable update idempotency in D1 (`telegram_updates`, ADR-0025): update_id
-  claim boundary, guarded `claimed -> processed | failed` transitions,
-  duplicates acknowledged without reprocessing, concurrent claims produce
-  exactly one winner, failures observable.
+  limit, bot-command target extraction (`/cmd@bot`), and crash-free
+  classification of unknown update kinds.
+- Durable update idempotency in D1 (`telegram_updates`, ADR-0025/0027):
+  update_id claim boundary with four outcomes (claimed / reclaimed /
+  already_processed / in_flight), guarded `claimed -> processed | failed`
+  transitions, atomic failed-update RECLAIM so retryable failures are
+  retried through Telegram redelivery instead of lost, duplicates
+  acknowledged without reprocessing, concurrent claims and reclaims produce
+  exactly one winner. Retryable failures propagate safe HTTP 503 semantics;
+  permanent failures are acknowledged (200) and marked failed.
 - Phase 2 configuration contracts: `TELEGRAM_INGRESS_ENABLED`,
   `BOT_TOKEN`, `WEBHOOK_SECRET`, `OWNER_TELEGRAM_ID` (validated formats;
   values never echoed) and non-secret `TARGET_CHANNEL`; fail-closed
   readiness while ingress is enabled; documented OFFLINE mode without
-  `BOT_TOKEN`.
+  `BOT_TOKEN` where noop actions complete but outbound actions fail
+  retryably (never falsely processed).
 - Authorization foundation: owner bootstrap identity + active D1 admins
   across the six approved roles (verbatim permission map); fail closed for
   disabled admins, unknown users, and identity-less updates.
 - Command routing contracts: `/start` `/help` `/status` `/version` for
   authorized senders (static Persian admin responses), minimal denial for
-  unauthorized senders, ignore-list for everything else; typed Telegram
-  actions decoupled from HTTP routing.
+  unauthorized senders, ignore-list for everything else, and bot-target
+  safety — a command addressed to another bot (`/cmd@other_bot`) is ignored
+  (stable `command_for_other_bot` reason), matched case-insensitively when
+  an expected username is configured. Typed Telegram actions decoupled from
+  HTTP routing.
 - Telegram Bot API client boundary (getMe / sendMessage / editMessageText /
   answerCallbackQuery): injectable fetch, strict timeout, single attempt,
-  retryable/permanent error classification, safe `retry_after` parsing,
-  HTML parse mode only, token/bodies never logged.
+  `redirect: "error"`, bounded 1 MiB response streaming on success and
+  error paths (ADR-0028), retryable/permanent error classification, safe
+  `retry_after` parsing, HTML parse mode only, token/bodies never logged.
 - Callback data contract `a:<base64url_token>` (≤ 64 bytes) with the
-  single-use, user-bound, expiring `admin_action_tokens` repository boundary.
-- Telegram-safe HTML: `&<>` escaping, allowlisted tag builders, validated
-  https-only links, bounded structural validator; Persian/RTL/emoji intact.
+  single-use, user-bound, expiring `admin_action_tokens` repository
+  boundary; all inputs (user id, timestamps, token shape, approved
+  permissions, action/payload bounds, JSON-object payload) validated BEFORE
+  any database access.
+- Telegram-safe HTML: `&<>` escaping, allowlisted tag builders,
+  URL-parsed https-only link canonicalization with attribute escaping
+  (ADR-0029), bounded structural validator accepting exactly builder output,
+  and a runtime HTML gate inside the Bot API client that a forged cast
+  cannot bypass; Persian/RTL/emoji intact.
 
 Implemented in Phase 1A (unchanged):
 

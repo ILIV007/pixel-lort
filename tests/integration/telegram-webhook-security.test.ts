@@ -44,10 +44,9 @@ function webhookRequest(body: string, headers: Record<string, string> = {}): Req
 }
 
 function validUpdateBody(): string {
-  return JSON.stringify({
-    update_id: 5001,
-    message: { message_id: 1, chat: { id: 1000000001 }, from: { id: 1000000001 }, text: '/start' },
-  });
+  // A noop update (channel_post): completes offline without a Bot API
+  // client, so the happy path is observable without network access.
+  return JSON.stringify({ update_id: 5001, channel_post: { message_id: 1 } });
 }
 
 beforeEach(async () => {
@@ -149,6 +148,29 @@ describe('POST /telegram/webhook — secret verification', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
   });
+
+  it('never fakes success for an outbound action without a client (503, ADR-0027)', async () => {
+    // Owner /start routes a send_message action; without BOT_TOKEN there is
+    // no client, so the update must NOT be acknowledged as processed.
+    const res = await worker.fetch(
+      webhookRequest(
+        JSON.stringify({
+          update_id: 5002,
+          message: {
+            message_id: 1,
+            chat: { id: 1000000001 },
+            from: { id: 1000000001 },
+            text: '/start',
+          },
+        }),
+      ),
+      ENABLED_ENV,
+      testCtx(),
+    );
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: Record<string, unknown> };
+    expect(body.error['code']).toBe('service_unavailable');
+  });
 });
 
 describe('POST /telegram/webhook — content type and body-size caps', () => {
@@ -177,6 +199,90 @@ describe('POST /telegram/webhook — content type and body-size caps', () => {
       testCtx(),
     );
     expect(res.status).toBe(413);
+  });
+
+  it('rejects an invalid Content-Length with a safe 400 before reading', async () => {
+    for (const invalid of ['abc', '-1', '1.5', '']) {
+      const res = await worker.fetch(
+        new Request('https://example.com/telegram/webhook', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-telegram-bot-api-secret-token': FAKE_WEBHOOK_SECRET,
+            'content-length': invalid,
+          },
+          body: validUpdateBody(),
+        }),
+        ENABLED_ENV,
+        testCtx(),
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: Record<string, unknown> };
+      expect(body.error['code']).toBe('bad_request');
+    }
+  });
+
+  it('rejects an oversized declared Content-Length before parsing (413)', async () => {
+    const res = await worker.fetch(
+      webhookRequest(validUpdateBody(), { 'content-length': String(10 * 1024 * 1024) }),
+      ENABLED_ENV,
+      testCtx(),
+    );
+    expect(res.status).toBe(413);
+  });
+
+  it('accepts a body at the exact 64 KiB limit', async () => {
+    // Pad with whitespace so the JSON stays valid at exactly 64 KiB.
+    const update = JSON.stringify({ update_id: 5077, channel_post: { message_id: 1 } });
+    const padding = ' '.repeat(64 * 1024 - new TextEncoder().encode(update).length);
+    expect(new TextEncoder().encode(update + padding).length).toBe(64 * 1024);
+    const res = await worker.fetch(webhookRequest(update + padding), ENABLED_ENV, testCtx());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it('rejects a streamed oversized body with NO Content-Length header (413)', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('x'.repeat(64 * 1024)));
+        controller.enqueue(new TextEncoder().encode('overflow'));
+        controller.close();
+      },
+    });
+    const res = await worker.fetch(
+      new Request('https://example.com/telegram/webhook', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-telegram-bot-api-secret-token': FAKE_WEBHOOK_SECRET,
+          // No content-length: the byte cap must come from the reader.
+        },
+        body: stream,
+        // @ts-expect-error duplex is required for streaming request bodies
+        duplex: 'half',
+      }),
+      ENABLED_ENV,
+      testCtx(),
+    );
+    expect(res.status).toBe(413);
+  });
+
+  it('rejects malformed UTF-8 in the body with a safe 400', async () => {
+    const res = await worker.fetch(
+      new Request('https://example.com/telegram/webhook', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-telegram-bot-api-secret-token': FAKE_WEBHOOK_SECRET,
+        },
+        body: new Uint8Array([0x7b, 0xff, 0xfe, 0x7d]),
+      }),
+      ENABLED_ENV,
+      testCtx(),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: Record<string, unknown> };
+    expect(body.error['code']).toBe('bad_request');
   });
 });
 
@@ -262,9 +368,14 @@ describe('POST /telegram/webhook — no payload or secret leakage in logs', () =
         },
       }),
     );
-    const res = await handleTelegramWebhook(request, ENABLED_ENV, { logger });
-    expect(res.status).toBe(200);
-
+    // The owner command routes an outbound action; without a client the
+    // handler fails RETRYABLY (503 semantics) — the leak assertions run on
+    // that failure path too (ADR-0027).
+    const outcome = await handleTelegramWebhook(request, ENABLED_ENV, { logger }).then(
+      (res) => res.status,
+      (error: unknown) => (error as { code?: string }).code ?? 'unexpected',
+    );
+    expect(outcome).toBe('service_unavailable');
     const everything = captured.join('\n');
     expect(everything).not.toContain(FAKE_WEBHOOK_SECRET);
     expect(everything).not.toContain('LEAK-CANARY');

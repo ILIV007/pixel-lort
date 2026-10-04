@@ -31,8 +31,11 @@ in [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md).
 | [ADR-0022](adr-0022-d1-observability.md)                     | D1 observability and error-mapping rules                                          | Accepted                         |
 | [ADR-0023](adr-0023-preview-cloudflare-infrastructure.md)    | Provision isolated Cloudflare preview infrastructure                              | Accepted                         |
 | [ADR-0024](adr-0024-telegram-webhook-ingress.md)             | Secure Telegram webhook ingress and Phase 2 configuration gating                  | Accepted                         |
-| [ADR-0025](adr-0025-telegram-update-idempotency.md)          | Durable Telegram update idempotency on telegram_updates                           | Accepted                         |
-| [ADR-0026](adr-0026-telegram-admin-interaction-contracts.md) | Telegram admin interaction contracts (roles, commands, HTML, callback tokens)     | Accepted                         |
+| [ADR-0025](adr-0025-telegram-update-idempotency.md)          | Durable Telegram update idempotency on telegram_updates                           | Accepted (amended by ADR-0027)   |
+| [ADR-0026](adr-0026-telegram-admin-interaction-contracts.md) | Telegram admin interaction contracts (roles, commands, HTML, callback tokens)     | Accepted (amended by ADR-0029)   |
+| [ADR-0027](adr-0027-retryable-update-reclaim.md)             | Retryable update reclaim semantics (failed rows are reclaimable, 503 propagation) | Accepted                         |
+| [ADR-0028](adr-0028-bounded-stream-reading.md)               | Bounded request/response stream reading (webhook + Bot API client)                | Accepted                         |
+| [ADR-0029](adr-0029-html-url-safety-boundary.md)             | Telegram-safe HTML link boundary (URL-parsed, canonical hrefs + runtime gate)     | Accepted                         |
 
 All Phase-0 open decisions (OD-001..OD-008) are now **closed**; see
 [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md) for the preserved history. An
@@ -42,3 +45,6 @@ ADR is written only when a decision is actually made.
 - [ADR-0024: Secure Telegram webhook ingress and Phase 2 configuration gating](adr-0024-telegram-webhook-ingress.md)
 - [ADR-0025: Durable Telegram update idempotency on telegram_updates](adr-0025-telegram-update-idempotency.md)
 - [ADR-0026: Telegram admin interaction contracts (roles, commands, HTML, callback tokens)](adr-0026-telegram-admin-interaction-contracts.md)
+- [ADR-0027: Retryable update reclaim semantics](adr-0027-retryable-update-reclaim.md)
+- [ADR-0028: Bounded request and response stream reading](adr-0028-bounded-stream-reading.md)
+- [ADR-0029: Telegram-safe HTML link boundary (URL-parsed hrefs)](adr-0029-html-url-safety-boundary.md)

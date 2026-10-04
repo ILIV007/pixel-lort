@@ -9,6 +9,13 @@
  *
  * Phase 2A behavior:
  * - Allowlist: /start, /help, /status, /version.
+ * - BOT TARGET SAFETY: Telegram commands may explicitly address another bot
+ *   ("/status@some_bot"). A command with an explicit target executes ONLY
+ *   when the routing context carries the expected bot username and it
+ *   matches (case-insensitive); otherwise the command is ignored with a
+ *   stable noop reason (`command_for_other_bot`). When no expected username
+ *   is configured, EVERY explicitly-targeted command is ignored (fail
+ *   closed) while unqualified commands keep working.
  * - Authorized (owner or active admin) senders receive the admin response
  *   contract for allowlisted commands (static Persian texts, no user content
  *   interpolated except escaped build metadata).
@@ -41,6 +48,7 @@ export type NoopReason =
   | 'unsupported_update'
   | 'not_a_command'
   | 'command_not_allowlisted'
+  | 'command_for_other_bot'
   | 'callback_not_supported'
   | 'malformed_callback_data'
   | 'unroutable_message';
@@ -61,6 +69,13 @@ export type TelegramAction =
 export interface CommandRouteContext {
   /** Application build marker surfaced by /version and /status. */
   readonly applicationVersion: string;
+  /**
+   * Bot username this deployment answers to (compared case-insensitively
+   * against an explicit "/cmd@target" suffix). When ABSENT, every
+   * explicitly-targeted command is ignored — fail closed; wiring a real
+   * username arrives with Phase 2B (no live getMe in Phase 2A).
+   */
+  readonly expectedBotUsername?: string;
 }
 
 export interface CommandRouter {
@@ -105,7 +120,8 @@ function versionResponse(applicationVersion: string): TelegramSafeHtml {
 }
 
 export function createCommandRouter(context: CommandRouteContext): CommandRouter {
-  const { applicationVersion } = context;
+  const { applicationVersion, expectedBotUsername } = context;
+  const normalizedExpectedBot = expectedBotUsername?.toLowerCase();
 
   function respond(command: InitialAdminCommand): TelegramSafeHtml {
     switch (command) {
@@ -141,6 +157,17 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
     const { command, chatId } = update;
     if (command === undefined) {
       return { type: 'noop', reason: 'not_a_command' };
+    }
+    if (update.commandTarget !== undefined) {
+      // Explicitly addressed command: execute ONLY when it targets THIS bot.
+      // No expected username configured (Phase 2A offline) -> every explicit
+      // target is another bot's command and is ignored.
+      if (
+        normalizedExpectedBot === undefined ||
+        update.commandTarget.toLowerCase() !== normalizedExpectedBot
+      ) {
+        return { type: 'noop', reason: 'command_for_other_bot' };
+      }
     }
     if (!isInitialAdminCommand(command)) {
       // Ignored for every sender — no feedback for command probing.

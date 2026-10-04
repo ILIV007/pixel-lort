@@ -14,8 +14,11 @@ import { formatCallbackData } from '../../src/admin/callback-tokens';
  * Admin authorization + command contracts over the real workerd D1 binding
  * (Phase 2A). The owner resolves through the bootstrap identity; active and
  * disabled admins are seeded into the `admins` table. No live Telegram
- * connection exists — outbound actions are observable as skipped-offline
- * events in a captured logger.
+ * connection exists and NO Bot API client is configured: noop actions
+ * complete safely (200), while OUTBOUND actions fail retryably with 503
+ * (service_unavailable) and are observable as `outbound_unavailable` events
+ * in a captured logger — absence of a client never fakes success
+ * (ADR-0027).
  */
 
 const FAKE_WEBHOOK_SECRET = 'test-webhook-secret-0000000000000000';
@@ -64,7 +67,9 @@ function captureLogger(): { lines: CapturedLine[]; logger: ReturnType<typeof cre
   return { lines, logger: createLogger({ level: 'debug', sink }) };
 }
 
-async function deliver(update: Record<string, unknown>): Promise<{ lines: CapturedLine[] }> {
+async function deliver(
+  update: Record<string, unknown>,
+): Promise<{ status: number; lines: CapturedLine[] }> {
   const { lines, logger } = captureLogger();
   const request = new Request('https://example.com/telegram/webhook', {
     method: 'POST',
@@ -74,9 +79,17 @@ async function deliver(update: Record<string, unknown>): Promise<{ lines: Captur
     },
     body: JSON.stringify(update),
   });
-  const res = await handleTelegramWebhook(request, HANDLER_ENV, { logger });
-  expect(res.status).toBe(200);
-  return { lines };
+  const response = await handleTelegramWebhook(request, HANDLER_ENV, { logger }).then(
+    (res) => res,
+    (error: unknown) => {
+      // The worker error path converts AppErrors to safe responses; emulate
+      // that mapping so the status is observable (service_unavailable -> 503).
+      const code = (error as { code?: string }).code ?? 'internal_error';
+      const status = code === 'service_unavailable' ? 503 : 500;
+      return new Response(JSON.stringify({ error: { code } }), { status });
+    },
+  );
+  return { status: response.status, lines };
 }
 
 function messageUpdate(updateId: number, fromId: number, text: string): Record<string, unknown> {
@@ -87,74 +100,87 @@ function messageUpdate(updateId: number, fromId: number, text: string): Record<s
 }
 
 describe('owner bootstrap authorization', () => {
-  it('serves the admin response contract to the owner', async () => {
-    const { lines } = await deliver(messageUpdate(8001, OWNER_ID, '/status'));
-    const processed = lines.find((l) => l.msg === 'telegram.update.processed');
-    expect(processed).toBeDefined();
-    expect(processed?.['action']).toBe('send_message');
-    expect(processed?.['authorized']).toBe(true);
-    expect(processed?.['role']).toBe('owner');
-    expect(lines.some((l) => l.msg === 'telegram.action.skipped_offline')).toBe(true);
+  it('routes the admin response contract for the owner (outbound -> 503 offline)', async () => {
+    const { status, lines } = await deliver(messageUpdate(8001, OWNER_ID, '/status'));
+    // Without BOT_TOKEN the outbound action fails retryably — never a
+    // false 200 success (ADR-0027).
+    expect(status).toBe(503);
+    const unavailable = lines.find((l) => l.msg === 'telegram.action.outbound_unavailable');
+    expect(unavailable?.['action']).toBe('send_message');
+    const failed = lines.find((l) => l.msg === 'telegram.update.failed');
+    expect(failed?.['retryable']).toBe(true);
   });
 });
 
 describe('D1 admin authorization', () => {
-  it('serves an active admin by role', async () => {
-    const { lines } = await deliver(messageUpdate(8002, EDITOR_ID, '/help'));
-    const processed = lines.find((l) => l.msg === 'telegram.update.processed');
-    expect(processed?.['action']).toBe('send_message');
-    expect(processed?.['role']).toBe('editor');
+  it('routes an active admin by role (outbound -> 503 offline)', async () => {
+    const { status, lines } = await deliver(messageUpdate(8002, EDITOR_ID, '/help'));
+    expect(status).toBe(503);
+    const unavailable = lines.find((l) => l.msg === 'telegram.action.outbound_unavailable');
+    expect(unavailable?.['action']).toBe('send_message');
   });
 
   it('denies a disabled admin (no privileged access)', async () => {
-    const { lines } = await deliver(messageUpdate(8003, DISABLED_ID, '/status'));
-    const processed = lines.find((l) => l.msg === 'telegram.update.processed');
-    expect(processed?.['action']).toBe('denied');
-    expect(processed?.['authorized']).toBe(false);
+    const { status, lines } = await deliver(messageUpdate(8003, DISABLED_ID, '/status'));
+    // The denial action itself is outbound and fails retryably offline —
+    // but the ROUTED action type is observable as `denied`.
+    expect(status).toBe(503);
+    const unavailable = lines.find((l) => l.msg === 'telegram.action.outbound_unavailable');
+    expect(unavailable?.['action']).toBe('denied');
   });
 
   it('denies an unknown user', async () => {
-    const { lines } = await deliver(messageUpdate(8004, UNKNOWN_ID, '/start'));
-    const processed = lines.find((l) => l.msg === 'telegram.update.processed');
-    expect(processed?.['action']).toBe('denied');
+    const { status, lines } = await deliver(messageUpdate(8004, UNKNOWN_ID, '/start'));
+    expect(status).toBe(503);
+    const unavailable = lines.find((l) => l.msg === 'telegram.action.outbound_unavailable');
+    expect(unavailable?.['action']).toBe('denied');
   });
 });
 
 describe('command allowlist', () => {
   it('ignores commands outside the allowlist even for the owner', async () => {
-    const { lines } = await deliver(messageUpdate(8005, OWNER_ID, '/inbox'));
+    const { status, lines } = await deliver(messageUpdate(8005, OWNER_ID, '/inbox'));
+    expect(status).toBe(200);
     const processed = lines.find((l) => l.msg === 'telegram.update.processed');
     expect(processed?.['action']).toBe('noop');
     expect(processed?.['noopReason']).toBe('command_not_allowlisted');
   });
 
   it('ignores non-command text', async () => {
-    const { lines } = await deliver(messageUpdate(8006, OWNER_ID, 'سلام، حالت چطوره؟'));
+    const { status, lines } = await deliver(messageUpdate(8006, OWNER_ID, 'سلام، حالت چطوره؟'));
+    expect(status).toBe(200);
     const processed = lines.find((l) => l.msg === 'telegram.update.processed');
     expect(processed?.['action']).toBe('noop');
     expect(processed?.['noopReason']).toBe('not_a_command');
   });
 
-  it('accepts commands targeted at a @botname suffix', async () => {
-    const { lines } = await deliver(messageUpdate(8007, OWNER_ID, '/version@pixel_admin_bot'));
+  it('ignores a command explicitly addressed to another bot (fail closed offline)', async () => {
+    const { status, lines } = await deliver(
+      messageUpdate(8007, OWNER_ID, '/version@pixel_admin_bot'),
+    );
+    // No expected bot username is wired in Phase 2A (no live getMe), so
+    // every explicit target is ignored with a stable reason.
+    expect(status).toBe(200);
     const processed = lines.find((l) => l.msg === 'telegram.update.processed');
-    expect(processed?.['action']).toBe('send_message');
+    expect(processed?.['action']).toBe('noop');
+    expect(processed?.['noopReason']).toBe('command_for_other_bot');
   });
 });
 
 describe('unsupported updates and callbacks', () => {
   it('acknowledges an unsupported update as processed without an action', async () => {
-    const { lines } = await deliver({
+    const { status, lines } = await deliver({
       update_id: 8010,
       channel_post: { message_id: 1, chat: { id: -100123 } },
     });
+    expect(status).toBe(200);
     const processed = lines.find((l) => l.msg === 'telegram.update.processed');
     expect(processed?.['action']).toBe('noop');
     expect(processed?.['noopReason']).toBe('unsupported_update');
   });
 
   it('classifies contract-valid callback data as not supported yet', async () => {
-    const { lines } = await deliver({
+    const { status, lines } = await deliver({
       update_id: 8011,
       callback_query: {
         id: 'cb-001',
@@ -162,16 +188,18 @@ describe('unsupported updates and callbacks', () => {
         data: formatCallbackData('AAAbbCCCdddEEEff'),
       },
     });
+    expect(status).toBe(200);
     const processed = lines.find((l) => l.msg === 'telegram.update.processed');
     expect(processed?.['action']).toBe('noop');
     expect(processed?.['noopReason']).toBe('callback_not_supported');
   });
 
   it('classifies malformed callback data as malformed without crashing', async () => {
-    const { lines } = await deliver({
+    const { status, lines } = await deliver({
       update_id: 8012,
       callback_query: { id: 'cb-002', from: { id: OWNER_ID }, data: '<script>alert(1)</script>' },
     });
+    expect(status).toBe(200);
     const processed = lines.find((l) => l.msg === 'telegram.update.processed');
     expect(processed?.['action']).toBe('noop');
     expect(processed?.['noopReason']).toBe('malformed_callback_data');
