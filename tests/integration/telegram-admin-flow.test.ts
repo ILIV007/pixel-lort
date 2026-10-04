@@ -33,10 +33,6 @@ const HANDLER_ENV = {
 
 const NOW = 1_700_000_000_000;
 
-function testCtx(): ExecutionContext {
-  return { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
-}
-
 beforeEach(async () => {
   await applyMigrations(env.DB);
   const executor = createDbExecutor(env.DB);
