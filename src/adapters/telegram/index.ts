@@ -30,3 +30,16 @@ export {
   type ActionTokenRecord,
   type ConsumeActionTokenResult,
 } from './action-tokens';
+export {
+  createBotApiClient,
+  TelegramApiError,
+  DEFAULT_TELEGRAM_API_TIMEOUT_MS,
+  MAX_TELEGRAM_RESPONSE_CHARS,
+  type TelegramBotApiClient,
+  type TelegramApiErrorCode,
+  type TelegramSentMessage,
+  type TelegramSendMessageInput,
+  type TelegramEditMessageInput,
+  type TelegramAnswerCallbackInput,
+  type BotApiClientOptions,
+} from './bot-api-client';

@@ -87,12 +87,25 @@ describe('parseTelegramPhase2Config — flag semantics', () => {
 describe('parseTelegramPhase2Config — fail-closed gating', () => {
   const baseEnabled = { TELEGRAM_INGRESS_ENABLED: 'true' };
 
-  it('fails closed when ingress is enabled and secrets are absent', () => {
+  it('fails closed when ingress is enabled and required secrets are absent', () => {
     const { config, result } = parseTelegramPhase2Config(baseEnabled);
     expect(config).toBeNull();
     expect(result.ok).toBe(false);
     const fields = result.issues.map((i) => i.field).sort();
-    expect(fields).toEqual(['BOT_TOKEN', 'OWNER_TELEGRAM_ID', 'WEBHOOK_SECRET']);
+    // BOT_TOKEN is deliberately NOT required: without it the ingress runs
+    // in documented offline mode until Phase 2B live wiring.
+    expect(fields).toEqual(['OWNER_TELEGRAM_ID', 'WEBHOOK_SECRET']);
+  });
+
+  it('keeps BOT_TOKEN optional while enabled (offline mode contract)', () => {
+    const { config, result } = parseTelegramPhase2Config({
+      ...baseEnabled,
+      WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
+      OWNER_TELEGRAM_ID: FAKE_OWNER_ID,
+    });
+    expect(result.ok).toBe(true);
+    expect(config?.ingressEnabled).toBe(true);
+    expect(config?.botToken).toBeUndefined();
   });
 
   it('fails closed when a required secret is present but invalid while enabled', () => {

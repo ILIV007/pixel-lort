@@ -51,7 +51,12 @@ export type TelegramAction =
   | { readonly type: 'send_message'; readonly chatId: number; readonly text: TelegramSafeHtml }
   | { readonly type: 'answer_callback'; readonly callbackQueryId: string }
   | { readonly type: 'noop'; readonly reason: NoopReason }
-  | { readonly type: 'denied'; readonly chatId: number; readonly reason: DenialReason };
+  | {
+      readonly type: 'denied';
+      readonly chatId: number;
+      readonly reason: DenialReason;
+      readonly text: TelegramSafeHtml;
+    };
 
 export interface CommandRouteContext {
   /** Application build marker surfaced by /version and /status. */
@@ -63,6 +68,11 @@ export interface CommandRouter {
 }
 
 const DENIAL_TEXT = 'دسترسی مجاز نیست.';
+
+/** Minimal denial message for unauthorized senders (fixed, static text). */
+export function denialText(): TelegramSafeHtml {
+  return escapeTelegramHtml(DENIAL_TEXT);
+}
 
 function startResponse(): TelegramSafeHtml {
   return composeTelegramHtml([
@@ -140,7 +150,7 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
       if (chatId === undefined) {
         return { type: 'noop', reason: 'unroutable_message' };
       }
-      return { type: 'denied', chatId, reason: 'unauthorized' };
+      return { type: 'denied', chatId, reason: 'unauthorized', text: denialText() };
     }
     if (chatId === undefined) {
       return { type: 'noop', reason: 'unroutable_message' };

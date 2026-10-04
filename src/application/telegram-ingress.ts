@@ -19,9 +19,11 @@
  * Processing: unsupported updates are acknowledged; commands are routed by
  * the command router against a fail-closed actor resolution and produce
  * TYPED actions (send_message / denied / noop). Outbound actions execute
- * through the injected Bot API client when one is configured; without a
- * client (offline mode — e.g. no BOT_TOKEN in Phase 2A preview) they are
- * logged as skipped. Nothing is executed for noop actions.
+ * through the injected Bot API client when one is configured (BOT_TOKEN
+ * present); without a client — offline mode, e.g. the Phase 2A preview —
+ * they are logged as skipped and the lifecycle still completes. Every
+ * outbound text passes the Telegram-safe HTML validator as a final gate.
+ * Nothing is executed for noop actions.
  *
  * Logging discipline: only update_id (the idempotency key), stable event
  * names, status words, action types, and role names are logged. Telegram
@@ -37,7 +39,9 @@ import {
 import type { ParsedUpdate } from '../adapters/telegram/update-parser';
 import type { ActorResolution, AuthorizationService } from '../admin/authorization';
 import type { CommandRouter, TelegramAction } from '../admin/command-router';
-import { toAppError } from '../shared/errors/app-error';
+import { isSafeTelegramHtml, type TelegramSafeHtml } from '../admin/telegram-html';
+import type { TelegramBotApiClient } from '../adapters/telegram/bot-api-client';
+import { AppError, toAppError } from '../shared/errors/app-error';
 import type { Clock } from '../shared/time/clock';
 import type { Logger } from '../observability/logger';
 
@@ -47,6 +51,8 @@ export interface TelegramIngressDeps {
   readonly executor: DbExecutor;
   readonly authorization: AuthorizationService;
   readonly commandRouter: CommandRouter;
+  /** Optional: absent (no BOT_TOKEN) means offline mode — no live calls. */
+  readonly botApi?: TelegramBotApiClient;
   readonly clock: Clock;
   readonly logger: Logger;
 }
@@ -57,21 +63,38 @@ export interface TelegramIngress {
 }
 
 export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngress {
-  const { executor, authorization, commandRouter, clock, logger } = deps;
+  const { executor, authorization, commandRouter, botApi, clock, logger } = deps;
 
-  /**
-   * Execute a routed action. Without an injected Bot API client (offline
-   * mode) outbound actions are logged as skipped — the durable lifecycle
-   * and authorization decisions still complete and are observable.
-   */
+  async function sendSafely(chatId: number, text: TelegramSafeHtml): Promise<void> {
+    if (botApi === undefined) {
+      logger.info('telegram.action.skipped_offline', { action: 'send_message' });
+      return;
+    }
+    // Defense-in-depth: only builder-composed text may reach the Bot API.
+    if (!isSafeTelegramHtml(text)) {
+      logger.error('telegram.action.html_rejected', { action: 'send_message' });
+      throw new AppError('internal_error');
+    }
+    await botApi.sendMessage({ chatId, text });
+  }
+
+  /** Execute a routed action against the injected Bot API client. */
   async function executeAction(action: TelegramAction): Promise<void> {
     switch (action.type) {
       case 'noop':
         return;
       case 'send_message':
+        await sendSafely(action.chatId, action.text);
+        return;
       case 'denied':
+        await sendSafely(action.chatId, action.text);
+        return;
       case 'answer_callback':
-        logger.info('telegram.action.skipped_offline', { action: action.type });
+        if (botApi === undefined) {
+          logger.info('telegram.action.skipped_offline', { action: 'answer_callback' });
+          return;
+        }
+        await botApi.answerCallbackQuery({ callbackQueryId: action.callbackQueryId });
         return;
     }
   }

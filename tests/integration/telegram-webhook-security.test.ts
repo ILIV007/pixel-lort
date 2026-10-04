@@ -15,13 +15,13 @@ import { createLogger, type LogSink } from '../../src/observability/logger';
 
 const FAKE_WEBHOOK_SECRET = 'test-webhook-secret-0000000000000000';
 const FAKE_OWNER_ID = '1000000001';
-const FAKE_BOT_TOKEN = '0000000000:FAKE-FAKE-FAKE-FAKE-FAKE-FAKE-000000';
 
 const ENABLED_ENV = {
   TELEGRAM_INGRESS_ENABLED: 'true',
   WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
   OWNER_TELEGRAM_ID: FAKE_OWNER_ID,
-  BOT_TOKEN: FAKE_BOT_TOKEN,
+  // No BOT_TOKEN: the ingress runs in documented OFFLINE mode — no client is
+  // constructed, so no test can ever reach the network.
   DB: env.DB,
 };
 
@@ -96,7 +96,6 @@ describe('POST /telegram/webhook — durable idempotency requirements', () => {
         TELEGRAM_INGRESS_ENABLED: 'true',
         WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
         OWNER_TELEGRAM_ID: FAKE_OWNER_ID,
-        BOT_TOKEN: FAKE_BOT_TOKEN,
         // No DB binding: durable update claims are impossible -> unavailable.
       },
       testCtx(),

@@ -31,6 +31,7 @@ import { createTelegramIngress } from '../../../application/telegram-ingress';
 import { createAuthorizationService } from '../../../admin/authorization';
 import { createCommandRouter } from '../../../admin/command-router';
 import { createDbExecutor } from '../../../adapters/db/db-executor';
+import { createBotApiClient } from '../../../adapters/telegram/bot-api-client';
 import { createAdminRoleLookup } from '../../../adapters/telegram/admin-lookup';
 import { parseTelegramUpdate } from '../../../adapters/telegram/update-parser';
 import { systemClock } from '../../../shared/time/clock';
@@ -177,6 +178,12 @@ export async function handleTelegramWebhook(
       applicationVersion: parseWorkerConfig(env as Readonly<Record<string, unknown>>).config
         .APP_VERSION,
     }),
+    // Offline mode without BOT_TOKEN: outbound actions are skipped (no live
+    // Telegram connection exists in Phase 2A).
+    botApi:
+      phase2.config.botToken !== undefined
+        ? createBotApiClient({ botToken: phase2.config.botToken, logger: ctx.logger })
+        : undefined,
     clock: systemClock,
     logger: ctx.logger,
   });

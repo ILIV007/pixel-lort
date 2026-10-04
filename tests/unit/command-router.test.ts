@@ -78,7 +78,13 @@ describe('allowlist behavior', () => {
 describe('authorization outcomes', () => {
   it('denies unauthorized senders of allowlisted commands minimally', () => {
     const action = router.route(message(), UNAUTHORIZED);
-    expect(action).toEqual({ type: 'denied', chatId: 555, reason: 'unauthorized' });
+    expect(action.type).toBe('denied');
+    if (action.type === 'denied') {
+      expect(action.chatId).toBe(555);
+      expect(action.reason).toBe('unauthorized');
+      // The denial text is the fixed minimal Persian string.
+      expect(action.text).toBe('دسترسی مجاز نیست.');
+    }
   });
 
   it('gives no feedback to unauthorized probing of non-allowlisted commands', () => {

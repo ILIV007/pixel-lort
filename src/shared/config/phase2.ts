@@ -12,11 +12,13 @@
  * Fail-closed rules (ADR-0008 phase-scoped readiness, extended to Phase 2):
  * - Format validation runs whenever a value is PRESENT, regardless of the
  *   flag; a present-but-invalid value is never silently ignored.
- * - While ingress is ENABLED, the three Phase 2 secrets are REQUIRED:
- *   readiness fails closed when any of them is absent or invalid. This is
- *   what keeps preview/production honest once Telegram ingress is switched
- *   on. (Phase 2A configures NO Cloudflare secrets — with the flag left
- *   'false' every environment stays ready, and the webhook route 404s.)
+ * - While ingress is ENABLED, the secrets its Phase 2A features consume are
+ *   REQUIRED: WEBHOOK_SECRET (webhook security) and OWNER_TELEGRAM_ID
+ *   (authorization bootstrap). Readiness fails closed when either is absent
+ *   or invalid. BOT_TOKEN is validated whenever present but stays OPTIONAL
+ *   until Phase 2B enables live Telegram wiring — without it the ingress
+ *   runs in documented OFFLINE mode (routed actions are skipped, never
+ *   executed against the network).
  * - Validation issues carry FIELD NAMES and stable reason codes only —
  *   never values.
  * - Local development and offline tests use explicit fake fixtures that
@@ -111,12 +113,14 @@ export const PHASE_2_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
   },
 ]);
 
-/** Names of the secrets that become REQUIRED once ingress is enabled. */
-export const INGRESS_REQUIRED_SECRETS = [
-  'BOT_TOKEN',
-  'WEBHOOK_SECRET',
-  'OWNER_TELEGRAM_ID',
-] as const;
+/**
+ * Names of the secrets that become REQUIRED once ingress is enabled:
+ * WEBHOOK_SECRET (webhook security) and OWNER_TELEGRAM_ID (authorization
+ * bootstrap). BOT_TOKEN is deliberately ABSENT — it is validated whenever
+ * present, but stays optional so the ingress runs in documented OFFLINE
+ * mode (routed actions skipped, no live calls) until Phase 2B wiring.
+ */
+export const INGRESS_REQUIRED_SECRETS = ['WEBHOOK_SECRET', 'OWNER_TELEGRAM_ID'] as const;
 
 export interface TelegramPhase2Config {
   readonly ingressEnabled: boolean;
