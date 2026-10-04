@@ -23,11 +23,15 @@
  *   correlation-ID behavior are applied by the shared worker/response paths.
  */
 import { AppError, type AppErrorCode } from '../../../shared/errors/app-error';
+import { parseWorkerConfig } from '../../../shared/config/phase0';
 import { parseTelegramPhase2Config } from '../../../shared/config/phase2';
 import { timingSafeEqualStrings } from '../../../shared/security/timing-safe';
 import type { WorkerEnv } from '../../../shared/types/env';
 import { createTelegramIngress } from '../../../application/telegram-ingress';
+import { createAuthorizationService } from '../../../admin/authorization';
+import { createCommandRouter } from '../../../admin/command-router';
 import { createDbExecutor } from '../../../adapters/db/db-executor';
+import { createAdminRoleLookup } from '../../../adapters/telegram/admin-lookup';
 import { parseTelegramUpdate } from '../../../adapters/telegram/update-parser';
 import { systemClock } from '../../../shared/time/clock';
 import type { Logger } from '../../../observability/logger';
@@ -161,9 +165,18 @@ export async function handleTelegramWebhook(
     ctx.logger.warn('telegram.webhook.unavailable', { reason: 'db_binding_missing' });
     throw new AppError('service_unavailable');
   }
+  const executor = createDbExecutor(env.DB);
 
   const ingress = createTelegramIngress({
-    executor: createDbExecutor(env.DB),
+    executor,
+    authorization: createAuthorizationService({
+      ownerTelegramId: phase2.config.ownerTelegramId,
+      lookup: createAdminRoleLookup(executor),
+    }),
+    commandRouter: createCommandRouter({
+      applicationVersion: parseWorkerConfig(env as Readonly<Record<string, unknown>>).config
+        .APP_VERSION,
+    }),
     clock: systemClock,
     logger: ctx.logger,
   });

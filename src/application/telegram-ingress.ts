@@ -16,9 +16,17 @@
  * duplicate deliveries produce exactly one winner; losers see the existing
  * row's status.
  *
+ * Processing: unsupported updates are acknowledged; commands are routed by
+ * the command router against a fail-closed actor resolution and produce
+ * TYPED actions (send_message / denied / noop). Outbound actions execute
+ * through the injected Bot API client when one is configured; without a
+ * client (offline mode — e.g. no BOT_TOKEN in Phase 2A preview) they are
+ * logged as skipped. Nothing is executed for noop actions.
+ *
  * Logging discipline: only update_id (the idempotency key), stable event
- * names, and status words are logged. Telegram payload fields (text, chat
- * ids, user ids, callback data) never become log fields.
+ * names, status words, action types, and role names are logged. Telegram
+ * payload fields (text, chat ids, user ids, callback data) never become
+ * log fields.
  */
 import type { DbExecutor } from '../adapters/db/db-executor';
 import {
@@ -27,6 +35,8 @@ import {
   markTelegramUpdateProcessed,
 } from '../adapters/telegram/update-claims';
 import type { ParsedUpdate } from '../adapters/telegram/update-parser';
+import type { ActorResolution, AuthorizationService } from '../admin/authorization';
+import type { CommandRouter, TelegramAction } from '../admin/command-router';
 import { toAppError } from '../shared/errors/app-error';
 import type { Clock } from '../shared/time/clock';
 import type { Logger } from '../observability/logger';
@@ -35,6 +45,8 @@ export type TelegramUpdateOutcome = 'processed' | 'duplicate' | 'failed';
 
 export interface TelegramIngressDeps {
   readonly executor: DbExecutor;
+  readonly authorization: AuthorizationService;
+  readonly commandRouter: CommandRouter;
   readonly clock: Clock;
   readonly logger: Logger;
 }
@@ -45,7 +57,24 @@ export interface TelegramIngress {
 }
 
 export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngress {
-  const { executor, clock, logger } = deps;
+  const { executor, authorization, commandRouter, clock, logger } = deps;
+
+  /**
+   * Execute a routed action. Without an injected Bot API client (offline
+   * mode) outbound actions are logged as skipped — the durable lifecycle
+   * and authorization decisions still complete and are observable.
+   */
+  async function executeAction(action: TelegramAction): Promise<void> {
+    switch (action.type) {
+      case 'noop':
+        return;
+      case 'send_message':
+      case 'denied':
+      case 'answer_callback':
+        logger.info('telegram.action.skipped_offline', { action: action.type });
+        return;
+    }
+  }
 
   async function processUpdate(update: ParsedUpdate): Promise<TelegramUpdateOutcome> {
     let claim: Awaited<ReturnType<typeof claimTelegramUpdate>>;
@@ -70,14 +99,24 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     logger.info('telegram.update.claimed', { updateId: update.updateId });
 
     try {
-      // Claimed-update processing. Phase 2A slices: durable lifecycle first;
-      // authorization, command routing, and Telegram actions attach here in
-      // their owning commits (no publishing controls exist in Phase 2A).
+      const actor: ActorResolution =
+        update.kind === 'unsupported'
+          ? { kind: 'unauthorized' }
+          : await authorization.resolveActor(update.fromUserId);
+      const action = commandRouter.route(update, actor);
+      await executeAction(action);
+
       const marked = await markTelegramUpdateProcessed(executor, update.updateId, clock.now());
       if (!marked) {
         logger.warn('telegram.update.mark_skipped', { updateId: update.updateId });
       }
-      logger.info('telegram.update.processed', { updateId: update.updateId, action: 'noop' });
+      logger.info('telegram.update.processed', {
+        updateId: update.updateId,
+        action: action.type,
+        noopReason: action.type === 'noop' ? action.reason : undefined,
+        authorized: actor.kind === 'authorized',
+        role: actor.kind === 'authorized' ? actor.role : undefined,
+      });
       return 'processed';
     } catch (error) {
       logger.warn('telegram.update.failed', {
