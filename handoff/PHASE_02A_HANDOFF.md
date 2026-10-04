@@ -474,3 +474,194 @@ npm run check` — exit 0 (lint, prettier, strict typecheck, tests, secret
 
 Ancestry: `446f3f1` (authoritative main) → `8f23b42` (v1.2.0 head) → this
 commit. No history rewritten.
+
+---
+
+# Second correction round — v1.2.2 (Phase 2A second correction review: CHANGES REQUIRED)
+
+## D1. Scope and authority
+
+Alexios' second Phase 2A correction review (verdict CHANGES REQUIRED)
+against branch `phase/02a-telegram-ingress` at HEAD `d49ba6862b7214d55886512ce96317d91de918e0`
+(base Phase 2A HEAD `8f23b42`, main baseline
+`446f3f14865a1ce57871f50d1979fbe5494a1e4a`, version 1.2.1, independently
+verified 417/417 tests and 24/24 D1 tests). The first correction fixed the
+security boundaries but left two reliability defects in the durable update
+state machine. This round implements the four required fixes in ONE focused
+correction commit, bumps the artifact version to **1.2.2**, adds migration
+0002 (schema v2), and adds ADR-0030/0031/0032. Sections 1–14 (v1.2.0) and
+C1–C10 (v1.2.1) above are preserved as history.
+
+## D2. FIX 1 — Recover abandoned claimed updates (ADR-0030, migration 0002)
+
+- **Migration `0002_telegram_update_lifecycle.sql`** (schema version 1 → 2;
+  0001 untouched): adds `telegram_updates.claim_expires_at INTEGER` (the
+  claim lease), `failure_class TEXT NULL` (CHECK retryable/permanent/NULL),
+  `attempt_count INTEGER NOT NULL DEFAULT 0` (CHECK >= 0), and the
+  `idx_tg_updates_lifecycle (status, claim_expires_at)` recovery index.
+  Advances `schema_metadata` to `schema_version = 2` /
+  `migration_id = 0002_telegram_update_lifecycle` inside the same atomic
+  batch. `SCHEMA_VERSION` config/defaults updated to 2 everywhere.
+- Every new claim writes a FULL lease state: `status='claimed'`,
+  `claim_expires_at = now + TELEGRAM_UPDATE_CLAIM_LEASE_MS`,
+  `failure_class = NULL`, `attempt_count = 1`.
+- **Lease duration centralized:** `TELEGRAM_UPDATE_CLAIM_LEASE_MS = 5 min`
+  in `src/adapters/telegram/update-claims.ts`, documented (far above the
+  bounded webhook processing time, far below any operational horizon), and
+  boundary-tested at lease − 1 ms (active → in_flight), exact expiry
+  (stale → reclaimable), and after expiry (stale). No wall-clock calls in
+  repositories — time stays explicitly injected.
+- Active unexpired lease → explicit `in_flight` outcome. An in-flight
+  delivery is NOT acknowledged as a successful duplicate: the webhook
+  returns safe retryable 503 semantics so Telegram keeps redelivering until
+  the lease resolves (winner completes → later delivery sees
+  `already_processed`; or lease expires → stale reclaim).
+- Expired lease (or NULL lease from a pre-0002 legacy row) → atomic guarded
+  reclaim (`WHERE status='claimed' AND (claim_expires_at IS NULL OR
+claim_expires_at <= ?)`): exactly one concurrent winner; losers observe
+  the winner's FRESH lease as in-flight. Reclaim refreshes the lease,
+  clears `failure_class`, resets `processed_at`, and increments
+  `attempt_count`.
+- **Marking-failure recovery sequence proven end to end** (integration
+  test): processing fails retryably AND marking the failure fails → 503
+  with the row still claimed under its lease → next delivery in-flight
+  503 → lease expiry → `reclaimed_stale` → action executes once →
+  processed (attempt_count 2).
+- Claim outcomes now explicitly: `claimed`, `reclaimed_retryable`,
+  `reclaimed_stale`, `already_processed`, `permanently_failed`, `in_flight`.
+
+## D3. FIX 2 — Distinguish retryable and permanent failure persistence (ADR-0031)
+
+- Retryable failure: `status='failed'`, `failure_class='retryable'`, lease
+  cleared; webhook 503; later deliveries may atomically reclaim
+  (`reclaimed_retryable`).
+- Permanent failure: `status='failed'`, `failure_class='permanent'`, lease
+  cleared; webhook 200; the row is TERMINAL — reclaim is guarded to
+  `failure_class = 'retryable'` (plus NULL fail-safe) so a permanent row can
+  never be reclaimed; every later duplicate/redelivery observes the explicit
+  `permanently_failed` outcome and answers 200 WITHOUT executing.
+- The v1.2.1 test that proved a permanent failed update is repeatedly
+  reclaimed was REMOVED/REWRITTEN. New tests prove: permanent failure
+  executes at most once (counting client); later duplicates return 200
+  without executing; retryable failures remain reclaimable; concurrent
+  retryable reclaim has exactly one winner; concurrent stale-claim reclaim
+  has exactly one winner; processed is never reclaimable; permanent failed
+  is never reclaimable.
+- Legacy backfill (documented, fail-safe): migration 0002 backfills every
+  pre-0002 failed row to `failure_class='retryable'` — consistent with the
+  ADR-0027 principle that a wrong retryable guess is bounded while a wrong
+  permanent guess loses the update. Proven by the populated v1→v2 migration
+  tests (legacy rows remain valid and recoverable).
+
+## D4. FIX 3 — Honest external side-effect semantics (ADR-0032)
+
+- No exactly-once claim is made anywhere for Telegram API side effects. The
+  contract is stated as: **durable at-least-once processing with duplicate
+  suppression before execution, plus bounded duplicate risk for ambiguous
+  external side effects.** Exactly-once database claim ownership does NOT
+  imply exactly-once Telegram message delivery (sendMessage has no
+  application-provided idempotency key).
+- ADR-0025's "exactly-once command execution" wording is superseded via an
+  amendment note; ADR-0027 carries a status note (completed by 0030/0031);
+  README, ARCHITECTURE, SECURITY_MODEL, ROADMAP, and this handoff use the
+  honest wording. Deterministic update_id deduplication is preserved.
+- A new integration test documents and proves the ambiguous window: the
+  outbound send SUCCEEDS, the processed transition (and the failure
+  marking) fail → 503; after lease expiry the next delivery re-executes the
+  action and the message is delivered a SECOND time (sends = 2), after
+  which duplicate suppression resumes. This is the documented bounded
+  duplicate risk — not an exactly-once guarantee.
+- Roadmap gate recorded (Phase 8, docs/ROADMAP.md): publishing-side
+  duplicate mitigation and reconciliation MUST exist before autonomous
+  channel publishing is enabled. No outbox was added in this correction
+  (the architecture does not yet support one safely — no publishing exists).
+
+## D5. FIX 4 — Version and example consistency (1.2.2)
+
+- Version bumped consistently to **1.2.2**: package.json and
+  package-lock.json (via `npm version` tooling), wrangler.jsonc (root +
+  preview), `DEFAULT_APP_VERSION`, `/version` tests and expectations,
+  test helpers, and documentation.
+- The specific defects were corrected: `.env.example` now carries
+  `APP_VERSION=1.2.2` (was 1.1.0) and `.dev.vars.example` carries
+  `APP_VERSION=1.2.2` (was 1.2.0).
+- **New automated version-consistency gate** `scripts/check-versions.mjs`
+  (wired into `npm run check` as `npm run check:versions`): package.json is
+  the source of truth; the script fails the build on drift across
+  package-lock.json, wrangler.jsonc vars, `DEFAULT_APP_VERSION`,
+  `.env.example`, `.dev.vars.example`, the test env helper — and also pins
+  the schema-version touch points (`EXPECTED_SCHEMA_VERSION`, wrangler
+  `SCHEMA_VERSION`, `.env.example`). Historical ADR/handoff text is
+  intentionally not scanned (clearly-identified history may retain old
+  versions).
+
+## D6. Migration and database tests
+
+- Append-only test migration plan extended with the real 0002 descriptor;
+  0001 unchanged.
+- `tests/integration/migration-0002.test.ts` (new, isolated storage):
+  applies ONLY 0001 to build a genuine populated schema-v1 database, seeds
+  legacy telegram_updates rows (claimed without lease, processed, failed),
+  applies the real plan (only 0002 pending), and proves: schema version
+  becomes 2 with the 0002 migration id; existing rows remain valid; the
+  legacy failed row is backfilled retryable and stays reclaimable; the
+  legacy lease-less claimed row is recoverable via stale reclaim; applying
+  twice is a no-op; the new CHECK constraints are enforced.
+- `migration-plan.test.ts` / `migration-plan-failures.test.ts` reworked for
+  schema v2 (partial-plan v1 baselines; rollback atomicity recovery now
+  lands at the real version 2). The synthetic TEST-ONLY version-2 fixture
+  is retained for plan-mechanics proofs.
+- D1 schema contract updated: exactly 30 indexes (29 approved +
+  `idx_tg_updates_lifecycle`), schema metadata pinned to v2, lifecycle
+  columns + CHECKs asserted.
+- `npm run test:db` now explicitly runs the migration/schema suites
+  (d1-schema, db-boundary, migration-plan, migration-plan-failures,
+  migration-0002). NO remote migration was applied.
+
+## D7. Documentation
+
+- New ADRs: ADR-0030 (claimed-update lease and stale reclaim), ADR-0031
+  (permanent vs retryable failure persistence), ADR-0032 (honest
+  at-least-once side-effect semantics); ADR index updated; ADR-0025 and
+  ADR-0027 carry clearly-marked amendment notes (history preserved).
+- Updated: README.md, docs/ARCHITECTURE.md (§3.7/§3.8), docs/SECURITY_MODEL.md
+  (trust boundary + prohibited practices), docs/ROADMAP.md (Phase 2A + the
+  Phase 8 publishing-duplicate-mitigation gate), migrations/README.md, and
+  this handoff (second correction section appended, earlier history
+  preserved). A claimed row is described as recoverable ONLY through the
+  tested lease-expiry path.
+
+## D8. Verification (second correction round)
+
+- Clean-environment gate (exact commands): `rm -rf node_modules dist
+.wrangler && npm ci && npm run check` — exit 0 (lint, prettier, strict
+  typecheck, tests, secret-scanner self-test, secret scan,
+  version-consistency gate, offline dry-run build). `npm run test:db` green
+  (d1-schema, db-boundary, migration-plan, migration-plan-failures,
+  migration-0002 run explicitly; migration tests also run inside
+  `npm run check`).
+- Suite totals: **440 tests in 34 files, all passing** (v1.2.1 baseline was
+  417 tests in 33 files; this round adds 23 tests and the new
+  `tests/integration/migration-0002.test.ts` file, and extends the claims /
+  reclaim / pipeline / plan / schema / version suites). Phase 1A/0 suites
+  unchanged and green.
+- Secret scanner: 164 files scanned, 0 findings; scanner self-test 10/10.
+- Version-consistency gate: application version 1.2.2 and schema version 2
+  consistent across all active configuration files.
+- Dry-run build: OK (offline `wrangler deploy --dry-run`).
+- No deployment, no push, no webhook registration, no resource creation,
+  no remote migration, no credentials, no live Telegram traffic.
+
+## D9. Correction commit
+
+| Round        | Commit          | Subject                                          |
+| ------------ | --------------- | ------------------------------------------------ |
+| v1.2.2 (fix) | _(this commit)_ | fix: complete Telegram update lifecycle recovery |
+
+Ancestry: `446f3f1` (authoritative main) → `8f23b42` (v1.2.0 head) →
+`d49ba68` (v1.2.1 correction head) → this commit. No history rewritten.
+
+Single artifact: `pixel-lort-phase02a-v1.2.2.zip` (full working tree +
+complete `.git` history at the ZIP root; excludes node_modules, dist,
+.wrangler, coverage, environment/secret files, credentials, logs, temporary
+files, and previous ZIP artifacts).

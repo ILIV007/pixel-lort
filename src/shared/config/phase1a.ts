@@ -23,8 +23,8 @@ import { defineConfigSpec, type ConfigSpec } from './spec';
 import { validateConfig, type ConfigIssue, type ConfigValidationResult } from './validate';
 import type { Environment } from './phase0';
 
-/** The approved Phase 1A schema version (migration 0001 — ADR-0019). */
-export const EXPECTED_SCHEMA_VERSION = 1;
+/** The expected schema version (migrations 0001+0002 — ADR-0019/0030). */
+export const EXPECTED_SCHEMA_VERSION = 2;
 
 /** Local-development placeholder commit identifier (invalid outside development). */
 export const DEFAULT_APP_COMMIT = 'local-dev';

@@ -84,6 +84,11 @@ function interceptingExecutor(shouldReject: (statement: DbStatement) => boolean)
   };
 }
 
+/** Match the guarded terminal-state transitions (processed/failed marking). */
+function isTerminalTransition(statement: DbStatement): boolean {
+  return /UPDATE telegram_updates\s+SET status = '(processed|failed)'/s.test(statement.sql);
+}
+
 function buildDeps(overrides: Partial<TelegramIngressDeps> = {}): TelegramIngressDeps {
   const executor = overrides.executor ?? createDbExecutor(env.DB);
   return {
@@ -94,7 +99,7 @@ function buildDeps(overrides: Partial<TelegramIngressDeps> = {}): TelegramIngres
         ownerTelegramId: OWNER_ID,
         lookup: createAdminRoleLookup(executor),
       }),
-    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.1' }),
+    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.2' }),
     botApi: overrides.botApi,
     clock: overrides.clock ?? fixedClock(NOW),
     logger: overrides.logger ?? captureLogger().logger,
@@ -125,20 +130,32 @@ describe('duplicate deliveries never execute the command twice', () => {
     expect(sends).toHaveLength(1);
   });
 
-  it('produces exactly one winner for concurrent duplicate claims', async () => {
+  it('produces exactly one execution winner for concurrent duplicate claims', async () => {
     const { client, sends } = countingClient();
     const ingress = createTelegramIngress(buildDeps({ botApi: client }));
     const update = ownerCommand(9002, '/help');
 
-    const outcomes = await Promise.all([
+    const settled = await Promise.allSettled([
       ingress.processUpdate(update),
       ingress.processUpdate(update),
       ingress.processUpdate(update),
     ]);
 
-    expect(outcomes.filter((o) => o === 'processed')).toHaveLength(1);
-    expect(outcomes.filter((o) => o === 'duplicate')).toHaveLength(2);
-    expect(outcomes.filter((o) => o === 'failed')).toHaveLength(0);
+    // Exactly one delivery wins the durable claim and executes.
+    const processed = settled.filter(
+      (outcome) => outcome.status === 'fulfilled' && outcome.value === 'processed',
+    );
+    expect(processed).toHaveLength(1);
+    // Concurrent losers observe an ACTIVE lease (in_flight) — deliberately
+    // NOT acknowledged as successful duplicates: they answer safe retryable
+    // 503 semantics so Telegram keeps redelivering until the lease resolves
+    // (ADR-0030). None of them may resolve as a false 'duplicate'.
+    const rejected = settled.filter(
+      (outcome) =>
+        outcome.status === 'rejected' &&
+        (outcome.reason as { code?: string }).code === 'service_unavailable',
+    );
+    expect(rejected).toHaveLength(2);
     // Exactly one routed response despite three deliveries.
     expect(sends).toHaveLength(1);
   });
@@ -171,12 +188,9 @@ describe('failed processing is observable and never falsely processed', () => {
     expect(sends).toHaveLength(0);
   });
 
-  it('keeps the row claimed (recoverable) when even the failure marking fails', async () => {
+  it('keeps the row claimed under its lease when even the failure marking fails', async () => {
     const { client } = countingClient();
-    const failingExecutor = interceptingExecutor((statement) => {
-      // Simulate a D1 outage for ALL terminal-state transitions.
-      return statement.sql.startsWith('UPDATE telegram_updates SET status = ?');
-    });
+    const failingExecutor = interceptingExecutor(isTerminalTransition);
     const ingress = createTelegramIngress(buildDeps({ executor: failingExecutor, botApi: client }));
 
     await expect(ingress.processUpdate(ownerCommand(9011, '/status'))).rejects.toMatchObject({
@@ -186,7 +200,10 @@ describe('failed processing is observable and never falsely processed', () => {
       sql: 'SELECT status FROM telegram_updates WHERE update_id = ?',
       params: [9011],
     });
-    // NOT processed, NOT failed — claimed remains the observable truth.
+    // NOT processed, NOT failed — claimed remains the observable truth; the
+    // row carries a lease, so after expiry a later delivery reclaims the
+    // abandoned claim (the full recovery sequence is proven in
+    // telegram-update-reclaim.test.ts, ADR-0030).
     expect(row?.status).toBe('claimed');
   });
 

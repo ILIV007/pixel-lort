@@ -23,12 +23,17 @@
  * - The request body, the secret header value, message text, usernames,
  *   phone numbers, and the Bot Token are NEVER logged. Logs carry stable
  *   event names and reason codes only.
- * - Response semantics mirror the durable update lifecycle (ADR-0027):
- *     - duplicate/processed/permanent-failure outcomes answer the fast
- *       deterministic 200 {"ok":true};
+ * - Response semantics mirror the durable update lifecycle (ADR-0027/0030/0031):
+ *     - duplicate-of-processed and TERMINAL permanent-failure outcomes answer
+ *       the fast deterministic 200 {"ok":true};
  *     - a RETRYABLE processing failure REJECTS with HTTP 503 semantics so
- *       Telegram redelivers and the failed update is reclaimed — a
- *       temporary failure can never be falsely acknowledged as success.
+ *       Telegram redelivers and the failed row is reclaimed — a temporary
+ *       failure can never be falsely acknowledged as success;
+ *     - an IN-FLIGHT update (an active claim lease held by another delivery)
+ *       ALSO answers safe retryable 503 semantics — never a false-success
+ *       200 — so Telegram keeps redelivering until the lease resolves (the
+ *       winner completes, or the lease expires and the abandoned claim
+ *       becomes reclaimable; ADR-0030).
  * - Responses are fast and deterministic; standard security headers and
  *   correlation-ID behavior are applied by the shared worker/response paths.
  */
@@ -229,10 +234,12 @@ export async function handleTelegramWebhook(
     clock: systemClock,
     logger: ctx.logger,
   });
-  // Outcome semantics (ADR-0027): duplicates and permanent failures answer
-  // the deterministic 2xx; a RETRYABLE failure REJECTS with 503 semantics
-  // (the durable telegram_updates row is the source of truth and Telegram
-  // redelivery reclaims the failed row).
+  // Outcome semantics (ADR-0027/0030/0031): duplicates of PROCESSED updates
+  // and TERMINAL permanent failures answer the deterministic 2xx; an
+  // IN-FLIGHT update (active lease elsewhere) or a RETRYABLE failure
+  // REJECTS with 503 semantics (the durable telegram_updates row is the
+  // source of truth; Telegram redelivery either reclaims the failed row,
+  // reclaims the stale lease, or observes the winner's completion).
   await ingress.processUpdate(parseResult.update);
   return jsonResponse(200, { ok: true });
 }

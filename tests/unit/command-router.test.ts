@@ -13,9 +13,9 @@ const OWNER: ActorResolution = { kind: 'authorized', role: 'owner' };
 const VIEWER: ActorResolution = { kind: 'authorized', role: 'viewer' };
 const UNAUTHORIZED: ActorResolution = { kind: 'unauthorized' };
 
-const router = createCommandRouter({ applicationVersion: '1.2.1' });
+const router = createCommandRouter({ applicationVersion: '1.2.2' });
 const targetedRouter = createCommandRouter({
-  applicationVersion: '1.2.1',
+  applicationVersion: '1.2.2',
   expectedBotUsername: 'Pixel_Admin_Bot',
 });
 
@@ -108,10 +108,10 @@ describe('authorization outcomes', () => {
 describe('response content', () => {
   it('interpolates the escaped application version into /version and /status', () => {
     const versionAction = asSent(router.route(message({ command: 'version' }), OWNER));
-    expect(versionAction.text).toContain('1.2.1');
+    expect(versionAction.text).toContain('1.2.2');
 
     const statusAction = asSent(router.route(message({ command: 'status' }), OWNER));
-    expect(statusAction.text).toContain('1.2.1');
+    expect(statusAction.text).toContain('1.2.2');
   });
 
   it('does not echo sender-controlled content', () => {

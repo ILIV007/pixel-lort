@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
 import {
   MIGRATIONS,
-  SYNTHETIC_MIGRATION_0002,
   MigrationPlanError,
   applyMigrations,
   type MigrationDescriptor,
@@ -29,11 +28,8 @@ import {
 
 const db: D1Database = env.DB;
 
-/** The real approved migration (target schema version 1). */
+/** The real approved migrations (0001 = schema v1; 0002 = lifecycle, schema v2). */
 const V1 = MIGRATIONS[0]!;
-
-/** A plan with the synthetic TEST-ONLY version-2 migration appended. */
-const PLAN_V1_V2: readonly MigrationDescriptor[] = [V1, SYNTHETIC_MIGRATION_0002];
 
 /** A deliberately broken pending migration: statement 3 fails. */
 const BROKEN_V2: MigrationDescriptor = {
@@ -123,7 +119,9 @@ describe('applyMigrations — invalid plans never alter the database (proof 7)',
 
 describe('applyMigrations — failure atomicity (proof 6)', () => {
   it('rolls back a failed pending migration completely, keeping the previous version', async () => {
-    await applyMigrations(db); // database at version 1 (nothing applied before this in this file)
+    // Build a genuine version-1 database (partial plan — nothing applied
+    // before this in this file).
+    await applyMigrations(db, [V1]);
 
     await expect(applyMigrations(db, [V1, BROKEN_V2])).rejects.toThrowError();
 
@@ -136,10 +134,14 @@ describe('applyMigrations — failure atomicity (proof 6)', () => {
     expect(await appliedMigrationId()).toBe('0001_initial_schema');
 
     // Version-1 objects are intact and the database can still be upgraded by
-    // a valid pending migration afterwards (recovery path).
-    const recovery = await applyMigrations(db, PLAN_V1_V2);
+    // a valid pending migration afterwards (recovery path) — here via the
+    // REAL migration 0002, landing at the shipped schema version 2.
+    const recovery = await applyMigrations(db);
     expect(recovery.observedVersion).toBe(1);
-    expect(recovery.applied.map((migration) => migration.id)).toEqual(['test_0002_synthetic']);
+    expect(recovery.applied.map((migration) => migration.id)).toEqual([
+      '0002_telegram_update_lifecycle',
+    ]);
     expect(await appliedSchemaVersion()).toBe(2);
+    expect(await appliedMigrationId()).toBe('0002_telegram_update_lifecycle');
   });
 });

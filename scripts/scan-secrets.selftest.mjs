@@ -103,7 +103,7 @@ const CLEAN_LINES = [
   'Bearer <token> Bearer ${TOKEN} Bearer token',
   'ENVIRONMENT=development',
   'LOG_LEVEL=info',
-  'APP_VERSION=1.1.0',
+  'APP_VERSION=1.2.2',
   'visit https://example.com/docs for help',
   '-----BEGIN CERTIFICATE-----',
   'x-request-id: integration-test-req-0001',

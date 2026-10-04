@@ -3,13 +3,14 @@ import { env } from 'cloudflare:test';
 import { MIGRATIONS, applyMigrations, splitSqlStatements } from '../helpers/migrations';
 
 /**
- * Phase 1A schema-contract tests (ADR-0019).
+ * Schema-contract tests (ADR-0019, extended by ADR-0030/0031 — schema v2).
  *
  * These tests run inside workerd against an isolated local D1 database
  * (wrangler.jsonc placeholder binding — no Cloudflare resource). They prove:
- * - the migration set applies atomically and idempotently;
+ * - the migration set (0001 + 0002) applies atomically and idempotently;
  * - the resulting schema contains EXACTLY the approved tables and indexes;
- * - foreign keys, CHECK constraints and uniqueness rules are enforced;
+ * - foreign keys, CHECK constraints and uniqueness rules are enforced,
+ *   including the migration-0002 lifecycle columns on telegram_updates;
  * - representative insert/read/update flows work end-to-end;
  * - application schema metadata is present and distinct from wrangler's
  *   migration bookkeeping.
@@ -49,7 +50,7 @@ const EXPECTED_TABLES: readonly string[] = [
   'telegram_updates',
 ];
 
-/** All 29 approved blueprint indexes (named; auto-indexes are internal). */
+/** All 29 approved blueprint indexes + the Phase 2A lifecycle index (0002). */
 const EXPECTED_INDEXES: readonly string[] = [
   'idx_action_tokens_user_exp',
   'idx_admin_sessions_user_exp',
@@ -79,6 +80,7 @@ const EXPECTED_INDEXES: readonly string[] = [
   'idx_stories_state_priority',
   'idx_stories_type_time',
   'idx_story_entities_entity',
+  'idx_tg_updates_lifecycle',
   'idx_tg_updates_received',
 ];
 
@@ -113,15 +115,15 @@ beforeEach(async () => {
 });
 
 describe('migration application', () => {
-  it('applies every migration as an atomic batch and reports metadata', async () => {
+  it('applies every migration as an atomic batch and reports metadata (schema v2)', async () => {
     expect(await namedTables()).toEqual([...EXPECTED_TABLES].sort());
 
     const metadata = await db
       .prepare(`SELECT key, value FROM schema_metadata ORDER BY key`)
       .all<{ key: string; value: string }>();
     const byKey = new Map(metadata.results.map((row) => [row.key, row.value]));
-    expect(byKey.get('schema_version')).toBe('1');
-    expect(byKey.get('migration_id')).toBe('0001_initial_schema');
+    expect(byKey.get('schema_version')).toBe('2');
+    expect(byKey.get('migration_id')).toBe('0002_telegram_update_lifecycle');
     expect(byKey.get('applied_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -153,10 +155,44 @@ describe('schema contracts', () => {
     expect(tables).toEqual([...EXPECTED_TABLES].sort());
   });
 
-  it('creates exactly the 29 approved indexes and no others', async () => {
+  it('creates exactly the 30 expected indexes (29 approved + lifecycle index)', async () => {
     const indexes = await namedIndexes();
-    expect(indexes).toHaveLength(29);
+    expect(indexes).toHaveLength(30);
     expect(indexes).toEqual([...EXPECTED_INDEXES].sort());
+  });
+
+  it('carries the telegram_updates lifecycle columns with enforced CHECKs (migration 0002)', async () => {
+    const columns = await db.prepare(`PRAGMA table_info('telegram_updates')`).all<{
+      name: string;
+    }>();
+    const names = columns.results.map((row) => row['name']);
+    expect(names).toEqual(
+      expect.arrayContaining(['claim_expires_at', 'failure_class', 'attempt_count']),
+    );
+
+    // failure_class CHECK: only the documented classes (or NULL) are legal.
+    const insertWithClass = (failureClass: string | null, attemptCount: number) =>
+      db
+        .prepare(
+          `INSERT INTO telegram_updates (update_id, received_at, status, failure_class, attempt_count)
+           VALUES (?, ?, 'claimed', ?, ?)`,
+        )
+        .bind(8800, 1, failureClass, attemptCount)
+        .run();
+    await expect(insertWithClass('bogus', 0)).rejects.toThrow(/CHECK/i);
+    await insertWithClass(null, 0);
+    await db.prepare(`DELETE FROM telegram_updates WHERE update_id = 8800`).run();
+
+    // attempt_count CHECK: non-negative.
+    await expect(
+      db
+        .prepare(
+          `INSERT INTO telegram_updates (update_id, received_at, status, attempt_count)
+           VALUES (?, ?, 'claimed', ?)`,
+        )
+        .bind(8801, 1, -1)
+        .run(),
+    ).rejects.toThrow(/CHECK/i);
   });
 
   it('reports no foreign-key violations after migration', async () => {

@@ -1,9 +1,17 @@
 # ADR-0025: Durable Telegram update idempotency on telegram_updates
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by ADR-0027, ADR-0030, ADR-0031, ADR-0032)
 - **Phase:** 2A
 - **Date:** 2026-10-04
 - **Decided by:** Alexios
+
+> **Amendment note (v1.2.2).** The "exactly-once command execution"
+> guarantee in the Consequences below is SUPERSEDED by ADR-0032: the honest
+> contract is durable at-least-once processing with duplicate suppression
+> before execution, plus bounded duplicate risk for ambiguous external side
+> effects. ADR-0030 completes the lifecycle with a claim lease and stale
+> reclaim (schema v2 via migration 0002), and ADR-0031 makes failure classes
+> persistent. The decision and context below are preserved as history.
 
 ## Context
 

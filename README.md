@@ -20,7 +20,8 @@ secure, fully OFFLINE Telegram ingress and the initial admin
 foundation — no Telegram credentials exist, no webhook is registered, and no
 live Telegram call can occur.**
 
-Implemented in Phase 2A (as corrected in v1.2.1):
+Implemented in Phase 2A (as corrected in v1.2.1; lifecycle completed in the
+second correction round v1.2.2 — schema v2):
 
 - `POST /telegram/webhook` behind a fail-closed ingress flag
   (`TELEGRAM_INGRESS_ENABLED`, ships `false` everywhere): timing-safe shared
@@ -34,14 +35,22 @@ Implemented in Phase 2A (as corrected in v1.2.1):
   with safe-integer numerics, bounded strings, the 64-byte callback data
   limit, bot-command target extraction (`/cmd@bot`), and crash-free
   classification of unknown update kinds.
-- Durable update idempotency in D1 (`telegram_updates`, ADR-0025/0027):
-  update_id claim boundary with four outcomes (claimed / reclaimed /
-  already_processed / in_flight), guarded `claimed -> processed | failed`
-  transitions, atomic failed-update RECLAIM so retryable failures are
-  retried through Telegram redelivery instead of lost, duplicates
-  acknowledged without reprocessing, concurrent claims and reclaims produce
-  exactly one winner. Retryable failures propagate safe HTTP 503 semantics;
-  permanent failures are acknowledged (200) and marked failed.
+- Durable update idempotency in D1 (`telegram_updates`, ADR-0025/0027,
+  lifecycle completed by ADR-0030/0031): update_id claim boundary with SIX
+  explicit outcomes (claimed / reclaimed_retryable / reclaimed_stale /
+  already_processed / permanently_failed / in_flight), guarded
+  `claimed -> processed | failed` transitions with a PERSISTED failure
+  class, atomic reclaims (failed-retryable rows and EXPIRED-LEASE claimed
+  rows) where exactly one concurrent caller wins. Every claim carries a
+  conservative 5-minute lease (centralized constant, boundary-tested), so
+  an update whose Worker died after claiming is recovered by the next
+  delivery after lease expiry instead of being lost forever. Retryable
+  failures propagate safe HTTP 503 semantics (an in-flight update answers
+  503 too — never a false-success 200); permanent failures are TERMINAL:
+  acknowledged 200 and never re-executed. Processing is durable
+  at-least-once with duplicate suppression before execution plus bounded
+  duplicate risk for ambiguous external side effects (ADR-0032) — exactly-once
+  claim ownership does not imply exactly-once Telegram delivery.
 - Phase 2 configuration contracts: `TELEGRAM_INGRESS_ENABLED`,
   `BOT_TOKEN`, `WEBHOOK_SECRET`, `OWNER_TELEGRAM_ID` (validated formats;
   values never echoed) and non-secret `TARGET_CHANNEL`; fail-closed
@@ -110,8 +119,8 @@ Implemented in Phase 0 (unchanged):
   correlation IDs, clock abstraction, and deterministic idempotency-key
   primitives (interfaces only).
 - Quality gates: `npm run check` (lint, format, typecheck, tests, secret
-  scanner self-test, secret scan, offline build) and a non-deploying GitHub
-  Actions CI workflow.
+  scanner self-test, secret scan, version-consistency gate, offline build)
+  and a non-deploying GitHub Actions CI workflow.
 - Full documentation set and preserved blueprint under `docs/blueprint/v1/`.
 
 NOT implemented (by design — later phases):
@@ -122,7 +131,9 @@ NOT implemented (by design — later phases):
 - No admin menus/screens or sessions, no role mutation, no publishing
   controls, no editorial renderer.
 - No source connectors or feeds. No AI provider calls. No queues.
-- No schema changes: the migration set stays at 0001.
+- No further schema changes: the migration set is 0001 + 0002 (schema v2);
+  0002 adds ONLY the telegram_updates lifecycle columns needed for claim
+  lease and failure-class recovery (ADR-0030/0031).
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phase plan.
 
@@ -141,17 +152,17 @@ npm run check # full quality gate (lint/format/types/tests/secrets/build)
 For local Workers development later, copy `.dev.vars.example` to `.dev.vars`
 (git-ignored) and never commit real values. See `docs/SECURITY_MODEL.md`.
 
-## D1 migrations (Phase 1A)
+## D1 migrations (schema v2 — 0001 + 0002)
 
 Migrations are append-only files in `migrations/` (never edit or reorder an
 applied file). Local commands operate on local SQLite state only — no account
 and no network access:
 
-| Command                       | Purpose                                            |
-| ----------------------------- | -------------------------------------------------- |
-| `npm run db:migrations:list`  | List migrations and their local application status |
-| `npm run db:migrations:apply` | Apply pending migrations to the local D1 database  |
-| `npm run test:db`             | Schema-contract and DB-boundary tests (workerd D1) |
+| Command                       | Purpose                                                       |
+| ----------------------------- | ------------------------------------------------------------- |
+| `npm run db:migrations:list`  | List migrations and their local application status            |
+| `npm run db:migrations:apply` | Apply pending migrations to the local D1 database             |
+| `npm run test:db`             | Schema-contract, DB-boundary and migration tests (workerd D1) |
 
 Remote migration commands are **documentation-only during Phase 1A**:
 `npx wrangler d1 migrations apply DB --remote` may only be run after Phase 1B
@@ -167,7 +178,7 @@ remote migration has ever been executed from this repository.
 | `npm run format`              | Prettier auto-format                                                       |
 | `npm run typecheck`           | `tsc --noEmit` (strict mode)                                               |
 | `npm test`                    | Vitest suite executed inside the Workers runtime (workerd)                 |
-| `npm run test:db`             | D1 schema-contract + DB-boundary tests only                                |
+| `npm run test:db`             | D1 schema-contract + DB-boundary + migration tests only                    |
 | `npm run test:secrets`        | Secret-scanner self-test (detection, placeholders, exit codes)             |
 | `npm run build`               | `wrangler deploy --dry-run --outdir dist` — offline build only             |
 | `npm run scan:secrets`        | Secret-shape scan over git-tracked files                                   |
@@ -197,7 +208,8 @@ tests/
   integration/    entrypoint + D1 + Telegram pipeline tests via cloudflare:test
   types/          ambient test-environment declarations
   fixtures/       (reserved) connector/Golden fixtures
-migrations/       versioned D1 migrations (0001_initial_schema.sql — Phase 1A)
+migrations/       versioned D1 migrations (0001_initial_schema.sql — Phase 1A;
+                  0002_telegram_update_lifecycle.sql — Phase 2A schema v2)
 docs/             architecture, roadmap, decisions, security model, blueprint
 handoff/          per-phase handoff reports
 scripts/          maintenance scripts (secret scan)

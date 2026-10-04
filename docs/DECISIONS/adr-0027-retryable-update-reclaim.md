@@ -1,9 +1,18 @@
 # ADR-0027: Retryable update reclaim semantics
 
-- **Status:** Accepted (amends ADR-0025)
+- **Status:** Accepted (completed by ADR-0030 and ADR-0031)
 - **Phase:** 2A (correction round v1.2.1)
 - **Date:** 2026-10-04
 - **Decided by:** Alexios
+
+> **Amendment note (v1.2.2).** ADR-0030 supersedes the "no schema change"
+> stance below: the claim lifecycle now carries a LEASE
+> (`claim_expires_at`), a persisted `failure_class`, and `attempt_count`
+> (migration 0002, schema v2), and abandoned `claimed` rows are recoverable
+> via stale-claim reclaim. ADR-0031 persists the retryable/permanent class,
+> making permanent failures terminal (the four-outcome vocabulary below is
+> extended to six). The decision and context below are preserved as
+> history.
 
 ## Context
 
@@ -86,5 +95,9 @@ update_id=? AND status='failed'`): exactly one concurrent caller wins;
 - a retried update ends `processed` and executes outbound exactly once;
 - `processed` rows can never be reclaimed;
 - permanent failures answer 200 and never propagate errors;
+- **Verification note (superseded in v1.2.2):** the v1.2.1 suite contained a
+  test proving a permanent failed update was repeatedly reclaimed; ADR-0031
+  makes permanent failures TERMINAL and that test was rewritten (a permanent
+  failure now executes at most once and is never reclaimed).
 - a missing client with a required outbound action is never marked
   processed; noop updates complete offline.

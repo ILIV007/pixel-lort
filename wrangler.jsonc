@@ -18,14 +18,14 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.2.1",
+    "APP_VERSION": "1.2.2",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
     // replaced by the real commit identifier at deploy time in later phases;
     // SCHEMA_VERSION is validated as a strict positive decimal integer.
     "APP_COMMIT": "local-dev",
-    "SCHEMA_VERSION": "1",
+    "SCHEMA_VERSION": "2",
     // Phase 2A Telegram ingress flag (non-secret; ADR-0024). The webhook
     // route fails closed unless this is "true" AND the Phase 2 secrets are
     // configured (BOT_TOKEN / WEBHOOK_SECRET / OWNER_TELEGRAM_ID via
@@ -95,11 +95,11 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.2.1",
+        "APP_VERSION": "1.2.2",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
-        "SCHEMA_VERSION": "1",
+        "SCHEMA_VERSION": "2",
         // Phase 2A: ingress stays DISABLED on preview — BOT_TOKEN,
         // WEBHOOK_SECRET and OWNER_TELEGRAM_ID are intentionally NOT
         // configured yet (Phase 2B wiring). Readiness remains honest.

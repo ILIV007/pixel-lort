@@ -84,7 +84,7 @@ DB --remote`) after provisioning, by or with explicit approval of the
 
 ## Phase 2 — Telegram webhook, auth, RBAC and renderer ◑
 
-### Phase 2A — Telegram secure ingress and admin foundation ✅ (correction round v1.2.1 applied)
+### Phase 2A — Telegram secure ingress and admin foundation ✅ (correction rounds v1.2.1 and v1.2.2 applied)
 
 Implemented OFFLINE (no Telegram credentials, no webhook registration, no
 Cloudflare secret configuration; the ingress flag ships `false` everywhere):
@@ -102,14 +102,22 @@ Cloudflare secret configuration; the ingress flag ships `false` everywhere):
       callback data limit, unknown kinds classified unsupported (ADR-0026;
       no Zod — ADR-0010 boundary respected), bot-command target extraction
       (`/cmd@bot`) preserved in the parsed contract.
-- [x] Durable update claims on `telegram_updates` (ADR-0025/0027): update_id
-      as the idempotency boundary with four claim outcomes (claimed /
-      reclaimed / already_processed / in_flight), claimed -> processed |
-      failed guarded transitions, atomic failed-update RECLAIM (exactly one
-      concurrent winner; processed stays terminal), duplicates acknowledged
-      without reprocessing, retryable failures propagated as HTTP 503 so
-      Telegram redelivery retries them, permanent failures acknowledged with
-      200, missing-client outbound actions never falsely processed.
+- [x] Durable update claims on `telegram_updates` (ADR-0025/0027, lifecycle
+      completed by ADR-0030/0031 — schema v2, migration 0002): update_id as
+      the idempotency boundary with SIX claim outcomes (claimed /
+      reclaimed_retryable / reclaimed_stale / already_processed /
+      permanently_failed / in_flight), claimed -> processed | failed guarded
+      transitions with a PERSISTED failure_class, atomic RECLAIMS for
+      failed-retryable rows AND expired-lease claimed rows (exactly one
+      concurrent winner; processed and permanent failures stay terminal),
+      a conservative 5-minute claim lease (centralized constant,
+      boundary-tested at lease − 1 ms / exact expiry / after expiry) so a
+      Worker that dies after claiming is recovered by the next delivery,
+      in-flight deliveries answered with safe 503 (never a false-success
+      200), retryable failures propagated as HTTP 503 so Telegram
+      redelivery retries them, permanent failures acknowledged with 200 and
+      never re-executed, missing-client outbound actions never falsely
+      processed, and honest at-least-once delivery wording (ADR-0032).
 - [x] Phase 2 configuration contracts (ADR-0024): TELEGRAM_INGRESS_ENABLED
       flag; BOT_TOKEN / WEBHOOK_SECRET / OWNER_TELEGRAM_ID validated formats
       (values never echoed); TARGET_CHANNEL non-secret username validation;
@@ -150,9 +158,11 @@ registration, live Telegram traffic, degraded-readiness semantics.
 
 ### Phase 2 (umbrella) — remaining after 2A/2B
 
-- [x] Update claim + duplicate handling in D1 (200 on duplicates, no side
-      effects). _(Phase 2A; reclaim semantics per ADR-0027 — failed rows are
-      retryable through Telegram redelivery, processed stays terminal)_
+- [x] Update claim + duplicate handling in D1 (200 on duplicates of PROCESSED
+      updates, no side effects). _(Phase 2A; reclaim and lease semantics per
+      ADR-0027/0030 — failed-retryable rows and expired-lease claims are
+      retried through Telegram redelivery, processed and permanent failures
+      stay terminal, in-flight deliveries answer 503)_
 - [x] Admin identity, atomic permissions, fail-closed authorization.
       _(Phase 2A)_
 - [x] Deterministic Telegram HTML renderer: escaping, allowlist, length
@@ -194,6 +204,13 @@ registration, live Telegram traffic, degraded-readiness semantics.
 
 - [ ] Tehran-window scheduling, anti-robot rules, priority classes.
 - [ ] Edit/correction workflows; failed-publication idempotency.
+- [ ] GATE (ADR-0032): publishing-side duplicate mitigation and
+      reconciliation (outbox-style per-publication/per-message
+      reconciliation over `publications` / `publication_messages`) MUST be
+      designed, implemented, and tested BEFORE autonomous channel publishing
+      is enabled — exactly-once database claim ownership does not imply
+      exactly-once Telegram message delivery, and channel-facing posts need
+      stronger at-most-once protection than the webhook ingress provides.
 
 ## Phase 9 — admin Telegram screens ⬜
 
