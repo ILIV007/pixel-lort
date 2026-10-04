@@ -26,7 +26,10 @@ import { AppError, type AppErrorCode } from '../../../shared/errors/app-error';
 import { parseTelegramPhase2Config } from '../../../shared/config/phase2';
 import { timingSafeEqualStrings } from '../../../shared/security/timing-safe';
 import type { WorkerEnv } from '../../../shared/types/env';
+import { createTelegramIngress } from '../../../application/telegram-ingress';
+import { createDbExecutor } from '../../../adapters/db/db-executor';
 import { parseTelegramUpdate } from '../../../adapters/telegram/update-parser';
+import { systemClock } from '../../../shared/time/clock';
 import type { Logger } from '../../../observability/logger';
 import { jsonResponse } from '../responses';
 
@@ -152,8 +155,22 @@ export async function handleTelegramWebhook(
 
   ctx.logger.info('telegram.update.classified', { kind: parseResult.update.kind });
 
-  // Phase 2A commit 1: classification + deterministic acknowledgement.
-  // Durable idempotency lands with the update-claims slice; live routing is
-  // wired by the authorization/command-contract slices.
+  // Durable idempotency requires D1 (no in-memory-only dedup, no KV):
+  // without the binding the ingress fails closed as unavailable.
+  if (env.DB === undefined) {
+    ctx.logger.warn('telegram.webhook.unavailable', { reason: 'db_binding_missing' });
+    throw new AppError('service_unavailable');
+  }
+
+  const ingress = createTelegramIngress({
+    executor: createDbExecutor(env.DB),
+    clock: systemClock,
+    logger: ctx.logger,
+  });
+  // Duplicates and processed outcomes both get the same fast deterministic
+  // 2xx: the durable telegram_updates row is the source of truth, and a 5xx
+  // would only trigger a redelivery that is duplicate-acked without
+  // reprocessing (ADR-0025).
+  await ingress.processUpdate(parseResult.update);
   return jsonResponse(200, { ok: true });
 }

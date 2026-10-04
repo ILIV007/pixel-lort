@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { env } from 'cloudflare:test';
 import worker from '../../src/entrypoints/worker';
 import { handleTelegramWebhook } from '../../src/entrypoints/http/handlers/telegram-webhook';
+import { applyMigrations } from '../helpers/migrations';
 import { createLogger, type LogSink } from '../../src/observability/logger';
 
 /**
@@ -20,6 +22,7 @@ const ENABLED_ENV = {
   WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
   OWNER_TELEGRAM_ID: FAKE_OWNER_ID,
   BOT_TOKEN: FAKE_BOT_TOKEN,
+  DB: env.DB,
 };
 
 const DISABLED_ENV = { TELEGRAM_INGRESS_ENABLED: 'false' };
@@ -46,6 +49,10 @@ function validUpdateBody(): string {
     message: { message_id: 1, chat: { id: 1000000001 }, from: { id: 1000000001 }, text: '/start' },
   });
 }
+
+beforeEach(async () => {
+  await applyMigrations(env.DB);
+});
 
 describe('POST /telegram/webhook — ingress flag gating', () => {
   it('behaves like an unknown route (404) while the ingress flag is disabled', async () => {
@@ -79,6 +86,25 @@ describe('POST /telegram/webhook — non-POST methods are rejected uniformly', (
       expect(res.status).toBe(404);
     },
   );
+});
+
+describe('POST /telegram/webhook — durable idempotency requirements', () => {
+  it('fails closed with a safe 503 when ingress is enabled but D1 is unavailable', async () => {
+    const res = await worker.fetch(
+      webhookRequest(validUpdateBody()),
+      {
+        TELEGRAM_INGRESS_ENABLED: 'true',
+        WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
+        OWNER_TELEGRAM_ID: FAKE_OWNER_ID,
+        BOT_TOKEN: FAKE_BOT_TOKEN,
+        // No DB binding: durable update claims are impossible -> unavailable.
+      },
+      testCtx(),
+    );
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: Record<string, unknown> };
+    expect(body.error['code']).toBe('service_unavailable');
+  });
 });
 
 describe('POST /telegram/webhook — secret verification', () => {
