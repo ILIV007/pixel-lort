@@ -33,13 +33,26 @@ working in this repository. It is intentionally terse and version-stable.
   `schema_metadata` table and is distinct from Wrangler's `d1_migrations`
   bookkeeping (ADR-0019). Remote migration commands require explicit owner
   instruction and an approved Phase 1B binding.
+- **Telegram rules (Phase 2A+):** the webhook route exists only behind the
+  fail-closed `TELEGRAM_INGRESS_ENABLED` flag with valid Phase 2 config
+  (ADR-0024). Verify the shared secret with the timing-safe helper in
+  `src/shared/security/timing-safe.ts` — never a plain-string comparison.
+  update_id is the idempotency boundary via durable D1 claims (ADR-0025);
+  duplicates are acknowledged without reprocessing. Command behavior goes
+  through the command router's TYPED actions, never direct fetches
+  (ADR-0026). Outbound Telegram HTML must be composed with
+  `src/admin/telegram-html.ts` and passes the validator before sending.
+  Callback data is the opaque `a:<base64url_token>` contract only.
 
 ## 3. Security and secret rules — non-negotiable
 
 - Never commit real credentials or realistic token-shaped examples anywhere:
   source, fixtures, docs, logs, commit messages, or generated reports.
 - Never log or print: authorization headers, cookies, tokens, request bodies,
-  full environment objects, Telegram update payloads, or provider responses.
+  full environment objects, Telegram update payloads (including message text,
+  usernames, phone numbers, chat/user ids, callback data), or provider
+  responses. Webhook/pipeline logs carry stable event names, reason codes,
+  action types, role names, and update_id only.
 - All log fields pass through the redaction layer (`src/observability/`),
   which also FAIL-SAFE serializes Error instances (name + stable code +
   HTTP status only; raw messages/stacks/causes are never emitted —

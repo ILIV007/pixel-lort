@@ -151,6 +151,52 @@ by ADR-0014).
   binding is present; offline development without a binding stays ready
   (ADR-0021).
 
+### 3.8 Telegram ingress and admin foundation (Phase 2A — ADR-0024/0025/0026)
+
+**HTTP edge** (`src/entrypoints/http/handlers/telegram-webhook.ts`):
+`POST /telegram/webhook` exists only behind the fail-closed
+`TELEGRAM_INGRESS_ENABLED` flag with a fully valid Phase 2 configuration; a
+disabled or misconfigured ingress is a uniform unknown route. Request
+lifecycle: timing-safe secret verification (fresh-key HMAC-SHA256 via Web
+Crypto) -> JSON content type -> 64 KiB body cap (declared + actual bytes) ->
+strict JSON parse -> bounded Update parse. Rejections carry stable reason
+codes and never echo values.
+
+**Update parsing** (`src/adapters/telegram/update-parser.ts`): small explicit
+parser for `message` / `edited_message` / `callback_query` (no Zod — ADR-0010
+boundary). Safe-integer numerics only; strings bounded by omission; 64-byte
+callback data limit; unknown kinds classified `unsupported`.
+
+**Durable idempotency** (`src/application/telegram-ingress.ts` +
+`src/adapters/telegram/update-claims.ts`): update_id is the claim boundary;
+`claimed -> processed | failed` guarded transitions; duplicates acknowledged
+without reprocessing; concurrent claims produce exactly one winner; D1 is
+the only dedup authority (ADR-0025).
+
+**Authorization** (`src/admin/roles.ts`, `src/admin/authorization.ts`,
+`src/adapters/telegram/admin-lookup.ts`): owner bootstrap via
+`OWNER_TELEGRAM_ID` plus active D1 admins; six approved roles with the
+verbatim `pixel_admin_map_v1.json` permission map; numeric user IDs only;
+fail closed everywhere.
+
+**Command routing** (`src/admin/command-router.ts`): allowlist /start /help
+/status /version; output is a TYPED action (`send_message` / `answer_callback`
+/ `noop` / `denied`) — never an immediate fetch; unauthorized senders get a
+minimal fixed Persian denial; outside-allowlist commands are ignored.
+
+**Bot API boundary** (`src/adapters/telegram/bot-api-client.ts`): typed
+getMe / sendMessage / editMessageText / answerCallbackQuery; injectable
+fetch; strict timeout; single attempt (no retries); retryable/permanent
+error classification with safe `retry_after` parsing; token and bodies never
+logged. Without `BOT_TOKEN` the pipeline runs in documented OFFLINE mode
+(actions skipped).
+
+**Admin contracts** (`src/admin/telegram-html.ts`,
+`src/admin/callback-tokens.ts`, `src/adapters/telegram/action-tokens.ts`):
+Telegram-safe HTML escaper/builder plus a bounded structural validator;
+`a:<base64url_token>` callback contract (≤ 64 bytes) with the
+`admin_action_tokens` single-use, user-bound repository boundary.
+
 ## 4. Testing approach
 
 - Vitest with the Cloudflare-supported Workers pool: tests execute inside
@@ -168,3 +214,13 @@ Source connectors, story/evidence engine, AI adapters, renderer, media
 pipeline, publisher, Telegram admin panel, D1 repositories/business queries,
 deployments, Cloudflare resource creation, webhook registration, remote
 migrations — all planned, none implemented.
+
+## 6. Non-goals in Phase 2A
+
+No Telegram credentials exist and none are configured in Cloudflare; the
+ingress flag ships `false` everywhere. No webhook registration, no live
+Telegram traffic, no `getMe`/`sendMessage` calls against the real API, no
+admin menus/screens or multi-step sessions (`admin_sessions` untouched), no
+role-mutation endpoints, no publishing controls, no source connectors, no AI
+adapters, no queues, no schema changes (migration set stays at 0001). Live
+preview wiring is explicitly Phase 2B.

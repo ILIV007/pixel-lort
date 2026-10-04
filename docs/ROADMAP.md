@@ -1,8 +1,8 @@
 # Roadmap
 
 Phase order follows blueprint §26 ("Roadmap implementation order"). Phases
-**0** and **1A** are marked complete; everything else is pending and
-intentionally not started.
+**0**, **1A**, **1B**, and **2A** are marked complete; everything else is
+pending and intentionally not started.
 
 ## Phase 0 — product/config freeze + repository foundation ✅
 
@@ -82,14 +82,66 @@ DB --remote`) after provisioning, by or with explicit approval of the
 - [ ] CI extension for migration dry-run checks, if still appropriate after
       provisioning.
 
-## Phase 2 — Telegram webhook, auth, RBAC and renderer ⬜
+## Phase 2 — Telegram webhook, auth, RBAC and renderer ◑
 
-- [ ] `POST /telegram/webhook`: constant-time secret validation, POST/JSON
-      enforcement, body caps, minimal envelope parsing.
-- [ ] Update claim + duplicate handling in D1 (200 on duplicates, no side effects).
-- [ ] Admin identity, atomic permissions, fail-closed authorization.
-- [ ] Deterministic Telegram HTML renderer: escaping, allowlist, length
-      enforcement, safe splitting, RTL/bidi, deterministic footer.
+### Phase 2A — Telegram secure ingress and admin foundation ✅ (current)
+
+Implemented OFFLINE (no Telegram credentials, no webhook registration, no
+Cloudflare secret configuration; the ingress flag ships `false` everywhere):
+
+- [x] `POST /telegram/webhook` behind a fail-closed ingress flag (disabled /
+      misconfigured ingress = uniform unknown route; ADR-0024): timing-safe
+      secret verification (fresh-key HMAC-SHA256 via Web Crypto), JSON
+      content-type enforcement, 64 KiB body cap, strict JSON parsing, stable
+      rejection reason codes, correlation IDs and security headers retained,
+      and NO payload/secret logging.
+- [x] Bounded Update parser (message / edited_message / callback_query):
+      safe-integer numerics only, bounded strings by omission, 64-byte
+      callback data limit, unknown kinds classified unsupported (ADR-0026;
+      no Zod — ADR-0010 boundary respected).
+- [x] Durable update claims on `telegram_updates` (ADR-0025): update_id as
+      the idempotency boundary, claimed -> processed | failed guarded
+      transitions, duplicates acknowledged without reprocessing, concurrent
+      claims produce exactly one winner, failed processing observable and
+      recoverable via operator tooling later.
+- [x] Phase 2 configuration contracts (ADR-0024): TELEGRAM_INGRESS_ENABLED
+      flag; BOT_TOKEN / WEBHOOK_SECRET / OWNER_TELEGRAM_ID validated formats
+      (values never echoed); TARGET_CHANNEL non-secret username validation;
+      readiness fails closed on invalid values and while ingress is enabled
+      without its required secrets; offline mode without BOT_TOKEN.
+- [x] Authorization foundation (ADR-0026): owner bootstrap identity + active
+      D1 admins; six approved roles with the verbatim permission map;
+      disabled admins and unknown users unauthorized; numeric IDs only.
+- [x] Command routing contracts (ADR-0026): allowlist /start /help /status
+      /version; typed actions (send_message / answer_callback / noop /
+      denied) separate from HTTP routing; minimal Persian denial for
+      unauthorized senders; no role-mutation endpoints.
+- [x] Telegram Bot API client boundary (ADR-0026): getMe / sendMessage /
+      editMessageText / answerCallbackQuery; injectable fetch; strict
+      timeout; single attempt (no retry storm); retryable/permanent error
+      classification; safe retry_after parsing; HTML parse mode only.
+- [x] Callback data contract `a:<base64url_token>` (≤ 64 bytes) with the
+      `admin_action_tokens` repository boundary (single-use, user-bound,
+      expiring); full admin menu deferred to Phase 9.
+- [x] Telegram-safe HTML escaper/builder/validator: `&<>` escaping,
+      allowlisted tags, https-only validated links, Persian/RTL/emoji
+      intact, hostile markup rejected.
+- [x] Test suite for every Phase-2A test category, all offline; Phase 1A
+      suites remain green.
+
+DEFERRED to Phase 2B (live wiring): real BOT_TOKEN / WEBHOOK_SECRET /
+OWNER_TELEGRAM_ID / TARGET_CHANNEL configuration in Cloudflare, webhook
+registration, live Telegram traffic, degraded-readiness semantics.
+
+### Phase 2 (umbrella) — remaining after 2A/2B
+
+- [x] Update claim + duplicate handling in D1 (200 on duplicates, no side
+      effects). _(Phase 2A)_
+- [x] Admin identity, atomic permissions, fail-closed authorization.
+      _(Phase 2A)_
+- [x] Deterministic Telegram HTML renderer: escaping, allowlist, length
+      enforcement, safe splitting, RTL/bidi, deterministic footer. _(admin
+      subset in Phase 2A; full editorial renderer later)_
 - [ ] `degraded` readiness semantics per ADR-0015 (ready/degraded/not_ready).
 
 ## Phase 3 — job/queue framework and idempotency ⬜

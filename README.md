@@ -11,13 +11,53 @@ scheduling policies.
 - **Timezone:** `Asia/Tehran`
 - **Authoritative specification:** [`docs/blueprint/v1/`](docs/blueprint/README.md)
 
-## Current implementation status — Phase 1A (data foundation)
+## Current implementation status — Phase 2A (Telegram secure ingress + admin foundation)
 
-Phase 0 delivered the repository and Worker foundation (no business behavior).
-Phase 1A adds the offline, testable D1 data foundation and the approved
-`/version` contract. **It still implements no business behavior.**
+Phase 0 delivered the repository and Worker foundation. Phase 1A delivered
+the offline D1 data foundation and the approved `/version` contract. Phase 1B
+provisioned the isolated Cloudflare preview environment. **Phase 2A adds the
+secure, fully OFFLINE Telegram ingress and the initial admin
+foundation — no Telegram credentials exist, no webhook is registered, and no
+live Telegram call can occur.**
 
-Implemented in Phase 1A:
+Implemented in Phase 2A:
+
+- `POST /telegram/webhook` behind a fail-closed ingress flag
+  (`TELEGRAM_INGRESS_ENABLED`, ships `false` everywhere): timing-safe shared
+  secret verification (fresh-key HMAC-SHA256 via Web Crypto), JSON
+  content-type enforcement, 64 KiB body cap, strict JSON parsing, stable
+  rejection reason codes; correlation IDs and security headers retained
+  (ADR-0024). A disabled or misconfigured ingress behaves like an unknown
+  route.
+- Bounded Telegram Update parser (message / edited_message / callback_query)
+  with safe-integer numerics, bounded strings, the 64-byte callback data
+  limit, and crash-free classification of unknown update kinds.
+- Durable update idempotency in D1 (`telegram_updates`, ADR-0025): update_id
+  claim boundary, guarded `claimed -> processed | failed` transitions,
+  duplicates acknowledged without reprocessing, concurrent claims produce
+  exactly one winner, failures observable.
+- Phase 2 configuration contracts: `TELEGRAM_INGRESS_ENABLED`,
+  `BOT_TOKEN`, `WEBHOOK_SECRET`, `OWNER_TELEGRAM_ID` (validated formats;
+  values never echoed) and non-secret `TARGET_CHANNEL`; fail-closed
+  readiness while ingress is enabled; documented OFFLINE mode without
+  `BOT_TOKEN`.
+- Authorization foundation: owner bootstrap identity + active D1 admins
+  across the six approved roles (verbatim permission map); fail closed for
+  disabled admins, unknown users, and identity-less updates.
+- Command routing contracts: `/start` `/help` `/status` `/version` for
+  authorized senders (static Persian admin responses), minimal denial for
+  unauthorized senders, ignore-list for everything else; typed Telegram
+  actions decoupled from HTTP routing.
+- Telegram Bot API client boundary (getMe / sendMessage / editMessageText /
+  answerCallbackQuery): injectable fetch, strict timeout, single attempt,
+  retryable/permanent error classification, safe `retry_after` parsing,
+  HTML parse mode only, token/bodies never logged.
+- Callback data contract `a:<base64url_token>` (≤ 64 bytes) with the
+  single-use, user-bound, expiring `admin_action_tokens` repository boundary.
+- Telegram-safe HTML: `&<>` escaping, allowlisted tag builders, validated
+  https-only links, bounded structural validator; Persian/RTL/emoji intact.
+
+Implemented in Phase 1A (unchanged):
 
 - Versioned D1 migration `migrations/0001_initial_schema.sql` converted from
   the authoritative blueprint schema (27 approved tables, 29 approved
@@ -59,10 +99,13 @@ Implemented in Phase 0 (unchanged):
 
 NOT implemented (by design — later phases):
 
-- No Telegram webhook, publishing, or admin panel. No source connectors or feeds.
-- No AI provider calls. No D1 repositories or business workflows.
-- No deployment, no Cloudflare resource creation, no webhook registration.
-- No remote D1 migration has ever been executed (Phase 1B, with provisioning).
+- No live Telegram connection: no credentials, no Cloudflare secrets, no
+  webhook registration, no real Bot API calls. Live preview wiring is
+  Phase 2B.
+- No admin menus/screens or sessions, no role mutation, no publishing
+  controls, no editorial renderer.
+- No source connectors or feeds. No AI provider calls. No queues.
+- No schema changes: the migration set stays at 0001.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phase plan.
 
@@ -75,7 +118,7 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phase plan.
 
 ```bash
 npm ci        # install exactly the locked dependency tree
-npm run check # full Phase 1A quality gate
+npm run check # full quality gate (lint/format/types/tests/secrets/build)
 ```
 
 For local Workers development later, copy `.dev.vars.example` to `.dev.vars`
@@ -122,17 +165,19 @@ workflow in this repository.
 
 ```
 src/
-  entrypoints/    Worker entrypoints: fetch/HTTP, scheduled, queue
+  entrypoints/    Worker entrypoints: fetch/HTTP (incl. Telegram webhook), scheduled, queue
   domain/         (planned) pure domain models — no platform types
-  application/    (planned) use cases and workflows
-  adapters/       db/ D1 boundary (Phase 1A); queue/kv/r2/telegram/ai/http planned
+  application/    telegram-ingress.ts — durable update lifecycle (Phase 2A)
+  adapters/       db/ D1 boundary (Phase 1A); telegram/ parser, claims, lookup,
+                  action tokens, Bot API client (Phase 2A); queue/kv/r2/ai planned
   editorial/      (planned) deterministic renderer, Persian normalization, prompts
-  admin/          (planned) private Telegram admin screens and RBAC
+  admin/          roles, authorization, command router, Telegram-safe HTML,
+                  callback token contract (Phase 2A foundation)
   observability/  structured logging, redaction (implemented in Phase 0)
-  shared/         errors, config validation, ids, clock (implemented in Phase 0)
+  shared/         errors, config validation, ids, clock, timing-safe compare
 tests/
   unit/           unit tests (workerd runtime)
-  integration/    entrypoint + D1 tests via cloudflare:test SELF / bindings
+  integration/    entrypoint + D1 + Telegram pipeline tests via cloudflare:test
   types/          ambient test-environment declarations
   fixtures/       (reserved) connector/Golden fixtures
 migrations/       versioned D1 migrations (0001_initial_schema.sql — Phase 1A)
@@ -153,13 +198,14 @@ scripts/          maintenance scripts (secret scan)
 - [`SECURITY.md`](SECURITY.md) — vulnerability reporting policy
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch, commit, and review rules
 
-## Phase 0/1A boundary statement
+## Phase boundary statement
 
-Phase 0 and Phase 1A do **not** publish, deploy, register webhooks, call
-third-party services, or create Cloudflare/Telegram resources. Tests make no
-real network requests and require no credentials. The blueprint is preserved
-verbatim under [`docs/blueprint/v1/`](docs/blueprint/README.md) and remains
-authoritative.
+Phase 0, 1A, and 2A do **not** publish, deploy, register webhooks, call
+third-party services, or create Cloudflare/Telegram resources. Phase 2A's
+Telegram surface is fully offline: the ingress flag ships `false`, no secrets
+are configured anywhere, and every test runs without a real network request.
+The blueprint is preserved verbatim under
+[`docs/blueprint/v1/`](docs/blueprint/README.md) and remains authoritative.
 
 ## License
 

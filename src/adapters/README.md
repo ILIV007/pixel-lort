@@ -15,13 +15,22 @@ is introduced only in the phase that owns it (docs/ROADMAP.md).
     result counts and stable error codes only; SQL text and bind parameters are
     never logged.
 
+## Implemented — Phase 2A
+
+- `telegram/` — Telegram-facing adapters (ADR-0024/0025/0026):
+  - bounded Update parser (`update-parser.ts`),
+  - durable update claims on `telegram_updates` (`update-claims.ts`),
+  - admin lookup over `admins` (`admin-lookup.ts`),
+  - `admin_action_tokens` repository boundary (`action-tokens.ts`),
+  - Bot API client with injectable fetch, strict timeout, single attempt,
+    and stable error classification (`bot-api-client.ts`).
+
 ## Planned
 
 - `d1/` repositories — idempotent writers per aggregate (phase 2+)
 - `queue/` — queue producer/consumer adapters (phase 3)
 - `kv/` — cache/lock adapters (phase 1B+)
 - `r2/` — media artifact storage (phase 7)
-- `telegram/` — Bot API client (phase 2)
 - `ai/` — model provider adapters and routing (phase 6)
 - `http/` — outbound HTTP with SSRF guards, caps, and timeouts (phase 4)
 

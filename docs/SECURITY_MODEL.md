@@ -65,17 +65,24 @@ digest.
   `src/shared/errors/serialize.ts`: code + safe message + requestId +
   sanitized details — unchanged by the logging policy.
 - Redaction traversal is depth- and size-bounded against hostile input.
+- **Telegram event logging (Phase 2A, ADR-0024/0025/0026):** webhook and
+  pipeline logs carry stable event names, reason codes, action types, role
+  names, and update_id (the idempotency key) ONLY. Request bodies, message
+  text, captions, usernames, phone numbers, chat and user ids, callback
+  data, the Bot Token, and the webhook secret are NEVER logged — verified
+  by canary tests. Bot API client logs contain the method name and a stable
+  error code; raw Telegram descriptions are discarded.
 
 ## 3. Trust boundaries
 
-| Boundary                   | Posture                                                                                                                                                                     |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Telegram webhook (planned) | Untrusted until `x-telegram-bot-api-secret-token` passes constant-time comparison; POST + JSON + size caps; duplicate updates are harmless no-ops.                          |
-| Incoming request IDs       | Honored only if strictly well-formed; otherwise regenerated.                                                                                                                |
-| Source content             | Untrusted data: SSRF guards (private/loopback/metadata IP ranges, redirect cap 2, revalidation), XML external entities disabled, HTML treated as data, byte caps, timeouts. |
-| Admin actions              | Fail-closed authorization with atomic permissions; opaque one-time callback tokens bound to one user; destructive actions require confirmation tokens.                      |
-| AI providers (planned)     | Source text isolated as untrusted prompt data; secrets/admin IDs/private messages never sent; outputs schema- AND semantically validated.                                   |
-| Media hosts (planned)      | HTTPS-only, positive host allowlist when feasible, MIME/signature over extension trust, rights gates.                                                                       |
+| Boundary                    | Posture                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Telegram webhook (Phase 2A) | Untrusted until `x-telegram-bot-api-secret-token` passes TIMING-SAFE comparison (fresh-key HMAC-SHA256 over both inputs via Web Crypto — ADR-0024); route exists only behind the fail-closed ingress flag with valid config; JSON content type + 64 KiB body cap; the body is read only after the caller is verified; duplicate updates are harmless no-ops (durable D1 claims — ADR-0025). |
+| Incoming request IDs        | Honored only if strictly well-formed; otherwise regenerated.                                                                                                                                                                                                                                                                                                                                |
+| Source content              | Untrusted data: SSRF guards (private/loopback/metadata IP ranges, redirect cap 2, revalidation), XML external entities disabled, HTML treated as data, byte caps, timeouts.                                                                                                                                                                                                                 |
+| Admin actions (Phase 2A)    | Fail-closed authorization with the approved atomic permission map; owner resolves ONLY via a valid OWNER_TELEGRAM_ID bootstrap identity; disabled admins and unknown users unauthorized; numeric user IDs only; callback data is an opaque `a:<token>` (≤ 64 bytes) resolved server-side through single-use, user-bound, expiring `admin_action_tokens` (ADR-0026).                         |
+| AI providers (planned)      | Source text isolated as untrusted prompt data; secrets/admin IDs/private messages never sent; outputs schema- AND semantically validated.                                                                                                                                                                                                                                                   |
+| Media hosts (planned)       | HTTPS-only, positive host allowlist when feasible, MIME/signature over extension trust, rights gates.                                                                                                                                                                                                                                                                                       |
 
 Planned boundaries are marked planned; they are enforced when their phase
 implements the related feature (see `docs/ROADMAP.md`).
@@ -92,6 +99,12 @@ implements the related feature (see `docs/ROADMAP.md`).
   missing configuration or secrets for an active feature => `not_ready`
   (ADR-0008, approved by ADR-0014). Readiness semantics for
   `ready/degraded/not_ready` are fixed by ADR-0015.
+- **Phase 2 gating (ADR-0024):** any present-but-invalid Phase 2 value fails
+  readiness in every environment. While `TELEGRAM_INGRESS_ENABLED` is
+  `true`, `WEBHOOK_SECRET` and `OWNER_TELEGRAM_ID` are REQUIRED and a D1
+  binding must exist; without `BOT_TOKEN` the ingress runs in documented
+  OFFLINE mode (no live calls) until the Phase 2B gate. No Cloudflare
+  secrets are configured in Phase 2A and the flag ships `false`.
 - No public debug/mutation endpoints exist in any phase; the Telegram admin
   panel is the only administration UI in v1.
 
@@ -102,3 +115,8 @@ implements the related feature (see `docs/ROADMAP.md`).
 - Weakening TLS or certificate validation in any HTTP client.
 - Executing remote scripts fetched from sources (sources are data, not code).
 - Storing secrets in KV, D1, callback data, or query strings.
+- Passing raw/untrusted HTML to Telegram: outbound text is composed with the
+  escaper/builders and re-validated by the bounded allowlist validator
+  before every send (ADR-0026).
+- Automatic retries of Telegram API calls (retry storms): the client makes a
+  single attempt per call and classifies errors for future policies.

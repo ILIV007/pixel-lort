@@ -29,11 +29,6 @@ import { fixedClock } from '../../src/shared/time/clock';
 const OWNER_ID = 1000000001;
 const NOW = 1_700_000_000_000;
 
-function testCtx(): ExecutionContext {
-  return { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
-}
-void testCtx;
-
 beforeEach(async () => {
   await applyMigrations(env.DB);
 });
