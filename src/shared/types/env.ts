@@ -118,4 +118,24 @@ export interface WorkerEnv {
    * present, readiness additionally verifies schema health (ADR-0021).
    */
   readonly DB?: D1Database;
+  // ---------------------------------------------------------------------------
+  // Phase 2 configuration (Telegram secure ingress + admin foundation).
+  // Names are contract; secret VALUES exist only via `wrangler secret put`
+  // or a git-ignored `.dev.vars` file. They are validated by
+  // src/shared/config/phase2.ts and never logged, echoed, or serialized.
+  // ---------------------------------------------------------------------------
+  /**
+   * NON-SECRET ingress feature flag ('true' | 'false'; default 'false').
+   * The webhook route fails closed to a uniform 404 unless this is 'true'
+   * AND the full Phase 2 configuration is valid.
+   */
+  readonly TELEGRAM_INGRESS_ENABLED?: string;
+  /** NON-SECRET target public channel username (e.g. "@pixellort") — ADR-0009. */
+  readonly TARGET_CHANNEL?: string;
+  /** SECRET — Telegram bot token. Never logged or echoed. */
+  readonly BOT_TOKEN?: string;
+  /** SECRET — webhook shared secret (min strength 32, [A-Za-z0-9_-]). Never logged. */
+  readonly WEBHOOK_SECRET?: string;
+  /** SECRET — owner Telegram numeric user ID (bootstrap identity). Never logged. */
+  readonly OWNER_TELEGRAM_ID?: string;
 }

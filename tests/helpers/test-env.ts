@@ -1,13 +1,16 @@
 import type { WorkerEnv } from '../../src/shared/types/env';
 
 /**
- * Build a Phase 0 test environment. Values are obviously-fake, non-token
+ * Build a Phase 0/2A test environment. Values are obviously-fake, non-token
  * placeholders used ONLY by unit tests that call handlers directly.
  * Integration tests use the real vars from wrangler.jsonc via SELF.
+ *
+ * Phase 2 secrets are intentionally ABSENT here; Telegram-specific tests
+ * build their own explicit fake fixtures (never realistic credentials).
  */
 export function createTestEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
   return {
-    APP_VERSION: '1.1.0-test',
+    APP_VERSION: '1.2.0-test',
     ENVIRONMENT: 'development',
     LOG_LEVEL: 'debug',
     ...overrides,

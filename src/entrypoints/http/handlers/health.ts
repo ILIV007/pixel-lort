@@ -14,11 +14,19 @@
  *   resource exists in Phase 1A), the endpoint stays READY: absence of a
  *   not-yet-provisioned resource is not a failure (ADR-0019).
  *
+ * Phase 2 readiness extension (fail-closed, ADR-0008 phase-scoped):
+ * - Any present-but-invalid Phase 2 value => not_ready (never silently
+ *   ignored).
+ * - While TELEGRAM_INGRESS_ENABLED is 'true', the required Phase 2 secrets
+ *   must be present and valid, and a D1 binding must exist for durable
+ *   update idempotency; otherwise => not_ready.
+ *
  * Bodies are intentionally tiny and carry no configuration inventory;
  * reasons are logged as stable codes only.
  */
 import { parseWorkerConfig } from '../../../shared/config/phase0';
 import { parseDataFoundationConfig } from '../../../shared/config/phase1a';
+import { parseTelegramPhase2Config } from '../../../shared/config/phase2';
 import type { WorkerEnv } from '../../../shared/types/env';
 import type { Logger } from '../../../observability/logger';
 import { createDbExecutor, checkSchemaHealth } from '../../../adapters/db';
@@ -68,6 +76,18 @@ export async function handleHealthReady(
   }
   if (data.config === null) {
     reasons.push('metadata_config_invalid');
+  }
+
+  // Phase 2 (fail-closed, ADR-0008): any present-but-invalid Phase 2 value
+  // fails readiness in every environment. While the Telegram ingress flag is
+  // ENABLED, the three Phase 2 secrets are REQUIRED (missing or invalid =>
+  // not_ready) and a D1 binding must exist for durable update idempotency.
+  const phase2 = parseTelegramPhase2Config(env as Readonly<Record<string, unknown>>);
+  if (!phase2.result.ok) {
+    reasons.push('telegram_config_invalid');
+  }
+  if (phase2.config?.ingressEnabled === true && env.DB === undefined) {
+    reasons.push('telegram_db_unavailable');
   }
 
   if (data.config !== null && env.DB !== undefined) {
