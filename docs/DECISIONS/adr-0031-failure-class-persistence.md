@@ -1,7 +1,9 @@
 # ADR-0031: Permanent versus retryable failure persistence
 
-- **Status:** Accepted (completes ADR-0027)
-- **Phase:** 2A (second correction round v1.2.2)
+- **Status:** Accepted (completes ADR-0027; amended in the final correction
+  round v1.2.3 — generation-fenced terminal transitions and honest
+  acknowledgement)
+- **Phase:** 2A (second correction round v1.2.2; final correction round v1.2.3)
 - **Date:** 2026-10-04
 - **Decided by:** Alexios
 
@@ -37,6 +39,25 @@ reclaim time requires the class to be PERSISTED, not recomputed.
   UNKNOWN errors retryable by default). What changed is that the decided
   class is now persisted and enforced by the reclaim guard, making the
   no-re-execution guarantee durable across processes and deliveries.
+- **Fenced terminal transitions (amendment, final correction round
+  v1.2.3):** `markTelegramUpdateProcessed` and `markTelegramUpdateFailed`
+  require the caller's `expectedAttemptCount` (the claim generation carried
+  by the execution-owning claim outcome) and are guarded by
+  `WHERE update_id = ? AND status = 'claimed' AND attempt_count = ?` — a
+  stale owner always receives `false` and can never mark a newer owner's
+  claim processed or failed (ADR-0030 generation fencing).
+- **HTTP 200 is emitted ONLY after a terminal state is durably persisted
+  (amendment):** the permanent-failure acknowledgement happens only after
+  `failure_class = 'permanent'` is durably stored. If persisting the
+  terminal transition returns false (stale owner) or throws (storage
+  error), the webhook answers safe retryable 503 — a failure to persist the
+  terminal transition is a storage/service availability failure REGARDLESS
+  of the original processing failure class, and an unpersisted terminal
+  state is never acknowledged. The row remains protected by its current
+  lease and can later be stale-reclaimed (ADR-0030). Logging distinguishes
+  `terminal_transition_succeeded`, `terminal_transition_rejected`
+  (stale_owner), and `terminal_transition_failed` (storage_error) with
+  stable fields only.
 - **The ADR-0027 test that proved a permanent failed update is repeatedly
   reclaimed was removed/rewritten**: permanent failures now execute at most
   once, ever.
@@ -70,4 +91,11 @@ reclaim time requires the class to be PERSISTED, not recomputed.
 - permanent failed rows are never reclaimable, even under concurrency;
 - processed rows are never reclaimable;
 - legacy failed rows are backfilled retryable and stay recoverable;
-- CHECK constraints reject bogus classes and negative attempt counts.
+- CHECK constraints reject bogus classes and negative attempt counts;
+- fencing (v1.2.3): a stale owner cannot mark a newer generation processed
+  or failed (all fenced transitions return false); a processed transition
+  that returns false or throws answers 503 — never a false 200, and no
+  processed success log; a permanent failure whose persistence returns
+  false or throws answers 503 and the row stays claimed under its lease
+  until the lease expiry reclaim makes the terminal classification durable
+  (later deliveries then never execute again).

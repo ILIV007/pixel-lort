@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Version-consistency gate (Phase 2A second correction round, v1.2.2).
+ * Version-consistency gate (Phase 2A final correction round, v1.2.3).
  *
  * The correction review found active configuration files silently drifted to
  * three different application versions (.env.example at 1.1.0 while

@@ -160,7 +160,7 @@ describe('migration 0002 — populated schema-v1 database upgrades to schema v2'
     // The abandoned pre-0002 claim (no lease) is reclaimable by the next
     // delivery — exactly the recovery path that was impossible before 0002.
     const recovery = await claimTelegramUpdate(executor, 1, NOW + 10_000);
-    expect(recovery).toEqual({ kind: 'reclaimed_stale' });
+    expect(recovery).toEqual({ kind: 'reclaimed_stale', attemptCount: 1 });
     const row = await readRow(1);
     expect(row?.status).toBe('claimed');
     expect(row?.claim_expires_at).toBe(NOW + 10_000 + LEASE);
@@ -172,7 +172,7 @@ describe('migration 0002 — populated schema-v1 database upgrades to schema v2'
     const executor = createDbExecutor(db);
 
     const recovery = await claimTelegramUpdate(executor, 3, NOW + 10_000);
-    expect(recovery).toEqual({ kind: 'reclaimed_retryable' });
+    expect(recovery).toEqual({ kind: 'reclaimed_retryable', attemptCount: 1 });
     const row = await readRow(3);
     expect(row?.status).toBe('claimed');
     expect(row?.failure_class).toBeNull();
@@ -221,7 +221,7 @@ describe('migration 0002 — populated schema-v1 database upgrades to schema v2'
     // The persisted failure class transitions stay guarded: a retryable
     // failed row can never silently become permanent (and vice versa).
     await claimTelegramUpdate(executor, 9003, NOW);
-    await markTelegramUpdateFailed(executor, 9003, NOW + 10, 'retryable');
+    await markTelegramUpdateFailed(executor, 9003, 1, NOW + 10, 'retryable');
     const row = await readRow(9003);
     expect(row?.failure_class).toBe('retryable');
   });

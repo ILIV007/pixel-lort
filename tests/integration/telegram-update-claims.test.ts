@@ -11,10 +11,11 @@ import {
 import { createDbExecutor } from '../../src/adapters/db/db-executor';
 
 /**
- * Durable Telegram update claims — lifecycle, LEASE, and idempotency tests
- * (Phase 2A, ADR-0025, lifecycle completed by ADR-0030/0031 — schema v2).
- * All statements run against the isolated workerd D1 binding; no network and
- * no real Telegram involvement.
+ * Durable Telegram update claims — lifecycle, LEASE, GENERATION FENCING, and
+ * idempotency tests (Phase 2A, ADR-0025, lifecycle completed by ADR-0030/0031
+ * and FENCED by the final correction round v1.2.3 — schema v2). All
+ * statements run against the isolated workerd D1 binding; no network and no
+ * real Telegram involvement.
  */
 
 function testCtx(): ExecutionContext {
@@ -54,10 +55,10 @@ async function readRow(updateId: number): Promise<LifecycleRow | null> {
 }
 
 describe('claimTelegramUpdate — lifecycle', () => {
-  it('claims a new update_id with a FULL lease state (ADR-0030)', async () => {
+  it('claims a new update_id with a FULL lease state and generation 1 (ADR-0030)', async () => {
     const executor = createDbExecutor(env.DB);
     const claim = await claimTelegramUpdate(executor, 7001, NOW);
-    expect(claim).toEqual({ kind: 'claimed' });
+    expect(claim).toEqual({ kind: 'claimed', attemptCount: 1 });
 
     const row = await readRow(7001);
     expect(row?.status).toBe('claimed');
@@ -83,7 +84,7 @@ describe('claimTelegramUpdate — lifecycle', () => {
   it('transitions claimed -> processed and reports the terminal state on re-claim', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 7003, NOW);
-    await expect(markTelegramUpdateProcessed(executor, 7003, NOW + 10)).resolves.toBe(true);
+    await expect(markTelegramUpdateProcessed(executor, 7003, 1, NOW + 10)).resolves.toBe(true);
 
     const row = await readRow(7003);
     expect(row?.status).toBe('processed');
@@ -99,7 +100,7 @@ describe('claimTelegramUpdate — lifecycle', () => {
   it('transitions claimed -> failed(retryable), clears the lease, and stays RECLAIMABLE', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 7004, NOW);
-    await expect(markTelegramUpdateFailed(executor, 7004, NOW + 10, 'retryable')).resolves.toBe(
+    await expect(markTelegramUpdateFailed(executor, 7004, 1, NOW + 10, 'retryable')).resolves.toBe(
       true,
     );
 
@@ -112,9 +113,9 @@ describe('claimTelegramUpdate — lifecycle', () => {
     // A retryable failed update is NOT terminal: redelivery reclaims it
     // atomically (ADR-0027) so a temporary failure can never lose it.
     const redelivery = await claimTelegramUpdate(executor, 7004, NOW + 20_000);
-    expect(redelivery).toEqual({ kind: 'reclaimed_retryable' });
+    expect(redelivery).toEqual({ kind: 'reclaimed_retryable', attemptCount: 2 });
 
-    // Reclaim state: fresh lease, class cleared, attempt counted.
+    // Reclaim state: fresh lease, class cleared, generation incremented.
     const reclaimed = await readRow(7004);
     expect(reclaimed?.status).toBe('claimed');
     expect(reclaimed?.claim_expires_at).toBe(NOW + 20_000 + LEASE);
@@ -125,7 +126,7 @@ describe('claimTelegramUpdate — lifecycle', () => {
   it('transitions claimed -> failed(permanent) and reports TERMINAL permanently_failed', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 7005, NOW);
-    await expect(markTelegramUpdateFailed(executor, 7005, NOW + 10, 'permanent')).resolves.toBe(
+    await expect(markTelegramUpdateFailed(executor, 7005, 1, NOW + 10, 'permanent')).resolves.toBe(
       true,
     );
 
@@ -147,20 +148,22 @@ describe('claimTelegramUpdate — lifecycle', () => {
   it('never overwrites a terminal state with the guarded transitions', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 7006, NOW);
-    await expect(markTelegramUpdateProcessed(executor, 7006, NOW + 10)).resolves.toBe(true);
-    await expect(markTelegramUpdateFailed(executor, 7006, NOW + 20, 'retryable')).resolves.toBe(
+    await expect(markTelegramUpdateProcessed(executor, 7006, 1, NOW + 10)).resolves.toBe(true);
+    await expect(markTelegramUpdateFailed(executor, 7006, 1, NOW + 20, 'retryable')).resolves.toBe(
       false,
     );
-    await expect(markTelegramUpdateFailed(executor, 7006, NOW + 20, 'permanent')).resolves.toBe(
+    await expect(markTelegramUpdateFailed(executor, 7006, 1, NOW + 20, 'permanent')).resolves.toBe(
       false,
     );
-    await expect(markTelegramUpdateProcessed(executor, 7006, NOW + 30)).resolves.toBe(false);
+    await expect(markTelegramUpdateProcessed(executor, 7006, 1, NOW + 30)).resolves.toBe(false);
   });
 
   it('returns false for terminal transitions on unknown update ids', async () => {
     const executor = createDbExecutor(env.DB);
-    await expect(markTelegramUpdateProcessed(executor, 7099, NOW)).resolves.toBe(false);
-    await expect(markTelegramUpdateFailed(executor, 7099, NOW, 'retryable')).resolves.toBe(false);
+    await expect(markTelegramUpdateProcessed(executor, 7099, 1, NOW)).resolves.toBe(false);
+    await expect(markTelegramUpdateFailed(executor, 7099, 1, NOW, 'retryable')).resolves.toBe(
+      false,
+    );
   });
 });
 
@@ -177,7 +180,7 @@ describe('claim lease — expiry boundary (ADR-0030)', () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 7111, NOW);
     const second = await claimTelegramUpdate(executor, 7111, NOW + LEASE);
-    expect(second).toEqual({ kind: 'reclaimed_stale' });
+    expect(second).toEqual({ kind: 'reclaimed_stale', attemptCount: 2 });
     const row = await readRow(7111);
     expect(row?.attempt_count).toBe(2);
     expect(row?.claim_expires_at).toBe(NOW + LEASE + LEASE);
@@ -187,7 +190,7 @@ describe('claim lease — expiry boundary (ADR-0030)', () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 7112, NOW);
     const second = await claimTelegramUpdate(executor, 7112, NOW + LEASE + 1);
-    expect(second).toEqual({ kind: 'reclaimed_stale' });
+    expect(second).toEqual({ kind: 'reclaimed_stale', attemptCount: 2 });
   });
 
   it('reclaims an abandoned lease-less claim (pre-0002 legacy row) as stale', async () => {
@@ -200,7 +203,7 @@ describe('claim lease — expiry boundary (ADR-0030)', () => {
       params: [7113, NOW, 'claimed'],
     });
     const recovery = await claimTelegramUpdate(executor, 7113, NOW + 1_000);
-    expect(recovery).toEqual({ kind: 'reclaimed_stale' });
+    expect(recovery).toEqual({ kind: 'reclaimed_stale', attemptCount: 1 });
     const row = await readRow(7113);
     expect(row?.claim_expires_at).toBe(NOW + 1_000 + LEASE);
     expect(row?.attempt_count).toBe(1);
@@ -216,7 +219,121 @@ describe('claim lease — expiry boundary (ADR-0030)', () => {
       params: [7114, NOW, 'failed'],
     });
     const recovery = await claimTelegramUpdate(executor, 7114, NOW + 1_000);
-    expect(recovery).toEqual({ kind: 'reclaimed_retryable' });
+    expect(recovery).toEqual({ kind: 'reclaimed_retryable', attemptCount: 1 });
+  });
+});
+
+describe('claim generation fencing — attempt_count is the fencing token (v1.2.3)', () => {
+  it('a stale owner can never terminate a newer generation', async () => {
+    const executor = createDbExecutor(env.DB);
+    // Generation 1 claims...
+    const first = await claimTelegramUpdate(executor, 7300, NOW);
+    expect(first).toEqual({ kind: 'claimed', attemptCount: 1 });
+    // ...its lease expires, and generation 2 reclaims.
+    const second = await claimTelegramUpdate(executor, 7300, NOW + LEASE);
+    expect(second).toEqual({ kind: 'reclaimed_stale', attemptCount: 2 });
+
+    // The STALE owner (generation 1) resumes and attempts EVERY terminal
+    // transition with its obsolete generation — all fenced to false.
+    await expect(markTelegramUpdateProcessed(executor, 7300, 1, NOW + LEASE + 10)).resolves.toBe(
+      false,
+    );
+    await expect(
+      markTelegramUpdateFailed(executor, 7300, 1, NOW + LEASE + 10, 'retryable'),
+    ).resolves.toBe(false);
+    await expect(
+      markTelegramUpdateFailed(executor, 7300, 1, NOW + LEASE + 10, 'permanent'),
+    ).resolves.toBe(false);
+
+    // The newer claim is untouched: still claimed, still generation 2.
+    let row = await readRow(7300);
+    expect(row?.status).toBe('claimed');
+    expect(row?.attempt_count).toBe(2);
+
+    // Generation 2 completes normally (its durable generation is 2).
+    await expect(markTelegramUpdateProcessed(executor, 7300, 2, NOW + LEASE + 20)).resolves.toBe(
+      true,
+    );
+    row = await readRow(7300);
+    expect(row?.status).toBe('processed');
+    expect(row?.attempt_count).toBe(2);
+  });
+
+  it('an old generation cannot terminate the new one even after the new owner started processing', async () => {
+    const executor = createDbExecutor(env.DB);
+    // Generation 1 claims, its lease expires, generation 2 reclaims and
+    // STARTS processing (mid-flight — it holds the live lease).
+    await claimTelegramUpdate(executor, 7301, NOW);
+    await claimTelegramUpdate(executor, 7301, NOW + LEASE);
+    // Generation 2 begins its own execution window (fresh lease is active).
+
+    // The old owner resumes AFTER the new owner started: no terminal
+    // transition with generation 1 may succeed, whatever the class.
+    await expect(markTelegramUpdateProcessed(executor, 7301, 1, NOW + LEASE + 5)).resolves.toBe(
+      false,
+    );
+    await expect(
+      markTelegramUpdateFailed(executor, 7301, 1, NOW + LEASE + 5, 'retryable'),
+    ).resolves.toBe(false);
+    await expect(
+      markTelegramUpdateFailed(executor, 7301, 1, NOW + LEASE + 5, 'permanent'),
+    ).resolves.toBe(false);
+    expect((await readRow(7301))?.attempt_count).toBe(2);
+
+    // The new owner finishes its processing with ITS generation.
+    await expect(markTelegramUpdateProcessed(executor, 7301, 2, NOW + LEASE + 6)).resolves.toBe(
+      true,
+    );
+    // A late stale transition cannot flip the terminal state either.
+    await expect(
+      markTelegramUpdateFailed(executor, 7301, 1, NOW + LEASE + 7, 'permanent'),
+    ).resolves.toBe(false);
+    const row = await readRow(7301);
+    expect(row?.status).toBe('processed');
+    expect(row?.failure_class).toBeNull();
+  });
+
+  it('rejects terminal transitions carrying the WRONG generation even on a live claim', async () => {
+    const executor = createDbExecutor(env.DB);
+    const claim = await claimTelegramUpdate(executor, 7302, NOW);
+    expect(claim).toEqual({ kind: 'claimed', attemptCount: 1 });
+
+    // A fabricated/future generation never matches the durable row.
+    await expect(markTelegramUpdateProcessed(executor, 7302, 2, NOW + 5)).resolves.toBe(false);
+    await expect(markTelegramUpdateFailed(executor, 7302, 2, NOW + 5, 'retryable')).resolves.toBe(
+      false,
+    );
+    // The real owner still completes with its durable generation (1).
+    await expect(markTelegramUpdateProcessed(executor, 7302, 1, NOW + 6)).resolves.toBe(true);
+  });
+
+  it('concurrent stale reclaims agree on ONE durable generation (winner N+1, losers in_flight)', async () => {
+    const executor = createDbExecutor(env.DB);
+    // An abandoned generation-1 claim: written in the past, lease long expired.
+    await claimTelegramUpdate(executor, 7303, NOW - 3 * LEASE);
+
+    const results = await Promise.all([
+      claimTelegramUpdate(executor, 7303, NOW),
+      claimTelegramUpdate(executor, 7303, NOW),
+      claimTelegramUpdate(executor, 7303, NOW),
+      claimTelegramUpdate(executor, 7303, NOW),
+    ]);
+
+    const winners = results.filter((r) => r.kind === 'reclaimed_stale');
+    const losers = results.filter((r) => r.kind === 'in_flight');
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(3);
+
+    // The winner receives attempt N+1, and the durable row agrees: every
+    // result resolves against exactly ONE durable generation.
+    const winner = winners[0];
+    if (winner?.kind !== 'reclaimed_stale') {
+      throw new Error('unreachable: winner filtered above');
+    }
+    const durable = await readRow(7303);
+    expect(durable?.attempt_count).toBe(2);
+    expect(winner.attemptCount).toBe(durable?.attempt_count);
+    expect(durable?.claim_expires_at).toBe(NOW + LEASE);
   });
 });
 
@@ -233,6 +350,8 @@ describe('concurrent duplicate claims', () => {
     const losers = results.filter((r) => r.kind === 'in_flight');
     expect(winners).toHaveLength(1);
     expect(losers).toHaveLength(2);
+    // The single winner owns generation 1.
+    expect(winners[0]).toEqual({ kind: 'claimed', attemptCount: 1 });
   });
 
   it('produces exactly one stale-claim reclaim winner under concurrency', async () => {
@@ -250,14 +369,21 @@ describe('concurrent duplicate claims', () => {
     const inFlight = results.filter((r) => r.kind === 'in_flight');
     expect(reclaims).toHaveLength(1);
     expect(inFlight).toHaveLength(2);
-    // Exactly one attempt was added by the single winning reclaim.
-    expect((await readRow(7101))?.attempt_count).toBe(2);
+    // Exactly one attempt was added by the single winning reclaim, and the
+    // winner's generation matches the durable row.
+    const durable = await readRow(7101);
+    expect(durable?.attempt_count).toBe(2);
+    const winner = reclaims[0];
+    if (winner?.kind !== 'reclaimed_stale') {
+      throw new Error('unreachable: winner filtered above');
+    }
+    expect(winner.attemptCount).toBe(durable?.attempt_count);
   });
 
   it('produces exactly one retryable-failed reclaim winner under concurrency', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 7102, NOW);
-    await markTelegramUpdateFailed(executor, 7102, NOW + 10, 'retryable');
+    await markTelegramUpdateFailed(executor, 7102, 1, NOW + 10, 'retryable');
 
     const results = await Promise.all([
       claimTelegramUpdate(executor, 7102, NOW + 20_000),
@@ -269,12 +395,19 @@ describe('concurrent duplicate claims', () => {
     const inFlight = results.filter((r) => r.kind === 'in_flight');
     expect(reclaims).toHaveLength(1);
     expect(inFlight).toHaveLength(2);
+    // The winner owns generation 2 — the durable generation.
+    const winner = reclaims[0];
+    if (winner?.kind !== 'reclaimed_retryable') {
+      throw new Error('unreachable: winner filtered above');
+    }
+    expect(winner.attemptCount).toBe(2);
+    expect((await readRow(7102))?.attempt_count).toBe(2);
   });
 
   it('never reclaims a permanent failed row under concurrency', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 7103, NOW);
-    await markTelegramUpdateFailed(executor, 7103, NOW + 10, 'permanent');
+    await markTelegramUpdateFailed(executor, 7103, 1, NOW + 10, 'permanent');
 
     const results = await Promise.all([
       claimTelegramUpdate(executor, 7103, NOW + 20_000),

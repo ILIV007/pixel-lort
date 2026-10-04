@@ -21,7 +21,7 @@ foundation — no Telegram credentials exist, no webhook is registered, and no
 live Telegram call can occur.**
 
 Implemented in Phase 2A (as corrected in v1.2.1; lifecycle completed in the
-second correction round v1.2.2 — schema v2):
+correction rounds v1.2.2–v1.2.3 — schema v2):
 
 - `POST /telegram/webhook` behind a fail-closed ingress flag
   (`TELEGRAM_INGRESS_ENABLED`, ships `false` everywhere): timing-safe shared
@@ -36,18 +36,24 @@ second correction round v1.2.2 — schema v2):
   limit, bot-command target extraction (`/cmd@bot`), and crash-free
   classification of unknown update kinds.
 - Durable update idempotency in D1 (`telegram_updates`, ADR-0025/0027,
-  lifecycle completed by ADR-0030/0031): update_id claim boundary with SIX
-  explicit outcomes (claimed / reclaimed_retryable / reclaimed_stale /
-  already_processed / permanently_failed / in_flight), guarded
+  lifecycle completed by ADR-0030/0031, fenced by the final correction
+  round v1.2.3): update_id claim boundary with SIX explicit outcomes
+  (claimed / reclaimed_retryable / reclaimed_stale / already_processed /
+  permanently_failed / in_flight), GENERATION-FENCED
   `claimed -> processed | failed` transitions with a PERSISTED failure
   class, atomic reclaims (failed-retryable rows and EXPIRED-LEASE claimed
   rows) where exactly one concurrent caller wins. Every claim carries a
   conservative 5-minute lease (centralized constant, boundary-tested), so
   an update whose Worker died after claiming is recovered by the next
-  delivery after lease expiry instead of being lost forever. Retryable
-  failures propagate safe HTTP 503 semantics (an in-flight update answers
-  503 too — never a false-success 200); permanent failures are TERMINAL:
-  acknowledged 200 and never re-executed. Processing is durable
+  delivery after lease expiry instead of being lost forever. `attempt_count`
+  is the claim GENERATION (fencing token): every execution-owning claim
+  outcome carries it and every terminal transition is guarded by it, so a
+  stale Worker can never mutate a newer owner's claim. HTTP 200 is emitted
+  only after a terminal state is durably persisted; terminal-transition
+  uncertainty (rejected by the fence, or a storage error) answers safe 503.
+  Retryable failures propagate safe HTTP 503 semantics (an in-flight update
+  answers 503 too — never a false-success 200); permanent failures are
+  TERMINAL: acknowledged 200 and never re-executed. Processing is durable
   at-least-once with duplicate suppression before execution plus bounded
   duplicate risk for ambiguous external side effects (ADR-0032) — exactly-once
   claim ownership does not imply exactly-once Telegram delivery.

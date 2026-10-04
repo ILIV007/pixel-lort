@@ -1,7 +1,8 @@
 # ADR-0030: Claimed-update lease and stale-claim recovery
 
-- **Status:** Accepted (completes ADR-0027; amends ADR-0025)
-- **Phase:** 2A (second correction round v1.2.2)
+- **Status:** Accepted (completes ADR-0027; amends ADR-0025; amended in the
+  final correction round v1.2.3 — attempt_count generation fencing)
+- **Phase:** 2A (second correction round v1.2.2; final correction round v1.2.3)
 - **Date:** 2026-10-04
 - **Decided by:** Alexios
 
@@ -44,11 +45,13 @@ stale-claim path could ever trigger.
   below any operational recovery horizon. The boundary is tested at lease
   minus 1 ms (active), exact expiry (stale), and after expiry (stale). No
   wall-clock calls exist inside repositories: time is injected explicitly.
-- **Six claim outcomes** (names chosen for explicitness):
-  `claimed`, `reclaimed_retryable` (failed-retryable row re-claimed),
+- **Six claim outcomes** (names chosen for explicitness): `claimed`
+  (generation 1), `reclaimed_retryable` (failed-retryable row re-claimed),
   `reclaimed_stale` (expired-lease row re-claimed), `already_processed`
   (terminal), `permanently_failed` (terminal — ADR-0031), `in_flight`
-  (active unexpired lease held elsewhere).
+  (active unexpired lease held elsewhere). The three EXECUTION-OWNING
+  outcomes carry the `attemptCount` generation they now own; the
+  terminal/no-ownership outcomes carry none.
 - **Active lease → `in_flight`, and in-flight is NOT a successful
   duplicate.** The webhook answers safe retryable 503 semantics for an
   in-flight update so Telegram keeps redelivering until the lease resolves
@@ -56,12 +59,24 @@ stale-claim path could ever trigger.
   `already_processed` — or the lease expires and the claim becomes
   reclaimable).
 - **Expired lease → atomic stale reclaim.** A single guarded UPDATE
-  (`WHERE update_id = ? AND status = 'claimed'
+  (`WHERE update_id = ? AND status = 'claimed' AND attempt_count = ?
 AND (claim_expires_at IS NULL OR claim_expires_at <= ?)`) admits EXACTLY
   ONE winner; losers re-read the winner's FRESH lease and observe
-  `in_flight`. The reclaim refreshes the lease, clears `failure_class`, and
-  increments `attempt_count`. A NULL lease (possible only for a pre-0002
-  legacy row) is treated as already abandoned — recoverable, never stranded.
+  `in_flight`. The reclaim is additionally FENCED by the previously observed
+  generation (`AND attempt_count = ?`): exactly one generation transition
+  may win, and a lost race can never overwrite the winner. The reclaim
+  refreshes the lease, clears `failure_class`, and increments
+  `attempt_count`. A NULL lease (possible only for a pre-0002 legacy row) is
+  treated as already abandoned — recoverable, never stranded.
+- **Generation fencing (amendment, final correction round v1.2.3):**
+  `attempt_count` is the claim GENERATION (fencing token), not merely an
+  audit counter. Leases establish time-bounded ownership; the generation
+  fences stale owners from newer claims: every terminal transition
+  (`markTelegramUpdateProcessed` / `markTelegramUpdateFailed`) requires the
+  caller's `expectedAttemptCount` and is guarded by
+  `WHERE update_id = ? AND status = 'claimed' AND attempt_count = ?` — a
+  stale owner always receives `false` and can never mutate (or terminate) a
+  newer owner's claim, no matter when it resumes.
 - **If marking a retryable failure fails**, the original request still
   returns 503 and the row may remain claimed; after lease expiry a later
   delivery reclaims it. The full sequence is proven by an integration test
@@ -77,9 +92,10 @@ AND (claim_expires_at IS NULL OR claim_expires_at <= ?)`) admits EXACTLY
   with backoff; the winner's completion turns later redeliveries into
   duplicate-acked `already_processed`) for the guarantee that no in-flight
   ambiguity is ever acknowledged as success.
-- `attempt_count` gives an audit anchor for pathological redelivery loops;
-  no retry CAP is imposed at this layer (Telegram's redelivery window is
-  finite, and each attempt is one bounded execution).
+- `attempt_count` is the FENCING GENERATION for claim ownership (and an
+  audit anchor for pathological redelivery loops); no retry CAP is imposed
+  at this layer (Telegram's redelivery window is finite, and each attempt
+  is one bounded execution).
 
 ## Verification highlights
 
@@ -92,5 +108,12 @@ AND (claim_expires_at IS NULL OR claim_expires_at <= ?)`) admits EXACTLY
   expiry (attempt_count 2);
 - marking-failure sequence: 503 → row stays claimed → in-flight 503 →
   lease expiry → `reclaimed_stale` → processed;
+- fencing: a stale owner (generation 1) cannot mark processed, retryable-
+  failed, or permanent-failed after generation 2 reclaims — every fenced
+  transition returns false; generation 2 completes normally; a wrong/
+  fabricated generation is rejected even on a live claim;
+- concurrent stale reclaims agree on ONE durable generation (one winner at
+  attempt N+1; all losers in_flight); the winner's `attemptCount` equals
+  the durable `attempt_count`;
 - legacy lease-less (pre-0002) claimed row is reclaimable;
 - processed rows are never reclaimable.

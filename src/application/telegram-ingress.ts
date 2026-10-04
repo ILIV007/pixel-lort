@@ -1,28 +1,32 @@
 /**
  * Telegram ingress pipeline (Phase 2A, corrected by ADR-0027, lifecycle
- * completed by ADR-0030/0031/0032) — the durable update lifecycle with
- * RETRYABLE/PERMANENT failure semantics and lease-based claim recovery.
+ * completed by ADR-0030/0031/0032, FINAL CORRECTION v1.2.3: generation-fenced
+ * ownership and honest terminal-transition acknowledgement).
  *
  * Orchestrates, for one verified and parsed Update:
  *   1. durable claim by update_id — SIX claim outcomes (ADR-0030/0031):
- *        claimed (new, lease set) | reclaimed_retryable (failed-retryable ->
- *        claimed) | reclaimed_stale (expired-lease -> claimed) — each won by
- *        exactly one concurrent caller | already_processed (terminal, ack) |
- *        permanently_failed (terminal, ack, never re-executed) | in_flight
- *        (an ACTIVE lease is held elsewhere). Duplicates of PROCESSED updates
- *        are acknowledged WITHOUT reprocessing; in-flight claims are NOT
- *        acknowledged as success (safe 503 semantics so Telegram keeps
- *        redelivering until the lease resolves); a FAILED row is atomically
- *        reclaimable when retryable, or terminal when permanent, so a
- *        temporary failure can never permanently lose an update and a
- *        permanent failure can never execute twice.
+ *        claimed (new, lease set, generation 1) | reclaimed_retryable
+ *        (failed-retryable -> claimed) | reclaimed_stale (expired-lease ->
+ *        claimed) — each won by exactly one concurrent caller and each
+ *        CARRYING ITS CLAIM GENERATION (attempt_count, the fencing token) |
+ *        already_processed (terminal, ack) | permanently_failed (terminal,
+ *        ack, never re-executed) | in_flight (an ACTIVE lease is held
+ *        elsewhere). Duplicates of PROCESSED updates are acknowledged
+ *        WITHOUT reprocessing; in-flight claims are NOT acknowledged as
+ *        success (safe 503 semantics so Telegram keeps redelivering until
+ *        the lease resolves); a FAILED row is atomically reclaimable when
+ *        retryable, or terminal when permanent, so a temporary failure can
+ *        never permanently lose an update and a permanent failure can never
+ *        execute twice.
  *   2. routing of the claimed update (command/authorization contracts are
  *      wired by their owning slices) producing TYPED actions (send_message /
  *      denied / answer_callback / noop). An authorization DENIAL is a
  *      successfully handled action, never a processing failure.
- *   3. a stable terminal transition: processed, or failed with the persisted
- *      failure class. A transient internal failure therefore never ends up
- *      marked processed.
+ *   3. a GENERATION-FENCED terminal transition (final correction v1.2.3):
+ *      the pipeline retains the generation returned by the claim and passes
+ *      it to EVERY terminal transition, so a stale Worker resuming after a
+ *      newer reclaim can never mutate the newer owner's claim (a fenced
+ *      transition returns false — never an overwrite).
  *   4. FAILURE CLASSIFICATION (ADR-0031):
  *        - RETRYABLE failures (Telegram timeout/network/429/5xx, database
  *          and service-unavailability, unknown internal errors) mark the row
@@ -36,11 +40,26 @@
  *          ACKNOWLEDGED with 200 — no infinite retry loop, and the persisted
  *          class makes the row TERMINAL: reclaim is impossible, every later
  *          delivery observes permanently_failed without executing.
- *        - If even the failure marking fails, the row stays `claimed` with a
- *          lease; the original 503 still propagates, and after lease expiry a
- *          later delivery reclaims the abandoned claim (reclaimed_stale,
- *          ADR-0030).
- *   5. MISSING OUTBOUND CLIENT: a noop action completes safely without a
+ *        - If even the failure marking fails (throws OR is rejected by the
+ *          fence), the row stays `claimed` with a lease; the original 503
+ *          still propagates, and after lease expiry a later delivery
+ *          reclaims the abandoned claim (reclaimed_stale, ADR-0030).
+ *   5. TERMINAL-TRANSITION ACKNOWLEDGEMENT DISCIPLINE (final correction
+ *      v1.2.3): HTTP 200 is emitted ONLY after a terminal state is durably
+ *      persisted.
+ *        - processed: the fenced transition returning true is the ONLY path
+ *          to the `processed` outcome and its success log; a rejected
+ *          transition (stale owner) or a storage error produces safe
+ *          retryable 503 semantics — never a false-success 200, even though
+ *          the outbound action may already have executed.
+ *        - permanent failure: the 200 acknowledgement happens only after
+ *          failure_class='permanent' is DURABLY stored; persistence that
+ *          returns false or throws is a storage/service availability failure
+ *          (regardless of the original failure class) and answers 503.
+ *        - Logging distinguishes terminal_transition_succeeded,
+ *          terminal_transition_rejected (stale_owner), and
+ *          terminal_transition_failed (storage_error) with stable fields.
+ *   6. MISSING OUTBOUND CLIENT: a noop action completes safely without a
  *      Bot API client (offline mode). An OUTBOUND action (send_message /
  *      denied / answer_callback) without a client is a retryable
  *      `service_unavailable` — never silently skipped-and-acked, so the
@@ -151,9 +170,10 @@ export interface TelegramIngress {
    * Run the durable lifecycle for one parsed update.
    * Resolves with a terminal outcome (`processed` | `duplicate` | `failed`)
    * — or REJECTS with an AppError (HTTP 503 semantics) when processing
-   * failed retryably OR when the update is still in-flight under an active
-   * claim lease, so the caller never acknowledges a lost or ambiguous
-   * update with a false success.
+   * failed retryably, when the update is still in-flight under an active
+   * claim lease, or when the terminal transition could not be durably
+   * persisted — so the caller never acknowledges a lost, ambiguous, or
+   * unpersisted update with a false success.
    */
   processUpdate(update: ParsedUpdate): Promise<TelegramUpdateOutcome>;
 }
@@ -207,6 +227,83 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     }
   }
 
+  /**
+   * The failure path: classify the error, persist the terminal failed state
+   * (FENCED by the owning generation), and answer honestly (final correction
+   * v1.2.3):
+   * - persisted retryable  -> propagate safe 503 (Telegram redelivers);
+   * - persisted permanent  -> resolve 'failed' (HTTP 200 semantics) — ONLY
+   *                          after the terminal classification is durably
+   *                          stored;
+   * - persistence rejected (stale owner) or thrown (storage error) -> safe
+   *   503 REGARDLESS of the original failure class: a failure to persist the
+   *   terminal transition is a storage/service availability failure, and an
+   *   unpersisted terminal state is never acknowledged. The row remains
+   *   protected by its current lease and can later be stale-reclaimed
+   *   (ADR-0030).
+   */
+  async function handleProcessingFailure(
+    updateId: number,
+    expectedAttemptCount: number,
+    error: unknown,
+  ): Promise<TelegramUpdateOutcome> {
+    const failureClass = classifyProcessingFailure(error);
+    logger.warn('telegram.update.failed', {
+      updateId,
+      errorCode: toAppError(error).code,
+      retryable: failureClass === 'retryable',
+    });
+
+    let persisted: boolean;
+    try {
+      persisted = await markTelegramUpdateFailed(
+        executor,
+        updateId,
+        expectedAttemptCount,
+        clock.now(),
+        failureClass,
+      );
+    } catch (markError) {
+      // Storage error while persisting the terminal transition: the row
+      // stays `claimed` WITH ITS LEASE (observable); after lease expiry a
+      // later delivery atomically reclaims the abandoned claim
+      // (reclaimed_stale — ADR-0030). Never let a marking failure mask the
+      // original error, and never acknowledge an unpersisted state.
+      logger.warn('telegram.update.terminal_transition_failed', {
+        updateId,
+        transition: 'failed',
+        reason: 'storage_error',
+        errorCode: toAppError(markError).code,
+      });
+      throw new AppError('service_unavailable', { cause: error });
+    }
+    if (!persisted) {
+      // FENCE REJECTED the transition: a newer generation owns the claim.
+      // This stale owner must never mutate or acknowledge it.
+      logger.warn('telegram.update.terminal_transition_rejected', {
+        updateId,
+        transition: 'failed',
+        reason: 'stale_owner',
+      });
+      throw new AppError('service_unavailable', { cause: error });
+    }
+    logger.info('telegram.update.terminal_transition_succeeded', {
+      updateId,
+      transition: 'failed',
+      failureClass,
+    });
+
+    if (failureClass === 'retryable') {
+      // Propagate 503 semantics: the webhook MUST NOT answer 200, so
+      // Telegram redelivers and the failed row is reclaimed then.
+      throw new AppError('service_unavailable', { cause: error });
+    }
+    // Permanent (ADR-0031), now DURABLY persisted: acknowledge to avoid an
+    // infinite retry loop. TERMINAL: reclaim is impossible and later
+    // deliveries observe permanently_failed without executing.
+    return 'failed';
+  }
+
   async function processUpdate(update: ParsedUpdate): Promise<TelegramUpdateOutcome> {
     let claim: Awaited<ReturnType<typeof claimTelegramUpdate>>;
     try {
@@ -247,62 +344,82 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         break;
     }
 
+    // THE CLAIM GENERATION (attempt_count) is the FENCING TOKEN (final
+    // correction v1.2.3): every terminal transition below is guarded by it,
+    // so this Worker can never mutate a claim that a newer generation has
+    // reclaimed in the meantime.
+    const generation = claim.attemptCount;
+
     logger.info('telegram.update.claimed', {
       updateId: update.updateId,
       reclaimed: claim.kind !== 'claimed',
       reclaimedStale: claim.kind === 'reclaimed_stale',
+      attempt: generation,
     });
 
+    // Route and execute the action. A failure here goes to the fenced
+    // failure path; the processed transition below happens ONLY after the
+    // action executed successfully.
+    let actor: ActorResolution;
+    let action: TelegramAction;
     try {
-      const actor: ActorResolution =
+      actor =
         update.kind === 'unsupported'
           ? { kind: 'unauthorized' }
           : await authorization.resolveActor(update.fromUserId);
-      const action = commandRouter.route(update, actor);
+      action = commandRouter.route(update, actor);
       await executeAction(action);
-
-      const marked = await markTelegramUpdateProcessed(executor, update.updateId, clock.now());
-      if (!marked) {
-        logger.warn('telegram.update.mark_skipped', { updateId: update.updateId });
-      }
-      logger.info('telegram.update.processed', {
-        updateId: update.updateId,
-        action: action.type,
-        noopReason: action.type === 'noop' ? action.reason : undefined,
-        authorized: actor.kind === 'authorized',
-        role: actor.kind === 'authorized' ? actor.role : undefined,
-      });
-      return 'processed';
     } catch (error) {
-      const failureClass = classifyProcessingFailure(error);
-      logger.warn('telegram.update.failed', {
-        updateId: update.updateId,
-        errorCode: toAppError(error).code,
-        retryable: failureClass === 'retryable',
-      });
-      try {
-        await markTelegramUpdateFailed(executor, update.updateId, clock.now(), failureClass);
-      } catch (markError) {
-        // The row stays `claimed` WITH ITS LEASE (observable); after lease
-        // expiry a later delivery atomically reclaims the abandoned claim
-        // (reclaimed_stale — ADR-0030), so the update is still recoverable.
-        // Never let a marking failure mask the original error.
-        logger.warn('telegram.update.mark_failed', {
-          updateId: update.updateId,
-          errorCode: toAppError(markError).code,
-        });
-      }
-      if (failureClass === 'retryable') {
-        // Propagate 503 semantics: the webhook MUST NOT answer 200, so
-        // Telegram redelivers and the failed row is reclaimed then.
-        throw new AppError('service_unavailable', { cause: error });
-      }
-      // Permanent (ADR-0031): acknowledge to avoid an infinite retry loop.
-      // The row is marked failed with failure_class='permanent' (above) —
-      // TERMINAL: reclaim is impossible and later deliveries observe
-      // permanently_failed without executing.
-      return 'failed';
+      return handleProcessingFailure(update.updateId, generation, error);
     }
+
+    // Successful execution: the processed transition MUST be durably
+    // persisted before ANY success acknowledgement (final correction v1.2.3).
+    let marked: boolean;
+    try {
+      marked = await markTelegramUpdateProcessed(
+        executor,
+        update.updateId,
+        generation,
+        clock.now(),
+      );
+    } catch (markError) {
+      // Storage error: the terminal state is UNKNOWN — the row stays
+      // claimed under its lease and remains recoverable after expiry
+      // (ADR-0030). Safe retryable 503; never a false-success 200, even
+      // though the outbound action may already have executed.
+      logger.warn('telegram.update.terminal_transition_failed', {
+        updateId: update.updateId,
+        transition: 'processed',
+        reason: 'storage_error',
+        errorCode: toAppError(markError).code,
+      });
+      throw new AppError('service_unavailable', { cause: markError });
+    }
+    if (!marked) {
+      // FENCE REJECTED the transition: a newer generation owns the claim.
+      // The outbound action may already have executed — the honest answer is
+      // still safe retryable 503, and the success log is NEVER emitted.
+      logger.warn('telegram.update.terminal_transition_rejected', {
+        updateId: update.updateId,
+        transition: 'processed',
+        reason: 'stale_owner',
+      });
+      throw new AppError('service_unavailable');
+    }
+
+    logger.info('telegram.update.terminal_transition_succeeded', {
+      updateId: update.updateId,
+      transition: 'processed',
+    });
+    logger.info('telegram.update.processed', {
+      updateId: update.updateId,
+      action: action.type,
+      noopReason: action.type === 'noop' ? action.reason : undefined,
+      authorized: actor.kind === 'authorized',
+      role: actor.kind === 'authorized' ? actor.role : undefined,
+    });
+    return 'processed';
   }
 
   return { processUpdate };

@@ -665,3 +665,174 @@ Single artifact: `pixel-lort-phase02a-v1.2.2.zip` (full working tree +
 complete `.git` history at the ZIP root; excludes node_modules, dist,
 .wrangler, coverage, environment/secret files, credentials, logs, temporary
 files, and previous ZIP artifacts).
+
+---
+
+# Final correction round — v1.2.3 (Phase 2A final lifecycle correction: CHANGES REQUIRED)
+
+## E1. Scope and authority
+
+Alexios' final Phase 2A lifecycle correction review (verdict CHANGES
+REQUIRED) against branch `phase/02a-telegram-ingress` at HEAD
+`0db8fa376d4f960ff790190cdb2e0141071487ba` (version 1.2.2, schema version 2,
+independently verified 440/440 tests and 47/47 D1/migration tests, 164
+tracked files, 0 secret findings). The lease and failure-class design of the
+second correction round was ACCEPTED; one final ownership/fencing defect and
+one acknowledgement defect remained. This round implements the two required
+fixes in ONE focused correction commit, bumps the artifact version to
+**1.2.3**, and keeps schema version at 2 (no migration 0003). Sections 1–14
+(v1.2.0), C1–C10 (v1.2.1), and D1–D9 (v1.2.2) above are preserved as
+history.
+
+## E2. FIX 1 — attempt_count is the claim fencing token
+
+- **Generation semantics:** `attempt_count` is the claim GENERATION (fencing
+  token), not merely an audit counter. Leases establish time-bounded
+  ownership; the generation fences stale owners from newer claims.
+- Every EXECUTION-OWNING claim outcome carries its generation:
+  `claimed` → `attemptCount: 1`; `reclaimed_retryable` and
+  `reclaimed_stale` → the incremented generation won by the reclaim.
+  Terminal/no-ownership outcomes (`already_processed`, `permanently_failed`,
+  `in_flight`) carry no generation.
+- `attempt_count` is included in the `ClaimRow` read.
+- Both reclaim UPDATEs are additionally guarded by the previously observed
+  generation (`AND attempt_count = ?`, alongside the status / failure-class
+  / lease conditions) — exactly one generation transition may win, and a
+  lost race can never overwrite the winner.
+- Terminal transitions accept `expectedAttemptCount`:
+  `markTelegramUpdateProcessed(executor, updateId, expectedAttemptCount,
+processedAtMs)` and `markTelegramUpdateFailed(executor, updateId,
+expectedAttemptCount, failedAtMs, failureClass)`; their SQL is guarded by
+  `WHERE update_id = ? AND status = 'claimed' AND attempt_count = ?`. A
+  stale owner always receives `false` and can never mutate (or terminate) a
+  newer owner's claim.
+- The ingress pipeline retains the generation returned by the claim and
+  passes it to every terminal transition.
+- No migration 0003: the fencing uses the `attempt_count` column already
+  added by migration 0002. Schema version stays 2.
+
+## E3. FIX 2 — never acknowledge an unpersisted terminal state
+
+- Successful action execution: `markTelegramUpdateProcessed` returning true
+  is the ONLY path to the `processed` outcome; returning false throws safe
+  retryable `service_unavailable` (HTTP 503); throwing propagates safe
+  retryable 503 semantics. `telegram.update.processed` is logged ONLY when
+  the transition returned true.
+- Retryable failure: persisted retryable terminal state → 503 (unchanged);
+  persistence returning false (stale owner) or throwing → still 503; the
+  row remains protected by its current lease and can later be
+  stale-reclaimed.
+- Permanent failure: the HTTP 200 acknowledgement happens ONLY after
+  `failure_class = 'permanent'` is durably stored; persistence returning
+  false or throwing → HTTP 503.
+- A failure to persist the terminal transition is a storage/service
+  availability failure REGARDLESS of the original processing failure class.
+- Logging distinguishes `terminal_transition_succeeded`,
+  `terminal_transition_rejected` (reason `stale_owner`), and
+  `terminal_transition_failed` (reason `storage_error`) with stable fields
+  only (update_id, transition word, reason word, error code).
+
+## E4. Required tests (all green)
+
+- Stale-owner fencing: attempt 1 claims; lease expires; attempt 2 reclaims;
+  attempt 1 cannot mark processed, retryable-failed, or permanent-failed
+  (all fenced transitions return false); attempt 2 completes normally.
+- Old generation cannot terminate the new one even when the new owner has
+  started processing (repository level) or has already completed (pipeline
+  level with the real fenced completion) — the stale pipeline answers 503
+  and the durable terminal state stays intact.
+- Wrong/fabricated generation is rejected even on a live claim; the real
+  owner still completes.
+- Concurrent stale reclaim: exactly one winner receives attempt N+1; all
+  losers observe `in_flight`; the winner's `attemptCount` equals the single
+  durable `attempt_count`.
+- Processed transition returns false → pipeline answers safe 503, never
+  200, the outbound send may already have executed, and no processed
+  success log is emitted (`terminal_transition_rejected` / `stale_owner`
+  logged instead).
+- Processed transition throws → safe 503; row stays claimed under its
+  lease; no false processed acknowledgement.
+- Permanent-failure persistence returns false → safe 503, never 200.
+- Permanent-failure persistence throws → full recovery sequence proven:
+  503 → row claimed under its lease → lease expiry → newer generation
+  reclaims → persistence succeeds → terminal `failed(permanent)` → later
+  deliveries never execute again.
+- The existing ambiguous external-side-effect test (ADR-0032) remains valid
+  and still states durable at-least-once semantics with bounded duplicate
+  risk.
+- The simulated stale-owner interleavings use the same guarded statement
+  shapes as the real reclaim, so the fencing WHERE clause is exercised for
+  real.
+
+## E5. Active documentation cleanup
+
+- ADR-0030 (amendment): attempt_count is the fencing generation; leases
+  establish time-bounded ownership; reclaims are generation-guarded;
+  terminal transitions require `expectedAttemptCount`; verification
+  highlights extended.
+- ADR-0031 (amendment): fenced terminal transitions; HTTP 200 emitted only
+  after durable persistence of the permanent classification; transition
+  uncertainty → 503; three-way terminal-transition logging.
+- ADR-0032 (amendment): terminal-transition uncertainty produces HTTP 503,
+  never a false 200 — the honest at-least-once contract covers the
+  rejected-transition path too. ADR index status column updated.
+- `src/application/README.md`: replaced the stale "offline skip without
+  BOT_TOKEN" wording with the implemented contract (noop may complete
+  offline; outbound action without BOT_TOKEN is retryable
+  `service_unavailable`; never silently skipped and marked processed) and
+  documented fencing + honest acknowledgement.
+- README.md, docs/ARCHITECTURE.md (§3.8), docs/SECURITY_MODEL.md (trust
+  boundary row + a new prohibited practice: acknowledging an update whose
+  terminal transition is not durably persisted), docs/ROADMAP.md (Phase 2A
+  section), and migrations/README.md (attempt_count = fencing generation)
+  updated consistently. Historical handoff sections preserved; this final
+  correction appended.
+
+## E6. Version 1.2.3
+
+- Bumped consistently to **1.2.3**: package.json, package-lock.json (via
+  npm tooling), wrangler.jsonc (root + preview), `DEFAULT_APP_VERSION`,
+  `.env.example`, `.dev.vars.example`, test helpers, `/version`
+  expectations, unit/integration router-version fixtures, the
+  version-consistency gate header, and the secret-scanner self-test
+  fixture. Schema version stays 2; no migration 0003. The existing
+  version-consistency gate passes.
+
+## E7. Verification (final correction round)
+
+- Clean-environment gate (exact commands): `rm -rf node_modules dist
+.wrangler && npm ci && npm run check` — exit 0 (lint, prettier, strict
+  typecheck, tests, secret-scanner self-test, secret scan,
+  version-consistency gate, offline dry-run build). `npm run test:db` green
+  (d1-schema, db-boundary, migration-plan, migration-plan-failures,
+  migration-0002 run explicitly; migration tests also run inside
+  `npm run check`).
+- Suite totals: **449 tests in 34 files, all passing** (v1.2.2 baseline was
+  440 tests in 34 files; this round adds 9 tests: 4 repository-level
+  generation-fencing tests and 5 pipeline-level fenced-terminal-transition
+  tests; existing suites extended for the new signatures and generation
+  assertions).
+- D1/migration suites: **47/47 tests in 5 files, all passing** (schema
+  version 2 unchanged; migrations 0001 + 0002 untouched).
+- Secret scanner: 164 files scanned, 0 findings; scanner self-test 10/10.
+- Version-consistency gate: application version 1.2.3 and schema version 2
+  consistent across all active configuration files.
+- Dry-run build: OK (offline `wrangler deploy --dry-run`; 70.29 KiB /
+  gzip 17.15 KiB).
+- No deployment, no push, no webhook registration, no resource creation,
+  no remote migration, no credentials, no live Telegram traffic.
+
+## E8. Correction commit
+
+| Round        | Commit          | Subject                                         |
+| ------------ | --------------- | ----------------------------------------------- |
+| v1.2.3 (fix) | _(this commit)_ | fix: fence Telegram claim ownership transitions |
+
+Ancestry: `446f3f1` (authoritative main) → `8f23b42` (v1.2.0 head) →
+`d49ba68` (v1.2.1 correction head) → `0db8fa3` (v1.2.2 correction head) →
+this commit. No history rewritten.
+
+Single artifact: `pixel-lort-phase02a-v1.2.3.zip` (full working tree +
+complete `.git` history at the ZIP root; excludes node_modules, dist,
+.wrangler, coverage, environment/secret files, credentials, logs, temporary
+files, and previous ZIP artifacts).

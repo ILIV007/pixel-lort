@@ -1,7 +1,9 @@
 # ADR-0032: Honest at-least-once semantics for external Telegram side effects
 
-- **Status:** Accepted (amends the wording of ADR-0025; complements ADR-0027)
-- **Phase:** 2A (second correction round v1.2.2)
+- **Status:** Accepted (amends the wording of ADR-0025; complements
+  ADR-0027; amended in the final correction round v1.2.3 — fenced terminal
+  transitions and honest acknowledgement)
+- **Phase:** 2A (second correction round v1.2.2; final correction round v1.2.3)
 - **Date:** 2026-10-04
 - **Decided by:** Alexios
 
@@ -37,6 +39,16 @@ claim otherwise.
   delivered once, the row remains claimed, and after lease expiry the next
   delivery re-executes the action — the message is delivered a SECOND time.
   Duplicate suppression resumes after the terminal transition.
+- **Terminal-transition uncertainty answers 503, never a false 200
+  (amendment, final correction round v1.2.3):** HTTP 200 is emitted only
+  after a terminal state is durably persisted. A processed transition that
+  is rejected by the attempt_count generation fence (a newer owner
+  reclaimed the row) or fails with a storage error produces safe retryable
+  HTTP 503 semantics — even though the outbound action may already have
+  executed (that is exactly the bounded duplicate risk this ADR documents,
+  never a false success). The same rule covers the permanent-failure path:
+  the 200 acknowledgement happens only after `failure_class = 'permanent'`
+  is durably stored (see ADR-0031).
 - **No false exactly-once guarantee:** ADR-0025's "exactly-once execution"
   wording is superseded (see the amendment note there). Architecture,
   security model, roadmap, and handoff texts use the honest contract
@@ -73,6 +85,9 @@ claim otherwise.
 - sequential/concurrent duplicate-delivery tests continue to prove exactly
   one EXECUTION DECISION per update_id under the normal (non-ambiguous)
   path;
+- fenced-transition tests (v1.2.3): a rejected or failed terminal
+  transition answers 503, never a false 200; no processed success log is
+  emitted unless the transition returned true;
 - documentation greps: active docs describe at-least-once processing with
   duplicate suppression and bounded duplicate risk; no active document
   claims exactly-once Telegram delivery.

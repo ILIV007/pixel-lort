@@ -23,9 +23,13 @@
  * - The request body, the secret header value, message text, usernames,
  *   phone numbers, and the Bot Token are NEVER logged. Logs carry stable
  *   event names and reason codes only.
- * - Response semantics mirror the durable update lifecycle (ADR-0027/0030/0031):
+ * - Response semantics mirror the durable update lifecycle
+ *   (ADR-0027/0030/0031, final correction v1.2.3):
  *     - duplicate-of-processed and TERMINAL permanent-failure outcomes answer
- *       the fast deterministic 200 {"ok":true};
+ *       the fast deterministic 200 {"ok":true} — HTTP 200 is emitted ONLY
+ *       after a terminal state is durably persisted (a terminal transition
+ *       that is rejected by the claim-generation fence or fails with a
+ *       storage error answers safe 503 instead, never a false-success 200);
  *     - a RETRYABLE processing failure REJECTS with HTTP 503 semantics so
  *       Telegram redelivers and the failed row is reclaimed — a temporary
  *       failure can never be falsely acknowledged as success;
@@ -33,7 +37,9 @@
  *       ALSO answers safe retryable 503 semantics — never a false-success
  *       200 — so Telegram keeps redelivering until the lease resolves (the
  *       winner completes, or the lease expires and the abandoned claim
- *       becomes reclaimable; ADR-0030).
+ *       becomes reclaimable; ADR-0030). Claim ownership is FENCED by the
+ *       attempt_count generation: a stale Worker can never mutate or
+ *       acknowledge a newer owner's claim (ADR-0030, v1.2.3).
  * - Responses are fast and deterministic; standard security headers and
  *   correlation-ID behavior are applied by the shared worker/response paths.
  */

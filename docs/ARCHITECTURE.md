@@ -158,7 +158,7 @@ by ADR-0014).
   binding is present; offline development without a binding stays ready
   (ADR-0021).
 
-### 3.8 Telegram ingress and admin foundation (Phase 2A — ADR-0024/0025/0026/0027/0028/0029, lifecycle completed by ADR-0030/0031/0032)
+### 3.8 Telegram ingress and admin foundation (Phase 2A — ADR-0024/0025/0026/0027/0028/0029, lifecycle completed by ADR-0030/0031/0032, fenced by the final correction round v1.2.3)
 
 **HTTP edge** (`src/entrypoints/http/handlers/telegram-webhook.ts`):
 `POST /telegram/webhook` exists only behind the fail-closed
@@ -180,26 +180,36 @@ carry their optional lowercased target username (`/cmd@bot`) in
 
 **Durable idempotency** (`src/application/telegram-ingress.ts` +
 `src/adapters/telegram/update-claims.ts`): update_id is the claim boundary
-with SIX outcomes (ADR-0027, completed by ADR-0030/0031; schema v2 via
-migration 0002): `claimed` (new; lease + `failure_class = NULL` +
-`attempt_count = 1` written), `reclaimed_retryable` (atomic
-`failed(retryable) -> claimed`), `reclaimed_stale` (atomic
-`claimed(expired lease) -> claimed`), `already_processed` (terminal, ack),
-`permanently_failed` (terminal, ack, never re-executed), `in_flight`
-(active unexpired lease held elsewhere — answered with safe retryable 503
-semantics, NEVER a false-success 200). Every claim carries a conservative
-5-minute lease (`TELEGRAM_UPDATE_CLAIM_LEASE_MS`, centralized,
-boundary-tested): a Worker that dies after claiming leaves a claim that the
-next delivery recovers after lease expiry (exactly one concurrent stale
-reclaim winner; losers observe the winner's fresh lease). Retryable
-failures mark the row `failed` with `failure_class = 'retryable'` and
-propagate HTTP 503 semantics so Telegram redelivery reclaims them;
+with SIX outcomes (ADR-0027, completed by ADR-0030/0031, fenced by the
+final correction round v1.2.3; schema v2 via migration 0002): `claimed`
+(new; lease + `failure_class = NULL` + `attempt_count = 1` written),
+`reclaimed_retryable` (atomic `failed(retryable) -> claimed`),
+`reclaimed_stale` (atomic `claimed(expired lease) -> claimed`),
+`already_processed` (terminal, ack), `permanently_failed` (terminal, ack,
+never re-executed), `in_flight` (active unexpired lease held elsewhere —
+answered with safe retryable 503 semantics, NEVER a false-success 200).
+The three execution-owning outcomes CARRY their claim generation
+(`attempt_count` — the fencing token, not merely an audit counter). Every
+claim carries a conservative 5-minute lease
+(`TELEGRAM_UPDATE_CLAIM_LEASE_MS`, centralized, boundary-tested): a Worker
+that dies after claiming leaves a claim that the next delivery recovers
+after lease expiry (exactly one concurrent stale reclaim winner; losers
+observe the winner's fresh lease). Reclaims are additionally fenced by the
+previously observed generation, and every terminal transition requires the
+caller's `expectedAttemptCount` (`AND attempt_count = ?`) — the generation
+fences stale owners from newer claims, so a resumed stale Worker can never
+mutate a newer owner's claim. HTTP 200 is emitted only after a terminal
+state is durably persisted; terminal-transition uncertainty (rejected by
+the fence, or a storage error) produces safe retryable 503 semantics.
+Retryable failures mark the row `failed` with `failure_class = 'retryable'`
+and propagate HTTP 503 semantics so Telegram redelivery reclaims them;
 permanent failures mark `failed` with `failure_class = 'permanent'` and
-answer 200 — the persisted class makes the row TERMINAL (reclaim is
-guarded to retryable rows only). If even the failure marking fails, the row
-stays claimed under its lease and is recovered after expiry (tested end to
-end). `claimed -> processed | failed` transitions stay guarded; `processed`
-is never reclaimable; D1 is the only dedup authority (ADR-0025/0030).
+answer 200 — the persisted class makes the row TERMINAL (reclaim is guarded
+to retryable rows only). If even the failure marking fails (throws or is
+rejected by the fence), the row stays claimed under its lease and is
+recovered after expiry (tested end to end). `claimed -> processed | failed`
+transitions stay generation-fenced; `processed` is never reclaimable; D1 is
+the only dedup authority (ADR-0025/0030).
 
 **Delivery guarantee — honest wording (ADR-0032):** the pipeline provides
 durable at-least-once processing with duplicate suppression BEFORE

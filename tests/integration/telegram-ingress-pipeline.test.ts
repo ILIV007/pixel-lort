@@ -99,7 +99,7 @@ function buildDeps(overrides: Partial<TelegramIngressDeps> = {}): TelegramIngres
         ownerTelegramId: OWNER_ID,
         lookup: createAdminRoleLookup(executor),
       }),
-    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.2' }),
+    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.3' }),
     botApi: overrides.botApi,
     clock: overrides.clock ?? fixedClock(NOW),
     logger: overrides.logger ?? captureLogger().logger,

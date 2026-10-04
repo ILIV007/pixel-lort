@@ -84,7 +84,7 @@ DB --remote`) after provisioning, by or with explicit approval of the
 
 ## Phase 2 — Telegram webhook, auth, RBAC and renderer ◑
 
-### Phase 2A — Telegram secure ingress and admin foundation ✅ (correction rounds v1.2.1 and v1.2.2 applied)
+### Phase 2A — Telegram secure ingress and admin foundation ✅ (correction rounds v1.2.1, v1.2.2, and v1.2.3 applied)
 
 Implemented OFFLINE (no Telegram credentials, no webhook registration, no
 Cloudflare secret configuration; the ingress flag ships `false` everywhere):
@@ -103,21 +103,27 @@ Cloudflare secret configuration; the ingress flag ships `false` everywhere):
       no Zod — ADR-0010 boundary respected), bot-command target extraction
       (`/cmd@bot`) preserved in the parsed contract.
 - [x] Durable update claims on `telegram_updates` (ADR-0025/0027, lifecycle
-      completed by ADR-0030/0031 — schema v2, migration 0002): update_id as
-      the idempotency boundary with SIX claim outcomes (claimed /
-      reclaimed_retryable / reclaimed_stale / already_processed /
-      permanently_failed / in_flight), claimed -> processed | failed guarded
+      completed by ADR-0030/0031 — schema v2, migration 0002; FENCED by the
+      final correction round v1.2.3): update_id as the idempotency boundary
+      with SIX claim outcomes (claimed / reclaimed_retryable /
+      reclaimed_stale / already_processed / permanently_failed /
+      in_flight), claimed -> processed | failed GENERATION-FENCED
       transitions with a PERSISTED failure_class, atomic RECLAIMS for
       failed-retryable rows AND expired-lease claimed rows (exactly one
       concurrent winner; processed and permanent failures stay terminal),
       a conservative 5-minute claim lease (centralized constant,
       boundary-tested at lease − 1 ms / exact expiry / after expiry) so a
       Worker that dies after claiming is recovered by the next delivery,
-      in-flight deliveries answered with safe 503 (never a false-success
-      200), retryable failures propagated as HTTP 503 so Telegram
-      redelivery retries them, permanent failures acknowledged with 200 and
-      never re-executed, missing-client outbound actions never falsely
-      processed, and honest at-least-once delivery wording (ADR-0032).
+      attempt_count as the claim GENERATION (fencing token: every
+      execution-owning outcome carries it, every terminal transition is
+      guarded by it, and a stale owner can never mutate a newer claim),
+      HTTP 200 emitted only after a terminal state is durably persisted
+      (transition uncertainty answers safe 503), in-flight deliveries
+      answered with safe 503 (never a false-success 200), retryable
+      failures propagated as HTTP 503 so Telegram redelivery retries them,
+      permanent failures acknowledged with 200 and never re-executed,
+      missing-client outbound actions never falsely processed, and honest
+      at-least-once delivery wording (ADR-0032).
 - [x] Phase 2 configuration contracts (ADR-0024): TELEGRAM_INGRESS_ENABLED
       flag; BOT_TOKEN / WEBHOOK_SECRET / OWNER_TELEGRAM_ID validated formats
       (values never echoed); TARGET_CHANNEL non-secret username validation;

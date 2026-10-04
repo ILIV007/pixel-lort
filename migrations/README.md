@@ -16,7 +16,10 @@ migration list below.
 - `0002_telegram_update_lifecycle.sql` — the Phase 2A second-correction
   lifecycle migration (ADR-0030/0031): adds `telegram_updates.claim_expires_at`
   (the claim lease), `failure_class` (CHECK: `retryable` | `permanent` |
-  NULL), `attempt_count` (NOT NULL DEFAULT 0, CHECK >= 0), the
+  NULL), `attempt_count` (NOT NULL DEFAULT 0, CHECK >= 0 — the claim
+  GENERATION / fencing token for update ownership, not merely an audit
+  counter: every execution-owning claim outcome carries it and every
+  terminal transition is guarded by it; final correction round v1.2.3), the
   `idx_tg_updates_lifecycle (status, claim_expires_at)` recovery index, and
   the documented fail-safe backfill of legacy failed rows to
   `failure_class = 'retryable'`. Advances `schema_metadata` to

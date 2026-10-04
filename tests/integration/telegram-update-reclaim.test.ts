@@ -21,7 +21,7 @@ import type {
 import { TelegramApiError } from '../../src/adapters/telegram/bot-api-client';
 import type { ParsedUpdate } from '../../src/adapters/telegram/update-parser';
 import { fixedClock } from '../../src/shared/time/clock';
-import { createLogger } from '../../src/observability/logger';
+import { createLogger, type LogSink } from '../../src/observability/logger';
 
 /**
  * Update lifecycle recovery semantics (Phase 2A second correction round —
@@ -95,12 +95,13 @@ interface LifecycleRow {
   claim_expires_at: number | null;
   failure_class: string | null;
   attempt_count: number;
+  processed_at: number | null;
 }
 
 async function readRow(updateId: number): Promise<LifecycleRow | null> {
   const executor = createDbExecutor(env.DB);
   return executor.first<LifecycleRow>({
-    sql: `SELECT status, claim_expires_at, failure_class, attempt_count
+    sql: `SELECT status, claim_expires_at, failure_class, attempt_count, processed_at
           FROM telegram_updates WHERE update_id = ?`,
     params: [updateId],
   });
@@ -169,7 +170,7 @@ function buildDeps(overrides: Partial<TelegramIngressDeps> = {}): TelegramIngres
         ownerTelegramId: OWNER_ID,
         lookup: createAdminRoleLookup(executor),
       }),
-    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.2' }),
+    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.3' }),
     botApi: overrides.botApi,
     clock: overrides.clock ?? fixedClock(NOW),
     logger: overrides.logger ?? createLogger({ level: 'error', sink: () => {} }),
@@ -224,7 +225,7 @@ describe('webhook edge — retryable failure is never falsely acknowledged', () 
     // already processed.
     const executor = createDbExecutor(env.DB);
     const reclaim = await claimTelegramUpdate(executor, 8602, NOW + 1_000);
-    expect(reclaim).toEqual({ kind: 'reclaimed_retryable' });
+    expect(reclaim).toEqual({ kind: 'reclaimed_retryable', attemptCount: 2 });
   });
 
   it('answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry', async () => {
@@ -236,7 +237,7 @@ describe('webhook edge — retryable failure is never falsely acknowledged', () 
     const executor = createDbExecutor(env.DB);
     const realNow = Date.now();
     const claim = await claimTelegramUpdate(executor, 8603, realNow);
-    expect(claim).toEqual({ kind: 'claimed' });
+    expect(claim).toEqual({ kind: 'claimed', attemptCount: 1 });
 
     const body = JSON.stringify({ update_id: 8603, channel_post: { message_id: 1 } });
     const inFlight = await worker.fetch(webhookRequest(body), ENABLED_ENV, testCtx());
@@ -266,7 +267,7 @@ describe('webhook edge — retryable failure is never falsely acknowledged', () 
     // FIX 2 (ADR-0031): seed a permanent failure, then deliver again.
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 8604, NOW);
-    await markTelegramUpdateFailed(executor, 8604, NOW + 10, 'permanent');
+    await markTelegramUpdateFailed(executor, 8604, 1, NOW + 10, 'permanent');
 
     const res = await worker.fetch(webhookRequest(ownerStatusBody(8604)), ENABLED_ENV, testCtx());
     expect(res.status).toBe(200);
@@ -284,10 +285,10 @@ describe('claim boundary — reclaim semantics (ADR-0030/0031)', () => {
   it('reclaims a failed retryable update exactly once and records the claimed state', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 8610, NOW);
-    await markTelegramUpdateFailed(executor, 8610, NOW + 10, 'retryable');
+    await markTelegramUpdateFailed(executor, 8610, 1, NOW + 10, 'retryable');
 
     const reclaim = await claimTelegramUpdate(executor, 8610, NOW + 20_000);
-    expect(reclaim).toEqual({ kind: 'reclaimed_retryable' });
+    expect(reclaim).toEqual({ kind: 'reclaimed_retryable', attemptCount: 2 });
 
     const row = await executor.first<{ status: string; processed_at: number | null }>({
       sql: 'SELECT status, processed_at FROM telegram_updates WHERE update_id = ?',
@@ -300,7 +301,7 @@ describe('claim boundary — reclaim semantics (ADR-0030/0031)', () => {
   it('never reclaims a processed update (terminal)', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 8611, NOW);
-    await markTelegramUpdateProcessed(executor, 8611, NOW + 10);
+    await markTelegramUpdateProcessed(executor, 8611, 1, NOW + 10);
 
     const redelivery = await claimTelegramUpdate(executor, 8611, NOW + 20_000);
     expect(redelivery).toEqual({ kind: 'already_processed' });
@@ -309,7 +310,7 @@ describe('claim boundary — reclaim semantics (ADR-0030/0031)', () => {
   it('never reclaims a permanent failed update (terminal)', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 8612, NOW);
-    await markTelegramUpdateFailed(executor, 8612, NOW + 10, 'permanent');
+    await markTelegramUpdateFailed(executor, 8612, 1, NOW + 10, 'permanent');
 
     const redelivery = await claimTelegramUpdate(executor, 8612, NOW + 20_000);
     expect(redelivery).toEqual({ kind: 'permanently_failed' });
@@ -332,13 +333,14 @@ describe('claim boundary — reclaim semantics (ADR-0030/0031)', () => {
     // ...stale at exact expiry...
     await expect(claimTelegramUpdate(executor, 8614, NOW + LEASE)).resolves.toEqual({
       kind: 'reclaimed_stale',
+      attemptCount: 2,
     });
   });
 
   it('produces exactly one winner for concurrent retryable-failed reclaims', async () => {
     const executor = createDbExecutor(env.DB);
     await claimTelegramUpdate(executor, 8615, NOW);
-    await markTelegramUpdateFailed(executor, 8615, NOW + 10, 'retryable');
+    await markTelegramUpdateFailed(executor, 8615, 1, NOW + 10, 'retryable');
 
     const results = await Promise.all([
       claimTelegramUpdate(executor, 8615, NOW + 20_000),
@@ -561,5 +563,244 @@ describe('honest side-effect semantics — the ambiguous window (ADR-0032)', () 
     // After processing, duplicate suppression holds again: no third send.
     await expect(ingress.processUpdate(ownerCommand(8640))).resolves.toBe('duplicate');
     expect(sends).toHaveLength(2);
+  });
+});
+
+/**
+ * Final correction round (v1.2.3) — terminal transitions are FENCED by the
+ * claim generation and NEVER falsely acknowledged:
+ * - a terminal transition rejected by the attempt_count fence (stale owner)
+ *   or hit by a storage error answers safe retryable 503 — never 200 — even
+ *   though the outbound action may already have executed;
+ * - HTTP 200 for a permanent failure happens ONLY after
+ *   failure_class='permanent' is durably persisted;
+ * - an old generation can never terminate a newer owner's claim.
+ * The simulated interleavings use the SAME guarded statement shapes as the
+ * real stale reclaim, so the fencing WHERE clause is exercised for real.
+ */
+describe('terminal transitions are fenced and never falsely acknowledged (v1.2.3)', () => {
+  function captureLogger() {
+    const lines: string[] = [];
+    const sink: LogSink = (_level, line) => {
+      lines.push(line);
+    };
+    return { lines, logger: createLogger({ level: 'debug', sink }) };
+  }
+
+  /**
+   * Simulate the stale-owner interleaving at the pipeline boundary: at the
+   * moment the pipeline under test executes ITS terminal transition, a newer
+   * claim generation has already won the row (its lease had expired and a
+   * concurrent redelivery reclaimed it with the same guarded statement shape
+   * as the real stale reclaim). The pipeline's fenced UPDATE therefore
+   * matches zero rows — the stale owner is rejected by the attempt_count
+   * fence. When `completeNewOwner` is true, the newer generation also
+   * completes its own terminal transition (through the REAL fenced function)
+   * before the stale statement runs.
+   */
+  function racingNewerGenerationExecutor(
+    updateId: number,
+    intercept: 'processed' | 'failed',
+    completeNewOwner: boolean,
+  ): DbExecutor {
+    const delegate = createDbExecutor(env.DB);
+    let fired = false;
+    return {
+      query: (statement) => delegate.query(statement),
+      first: (statement) => delegate.first(statement),
+      run: (statement) => {
+        const isTarget =
+          !fired &&
+          (intercept === 'processed'
+            ? /UPDATE telegram_updates\s+SET status = 'processed'/s.test(statement.sql)
+            : /UPDATE telegram_updates\s+SET status = 'failed'/s.test(statement.sql));
+        if (!isTarget) {
+          return delegate.run(statement);
+        }
+        fired = true;
+        // A concurrent redelivery atomically reclaims the expired lease to
+        // the NEXT generation (exactly the guarded shape of the real stale
+        // reclaim — one winner, attempt_count incremented).
+        const reclaim = delegate.run({
+          sql: `UPDATE telegram_updates
+                SET status = 'claimed', claim_expires_at = ?, attempt_count = attempt_count + 1
+                WHERE update_id = ? AND status = 'claimed' AND attempt_count = 1`,
+          params: [NOW + 2 * LEASE, updateId],
+        });
+        const runStale = () => delegate.run(statement);
+        if (!completeNewOwner) {
+          return reclaim.then(runStale);
+        }
+        return reclaim.then(() =>
+          markTelegramUpdateProcessed(delegate, updateId, 2, NOW + LEASE + 1).then(runStale),
+        );
+      },
+      batch: (statements) => delegate.batch(statements),
+    };
+  }
+
+  it('answers 503 (never 200) when the processed transition is REJECTED by the fence', async () => {
+    // The outbound action MAY already have executed: the send succeeds, then
+    // a newer generation wins the row before the processed transition — the
+    // pipeline must still answer safe 503 and must NEVER emit the processed
+    // success log.
+    const { client, sends } = flakyClient(undefined); // every send SUCCEEDS
+    const { lines, logger } = captureLogger();
+    const executor = racingNewerGenerationExecutor(8650, 'processed', false);
+    const ingress = createTelegramIngress(
+      buildDeps({ executor, botApi: client, logger, clock: fixedClock(NOW) }),
+    );
+
+    await expect(ingress.processUpdate(ownerCommand(8650))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
+    // The outbound action executed before the transition was attempted.
+    expect(sends).toHaveLength(1);
+    // The row is owned by the newer generation (2), still claimed.
+    const row = await readRow(8650);
+    expect(row?.status).toBe('claimed');
+    expect(row?.attempt_count).toBe(2);
+    expect(row?.claim_expires_at).toBe(NOW + 2 * LEASE);
+
+    const everything = lines.join('\n');
+    expect(everything).toContain('terminal_transition_rejected');
+    expect(everything).toContain('stale_owner');
+    // NO processed success log — the transition never returned true.
+    expect(everything).not.toContain('telegram.update.processed');
+  });
+
+  it('answers 503 (never 200) when the processed transition THROWS (storage error)', async () => {
+    const { client, sends } = flakyClient(undefined);
+    const { lines, logger } = captureLogger();
+    const { executor: failingExecutor } = interceptingExecutor((statement) =>
+      /UPDATE telegram_updates\s+SET status = 'processed'/s.test(statement.sql),
+    );
+    const ingress = createTelegramIngress(
+      buildDeps({ executor: failingExecutor, botApi: client, logger, clock: fixedClock(NOW) }),
+    );
+
+    await expect(ingress.processUpdate(ownerCommand(8651))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
+    // The outbound action executed; the terminal state is UNKNOWN (storage
+    // error) — the row stays claimed under its lease, recoverable after
+    // expiry (ADR-0030).
+    expect(sends).toHaveLength(1);
+    const row = await readRow(8651);
+    expect(row?.status).toBe('claimed');
+    expect(row?.attempt_count).toBe(1);
+    expect(row?.claim_expires_at).toBe(NOW + LEASE);
+
+    const everything = lines.join('\n');
+    expect(everything).toContain('terminal_transition_failed');
+    expect(everything).toContain('storage_error');
+    // NO false processed acknowledgement in the logs.
+    expect(everything).not.toContain('telegram.update.processed');
+  });
+
+  it('answers 503 (never 200) when PERMANENT failure persistence is REJECTED by the fence', async () => {
+    const { client, sends, calls } = flakyClient(
+      new TelegramApiError('telegram_bad_request'),
+      10_000,
+    );
+    const { lines, logger } = captureLogger();
+    const executor = racingNewerGenerationExecutor(8652, 'failed', false);
+    const ingress = createTelegramIngress(
+      buildDeps({ executor, botApi: client, logger, clock: fixedClock(NOW) }),
+    );
+
+    // Permanent failure, but persisting the terminal classification did NOT
+    // happen (fence rejected) -> safe 503, NEVER the 200 acknowledgement.
+    await expect(ingress.processUpdate(ownerCommand(8652))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
+    expect(calls()).toBe(1);
+    expect(sends).toHaveLength(0);
+    const row = await readRow(8652);
+    expect(row?.status).toBe('claimed');
+    expect(row?.attempt_count).toBe(2);
+    expect(row?.failure_class).toBeNull();
+    expect(lines.join('\n')).toContain('terminal_transition_rejected');
+  });
+
+  it('recovers the full permanent-persistence-throw sequence: 503 -> expiry -> reclaim -> durable terminal -> never re-executes', async () => {
+    const { client, sends, calls } = flakyClient(
+      new TelegramApiError('telegram_bad_request'),
+      10_000,
+    );
+    const { executor, setArmed } = interceptingExecutor((statement) =>
+      /UPDATE telegram_updates\s+SET status = 'failed'/s.test(statement.sql),
+    );
+    const ingress = createTelegramIngress(
+      buildDeps({ executor, botApi: client, clock: fixedClock(NOW) }),
+    );
+
+    // 1. Permanent processing failure AND persistence throws -> 503; the row
+    //    remains claimed under its lease (NOT failed, NOT processed).
+    await expect(ingress.processUpdate(ownerCommand(8653))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
+    expect(calls()).toBe(1);
+    const stranded = await readRow(8653);
+    expect(stranded?.status).toBe('claimed');
+    expect(stranded?.attempt_count).toBe(1);
+    expect(stranded?.claim_expires_at).toBe(NOW + LEASE);
+
+    // 2. The lease expires and persistence recovers: the next delivery
+    //    reclaims (generation 2), the action fails permanently again, and
+    //    the terminal classification is now DURABLY stored.
+    const realExecutor = createDbExecutor(env.DB);
+    await realExecutor.run({
+      sql: 'UPDATE telegram_updates SET claim_expires_at = ? WHERE update_id = ?',
+      params: [NOW - 1, 8653],
+    });
+    setArmed(false);
+
+    await expect(ingress.processUpdate(ownerCommand(8653))).resolves.toBe('failed');
+    expect(calls()).toBe(2);
+    const terminal = await readRow(8653);
+    expect(terminal?.status).toBe('failed');
+    expect(terminal?.failure_class).toBe('permanent');
+    expect(terminal?.attempt_count).toBe(2);
+    expect(terminal?.claim_expires_at).toBeNull();
+
+    // 3. Later deliveries observe the TERMINAL permanently_failed outcome:
+    //    acknowledged without executing — the action never runs again.
+    await expect(ingress.processUpdate(ownerCommand(8653))).resolves.toBe('failed');
+    await expect(ingress.processUpdate(ownerCommand(8653))).resolves.toBe('failed');
+    expect(calls()).toBe(2);
+    expect((await readRow(8653))?.attempt_count).toBe(2);
+    // No message was EVER delivered: every attempt failed permanently.
+    expect(sends).toHaveLength(0);
+  });
+
+  it('an old generation cannot terminate the new one even if it resumes after the new owner completed', async () => {
+    // Worker A (generation 1) stalls past its lease; Worker B reclaims to
+    // generation 2 and COMPLETES. Worker A then resumes and attempts its
+    // processed transition — the fence rejects it, A answers 503 (never a
+    // false ack), and B's terminal state is untouched.
+    const { client, sends } = flakyClient(undefined);
+    const { lines, logger } = captureLogger();
+    const executor = racingNewerGenerationExecutor(8654, 'processed', true);
+    const ingress = createTelegramIngress(
+      buildDeps({ executor, botApi: client, logger, clock: fixedClock(NOW) }),
+    );
+
+    await expect(ingress.processUpdate(ownerCommand(8654))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
+
+    // The NEW generation durably completed; the stale owner did not corrupt it.
+    const row = await readRow(8654);
+    expect(row?.status).toBe('processed');
+    expect(row?.attempt_count).toBe(2);
+    expect(row?.processed_at).toBe(NOW + LEASE + 1);
+    // The stale owner's rejection was observable, its success log never was.
+    expect(lines.join('\n')).toContain('terminal_transition_rejected');
+    expect(lines.join('\n')).not.toContain('telegram.update.processed');
+
+    // The durable terminal state suppresses all later execution.
+    await expect(ingress.processUpdate(ownerCommand(8654))).resolves.toBe('duplicate');
+    expect(sends).toHaveLength(1);
   });
 });
