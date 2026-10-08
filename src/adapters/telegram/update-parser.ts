@@ -8,6 +8,11 @@
  * - The full Telegram API is NOT modeled: unknown Update kinds are classified
  *   as `unsupported` (still carrying their `update_id` so durable
  *   deduplication can acknowledge them) and never crash.
+ * - Message-ORDER metadata (v1.2.6, ADR-0035): `message.date` (server-assigned
+ *   Unix seconds) is extracted with strict bounds so preference writes can be
+ *   ordered by TELEGRAM's own message chronology, never by `update_id`
+ *   (which Telegram may randomize after a week without updates) and never by
+ *   local processing time (an old retry arrives later).
  * - Numeric fields must be JSON numbers AND safe integers (no numeric
  *   strings, no NaN/Infinity, no values beyond Number.MAX_SAFE_INTEGER).
  * - Strings are bounded; oversized or malformed strings are treated as
@@ -55,6 +60,15 @@ function boundedChatType(value: unknown): string | undefined {
 
 export interface ParsedMessageFields {
   readonly messageId?: number;
+  /**
+   * Telegram's SERVER-assigned message time (Unix seconds) — the validated
+   * message-ORDER metadata (ADR-0035). Present only when it is a safe
+   * integer within a sane epoch-seconds bound (0..2100-01-01); anything else
+   * is treated as ABSENT so callers can fail safely instead of ordering on
+   * garbage. This is the ordering input for admin UI language preference
+   * writes; it is NEVER a local clock reading and never logged.
+   */
+  readonly date?: number;
   /** Chat IDs may be negative (groups/channels) — any safe integer. */
   readonly chatId?: number;
   /** Sender user ID (positive safe integer) when present. */
@@ -212,6 +226,10 @@ function parseMessageLike(
     kind,
     updateId,
     messageId: toSafeInteger(payload['message_id'], { min: 1 }),
+    // Bounded VALIDATION of the server-assigned ordering timestamp: Telegram
+    // message dates are Unix SECONDS; anything beyond 4102444800 (2100-01-01)
+    // or below 0 is garbage and is treated as ABSENT (fail-safe, ADR-0035).
+    date: toSafeInteger(payload['date'], { min: 0, max: 4102444800 }),
     chatId: isRecord(chat) ? toSafeInteger(chat['id']) : undefined,
     chatType: isRecord(chat) ? boundedChatType(chat['type']) : undefined,
     fromUserId: isRecord(from) ? toSafeInteger(from['id'], { min: 1 }) : undefined,

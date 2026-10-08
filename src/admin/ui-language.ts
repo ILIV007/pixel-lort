@@ -1,5 +1,6 @@
 /**
- * Admin UI language selection (Phase 2B correction, v1.2.5).
+ * Admin UI language selection (Phase 2B correction, v1.2.5; ordering
+ * corrected in v1.2.6 — ADR-0035).
  *
  * STRICT SEPARATION (the reason this module exists): the ADMIN BOT UI
  * language — the language the BOT ANSWERS an authorized admin in — is a
@@ -23,11 +24,25 @@
  *   existing `settings` table (no schema change; blueprint settings table,
  *   ADR-0019) under the `admin_ui_language:<user_id>` key namespace. One
  *   admin's row is fully isolated from every other admin's row.
- * - Writes are FENCED by the Telegram update_id that performed the change
- *   (`last_update_id` inside the stored JSON): an OLDER retried
- *   language-change message can never overwrite a NEWER choice (monotonic
- *   fencing; ADR-0034). The fence lives in the single UPSERT statement, so
- *   the read-decide-write race is impossible.
+ * - Writes are ORDER-FENCED by VALIDATED TELEGRAM MESSAGE-ORDER METADATA
+ *   (v1.2.6, ADR-0035): `(message.date, message.message_id)` — the
+ *   server-assigned chronology of the changing message. `update_id` is NOT
+ *   used as a chronological fence: Telegram documents that update_id may be
+ *   RANDOMIZED after one week without updates, so its numeric value is not a
+ *   trustworthy order. `update_id` remains exactly what it is elsewhere in
+ *   the system — the DURABLE DEDUPLICATION boundary (ADR-0025 claims layer,
+ *   recorded here for audit) — while preference ordering uses the message
+ *   metadata Telegram guarantees to be chronological. An OLDER retried
+ *   message (older date/message_id, arriving later) can never overwrite a
+ *   NEWER choice; local processing/arrival time is deliberately NOT used
+ *   because an old retry arrives later. The fence lives in the single UPSERT
+ *   statement, so the read-decide-write race is impossible.
+ * - CORRUPT-ROW RECOVERY (v1.2.6, ADR-0035): a stored value that is
+ *   unreadable (malformed JSON, or valid JSON with invalid field
+ *   types/values) behaves as "no preference" (English default) AND the next
+ *   valid save atomically REPAIRS it — a presentation preference must never
+ *   become a permanently stuck row. The fence for VALID rows is never
+ *   weakened by the recovery path.
  * - `updated_by` is stored as NULL: the column carries a foreign key to the
  *   `admins` table, and the bootstrap owner is authorized WITHOUT an admins
  *   row — a non-null value would make the owner's first save fail on a
@@ -78,13 +93,25 @@ export function adminUiLanguageSettingsKey(telegramUserId: number): string {
 /** A durably stored per-admin UI language preference. */
 export interface AdminUiLanguagePreference {
   readonly language: AdminUiLanguage;
-  /** Epoch ms of the most recent accepted change (audit value). */
+  /**
+   * Epoch ms of the most recent accepted change, derived from the Telegram
+   * message's SERVER-assigned `date` (seconds × 1000) — never a local clock
+   * reading (ADR-0035).
+   */
   readonly changedAtMs: number;
   /**
-   * update_id of the message that performed the most recent accepted
-   * change — the MONOTONIC FENCING TOKEN for language-change writes.
+   * update_id of the message that performed the most recent accepted change —
+   * the durable DEDUPLICATION boundary (ADR-0025), recorded for audit only.
+   * It is deliberately NOT the chronological fence (Telegram may randomize
+   * update_id after one week without updates — ADR-0035).
    */
   readonly lastUpdateId: number;
+  /**
+   * Telegram `message_id` of the winning message — the same-second
+   * tiebreak of the ordering fence (per-chat monotonic). Absent when the
+   * write could not provide validated ordering metadata for it.
+   */
+  readonly lastMessageId?: number;
 }
 
 /** Outcome of a fenced preference write. */
@@ -106,18 +133,29 @@ export interface AdminUiLanguageStore {
    */
   findPreference(telegramUserId: number): Promise<AdminUiLanguagePreference | null>;
   /**
-   * Persist a language choice FENCED by the sending update's update_id:
-   * the write applies only when no strictly newer change is already stored
-   * (`stored.last_update_id <= incoming update_id`; equal = the same message
-   * redelivered, an idempotent re-apply). Resolves `stale` — without
-   * writing — when a newer choice exists, so an older retried message can
-   * never overwrite a newer selection.
+   * Persist a language choice ORDER-FENCED by VALIDATED TELEGRAM
+   * MESSAGE-ORDER METADATA (ADR-0035): `changedAtMs` is the changing
+   * message's server-assigned `date` in epoch ms (never a local clock
+   * reading) and `messageId` its per-chat `message_id` (same-second
+   * tiebreak). The write applies only when no strictly newer change is
+   * already stored — lexicographic `(changedAtMs, messageId)` ordering;
+   * an equal-ordering write is a duplicate delivery and re-applies
+   * idempotently. An OLDER retried message (older date/message_id, no
+   * matter when it ARRIVES) resolves `stale` — without writing — so it can
+   * never overwrite a newer selection. A stored value that is unreadable
+   * (malformed JSON or invalid field types) never blocks the next valid
+   * save: it is atomically repaired (ADR-0035) — without weakening the
+   * fence for valid rows.
    */
   savePreference(input: {
     readonly telegramUserId: number;
     readonly language: AdminUiLanguage;
+    /** Durable deduplication boundary (ADR-0025); audit value only. */
     readonly updateId: number;
+    /** Server-assigned message time (epoch ms) — the ordering key. */
     readonly changedAtMs: number;
+    /** Per-chat message_id — the same-second ordering tiebreak. */
+    readonly messageId?: number;
   }): Promise<AdminUiLanguageSaveOutcome>;
 }
 

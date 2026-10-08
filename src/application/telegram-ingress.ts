@@ -23,18 +23,21 @@
  *      denied / answer_callback / set_admin_ui_language / noop). An
  *      authorization DENIAL is a successfully handled action, never a
  *      processing failure.
- *   2b. ADMIN UI LANGUAGE (Phase 2B correction, v1.2.5, ADR-0034): for an
+ *   2b. ADMIN UI LANGUAGE (Phase 2B correction, v1.2.5, ADR-0034; write
+ *      ordering corrected in v1.2.6, ADR-0035): for an
  *      AUTHORIZED actor the pipeline loads the actor's durable admin UI
  *      language preference (existing `settings` table, per-admin key
  *      namespace; English default) and passes it to the router so every
  *      response is rendered in the sender's own language. This preference is
  *      presentation-only — it never touches editorial/channel language. A
  *      `set_admin_ui_language` action persists the choice FIRST through the
- *      update_id-fenced store (an older retried message can never overwrite
- *      a newer choice; the fence outcome decides which pre-composed
- *      confirmation is sent) and sends the confirmation ONLY after the write
- *      applied — a storage failure propagates as a retryable failure and
- *      never produces a false successful confirmation.
+ *      store FENCED BY THE MESSAGE'S TELEGRAM-ASSIGNED ORDER METADATA
+ *      `(date, message_id)` (an older retried message can never overwrite a
+ *      newer choice — and update_id is deliberately NOT the order: Telegram
+ *      may randomize it after a week idle; local arrival time would let an
+ *      old retry win); the fence outcome decides which pre-composed
+ *      confirmation is sent. A storage failure propagates as a retryable
+ *      failure and never produces a false successful confirmation.
  *   3. a GENERATION-FENCED terminal transition (final correction v1.2.3):
  *      the pipeline retains the generation returned by the claim and passes
  *      it to EVERY terminal transition, so a stale Worker resuming after a
@@ -250,11 +253,17 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         // PERSIST FIRST, confirm second: a storage failure below throws
         // before any confirmation can exist, so the admin is never told a
         // choice was saved when it was not (honest acknowledgement).
+        // ORDERING (v1.2.6, ADR-0035): the fence uses the changing message's
+        // TELEGRAM-ASSIGNED order metadata — server date + message_id —
+        // carried by the action. The local clock is deliberately NOT used:
+        // an old retried message ARRIVES later, so arrival time is no order,
+        // and update_id is only the durable dedup boundary (ADR-0025).
         const outcome = await adminUiLanguageStore.savePreference({
           telegramUserId: action.telegramUserId,
           language: action.language,
           updateId: action.updateId,
-          changedAtMs: clock.now(),
+          changedAtMs: action.changedAtMs,
+          messageId: action.messageId,
         });
         logger.info('telegram.action.ui_language_result', { outcome: outcome.kind });
         const text = outcome.kind === 'saved' ? action.savedText : action.staleText;

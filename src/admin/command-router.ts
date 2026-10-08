@@ -1,6 +1,7 @@
 /**
  * Command routing contracts (Phase 2A; admin UI language added by the
- * Phase 2B correction, v1.2.5 — ADR-0034).
+ * Phase 2B correction, v1.2.5 — ADR-0034; write ordering corrected in
+ * v1.2.6 — ADR-0035).
  *
  * A small router SEPARATE from HTTP routing: input is a normalized Telegram
  * update plus an authorized actor and the actor's ADMIN UI LANGUAGE; output
@@ -21,14 +22,17 @@
  *   change it — explicit and discoverable. `/language en` / `/language fa`
  *   return a TYPED `set_admin_ui_language` action carrying the SENDER's own
  *   numeric user ID (never another admin's) plus PRE-COMPOSED honest
- *   confirmations; the ingress persists the preference FIRST (fenced by the
- *   update_id — an older retried message can never overwrite a newer choice)
+ *   confirmations; the ingress persists the preference FIRST (order-fenced
+ *   by the message's Telegram-assigned `(date, message_id)` metadata — an
+ *   older retried message can never overwrite a newer choice, ADR-0035)
  *   and only then sends the matching confirmation. A storage failure throws
  *   before any confirmation exists to send.
  * - LANGUAGE-CHANGE GUARDS: a language change requires an AUTHORIZED sender
- *   AND a private chat AND a fresh (non-edited) message. In group chats or
- *   edited messages /language is ignored with a stable noop reason (no
- *   feedback, no state change).
+ *   AND a private chat AND a fresh (non-edited) message AND validated
+ *   Telegram message-ORDER metadata (`date` + `message_id`, ADR-0035). In
+ *   group chats, edited messages, or messages without valid ordering
+ *   metadata, /language is ignored with a stable noop reason (no feedback,
+ *   no state change) — missing metadata must never invent an order.
  * - BOT TARGET SAFETY: Telegram commands may explicitly address another bot
  *   ("/status@some_bot"). A command with an explicit target executes ONLY
  *   when the routing context carries the expected bot username and it
@@ -81,7 +85,8 @@ export type NoopReason =
   | 'malformed_callback_data'
   | 'unroutable_message'
   | 'language_not_private_chat'
-  | 'language_edited_message';
+  | 'language_edited_message'
+  | 'language_missing_ordering_metadata';
 
 export type DenialReason = 'unauthorized';
 
@@ -102,8 +107,16 @@ export type TelegramAction =
       readonly telegramUserId: number;
       /** The language the sender selected for THEIR OWN admin UI. */
       readonly language: AdminUiLanguage;
-      /** update_id of the changing message — the durable write-fencing token. */
+      /** update_id of the changing message — the DURABLE DEDUPLICATION boundary (ADR-0025); NOT the ordering fence (ADR-0035). */
       readonly updateId: number;
+      /**
+       * The changing message's Telegram SERVER-assigned time (epoch ms) —
+       * the primary preference-ORDER key (ADR-0035). Never a local clock
+       * reading: an old retry arrives later, so arrival time is no order.
+       */
+      readonly changedAtMs: number;
+      /** The changing message's per-chat message_id — the same-second order tiebreak (ADR-0035). */
+      readonly messageId: number;
       /** Confirmation sent ONLY after the fenced persistence succeeded. */
       readonly savedText: TelegramSafeHtml;
       /** Honest reply when an older retried message lost the write fence. */
@@ -299,8 +312,17 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
     const language = argument === undefined ? undefined : normalizeAdminUiLanguage(argument);
     if (language === undefined) {
       // No argument or malformed argument: honest localized status/usage
-      // response, NO state change.
+      // response, NO state change. (Read-only — needs no ordering metadata.)
       return { type: 'send_message', chatId, text: languageStatusResponse(ui) };
+    }
+    // ORDER METADATA GUARD (v1.2.6, ADR-0035): a language CHANGE is fenced
+    // by Telegram's SERVER-assigned message order — `(date, message_id)`.
+    // If either validated field is missing, there is no trustworthy order,
+    // so the change is ignored (no feedback, NO state change): a guess must
+    // never overwrite a real preference, and local arrival time is
+    // deliberately NOT a substitute (an old retry arrives later).
+    if (update.date === undefined || update.messageId === undefined) {
+      return { type: 'noop', reason: 'language_missing_ordering_metadata' };
     }
     return {
       type: 'set_admin_ui_language',
@@ -308,6 +330,11 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
       telegramUserId: fromUserId,
       language,
       updateId: update.updateId,
+      // Telegram's own chronology for the changing message (ADR-0035):
+      // server-assigned date (seconds -> ms) plus the per-chat message_id
+      // tiebreak. update_id rides along ONLY as the dedup/audit value.
+      changedAtMs: update.date * 1000,
+      messageId: update.messageId,
       // Confirmation in the language the sender switched TO; the stale reply
       // in their CURRENT (stored) language. Both are pre-composed here; the
       // ingress sends exactly one of them — and only AFTER the fenced write.
