@@ -8,6 +8,13 @@
  * references) and NEVER acknowledges uncertain completion as success
  * (ADR-0036 §4 decision table).
  *
+ * NO-THROW CONSUMER CONTRACT (v1.3.1 final correction): `consumeMessage`
+ * resolves ONE DeliveryAction for every input — the claimed execution and
+ * its fenced terminal persistence run AWAITED inside the error boundary, so
+ * a storage exception during the succeeded/retry_wait/dead_letter write
+ * resolves the safe `retry` action with a stable code and never escapes as
+ * a rejected promise. The queue entrypoint keeps its defensive backstop.
+ *
  * Crash-window design (ADR-0036 §3):
  * - Durable row FIRST (`pending`), reference second — an enqueue
  *   failure/uncertainty leaves a recoverable `pending`/`retry_wait` row for
@@ -451,7 +458,13 @@ export function createJobsEngine(
           // honest now; DLQ reconciliation delivers the safe reference.
           return { action: 'ack', outcome: 'job_dead_lettered' };
         case 'claimed':
-          return executeClaimed(row, payload.payload, claim.generation, messageId, nowMs);
+          // AWAITED INSIDE the try (v1.3.1 final correction): the claimed
+          // execution AND its fenced terminal persistence are part of this
+          // engine's no-throw boundary. A storage exception thrown by the
+          // succeeded/retry_wait/dead_letter write must resolve the safe
+          // retry action HERE (stable code only) — a bare `return` would
+          // escape the catch and hand the caller a rejected promise.
+          return await executeClaimed(row, payload.payload, claim.generation, messageId, nowMs);
       }
     } catch (error) {
       // Storage failure or unexpected engine error: NEVER acknowledge —
