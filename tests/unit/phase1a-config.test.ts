@@ -31,7 +31,7 @@ describe('parseDataFoundationConfig — development defaults', () => {
     expect(config).not.toBeNull();
     expect(config?.APP_COMMIT).toBe(DEFAULT_APP_COMMIT);
     expect(config?.schemaVersion).toBe(EXPECTED_SCHEMA_VERSION);
-    expect(EXPECTED_SCHEMA_VERSION).toBe(2);
+    expect(EXPECTED_SCHEMA_VERSION).toBe(3);
   });
 
   it('accepts an explicit valid commit identifier and schema version', () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import worker from '../../src/entrypoints/worker';
 import {
   createTestEnv,
@@ -7,33 +7,35 @@ import {
 } from '../helpers/test-env';
 
 /**
- * Scheduled handler smoke test (Phase 0: typed no-op foundation).
- * Asserts the handler resolves without side effects and without throwing.
+ * Scheduled handler unit tests — fail-closed activation (ADR-0036 §7).
+ * The default test environment has NO JOBS_ENABLED flag and NO D1 binding:
+ * the pass must be a structured no-op (Phase 2 Telegram-only behavior
+ * preserved). Enabled-path behavior is covered by the integration suite.
  */
-describe('scheduled handler', () => {
-  it('resolves without throwing for a standard cron trigger', async () => {
-    const env = createTestEnv();
-    const ctx = createTestExecutionContext();
-    const controller = createTestScheduledController();
-
-    await expect(worker.scheduled(controller, env, ctx)).resolves.toBeUndefined();
+describe('scheduled handler (engine disabled — default environment)', () => {
+  it('resolves without throwing for the blueprint cron schedule', async () => {
+    await expect(
+      worker.scheduled(
+        createTestScheduledController(),
+        createTestEnv(),
+        createTestExecutionContext(),
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it('does not schedule follow-up work via waitUntil', async () => {
-    const env = createTestEnv();
     const ctx = createTestExecutionContext();
-    const controller = createTestScheduledController('0 * * * *');
-
-    await worker.scheduled(controller, env, ctx);
+    await worker.scheduled(createTestScheduledController('0 * * * *'), createTestEnv(), ctx);
     expect(ctx.waitUntilCalls).toHaveLength(0);
   });
 
-  it('is a no-op for arbitrary cron expressions', async () => {
-    const env = createTestEnv();
-    const ctx = createTestExecutionContext();
-    const controller = createTestScheduledController('17 3 * * 1');
-
-    await expect(worker.scheduled(controller, env, ctx)).resolves.toBeUndefined();
-    expect(vi.isMockFunction(controller.noRetry)).toBe(false);
+  it('is a structured no-op for arbitrary cron expressions', async () => {
+    await expect(
+      worker.scheduled(
+        createTestScheduledController('17 3 * * 1'),
+        createTestEnv(),
+        createTestExecutionContext(),
+      ),
+    ).resolves.toBeUndefined();
   });
 });

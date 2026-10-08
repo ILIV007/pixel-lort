@@ -119,6 +119,32 @@ export interface WorkerEnv {
    */
   readonly DB?: D1Database;
   // ---------------------------------------------------------------------------
+  // Phase 3 configuration (durable job/queue engine — ADR-0036).
+  // The engine is FAIL-CLOSED: with the flag off, cron and queue behavior
+  // is identical to the Phase 2 Telegram-only deployment. Queue bindings
+  // are declared in the PREVIEW environment only (producer JOBS →
+  // pixel-jobs-preview, DLQ producer → pixel-dlq-preview); nothing is
+  // provisioned by this repository pass (operator runbook only).
+  // ---------------------------------------------------------------------------
+  /**
+   * NON-SECRET jobs engine feature flag ('true' | 'false'; default 'false').
+   * Cron dispatch and queue consumption exist only while this is 'true'
+   * AND the required bindings are present (missing bindings fail closed —
+   * never a partial or ack-all path).
+   */
+  readonly JOBS_ENABLED?: string;
+  /**
+   * Queues producer binding for the jobs queue (blueprint §4 binding name).
+   * Optional: only present where wrangler.jsonc declares it (preview).
+   * Carries bounded job REFERENCES only — never payloads.
+   */
+  readonly JOBS?: Queue<unknown>;
+  /**
+   * Queues producer binding for the DLQ queue (blueprint §4 "DLQ:
+   * pixel-dlq"). Optional; carries bounded safe dead-letter references.
+   */
+  readonly DLQ?: Queue<unknown>;
+  // ---------------------------------------------------------------------------
   // Phase 2 configuration (Telegram secure ingress + admin foundation).
   // Names are contract; secret VALUES exist only via `wrangler secret put`
   // or a git-ignored `.dev.vars` file. They are validated by

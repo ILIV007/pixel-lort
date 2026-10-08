@@ -24,7 +24,7 @@ import { validateConfig, type ConfigIssue, type ConfigValidationResult } from '.
 import type { Environment } from './phase0';
 
 /** The expected schema version (migrations 0001+0002 — ADR-0019/0030). */
-export const EXPECTED_SCHEMA_VERSION = 2;
+export const EXPECTED_SCHEMA_VERSION = 3;
 
 /** Local-development placeholder commit identifier (invalid outside development). */
 export const DEFAULT_APP_COMMIT = 'local-dev';
