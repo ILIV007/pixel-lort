@@ -33,6 +33,26 @@ export const TELEGRAM_UPDATE_LIMITS = {
 /** Numeric Telegram identifiers are represented as safe JS integers. */
 const MAX_SAFE_ID = Number.MAX_SAFE_INTEGER;
 
+/**
+ * The exact Telegram chat types the admin surface may reason about (Phase 2B:
+ * /language requires a PRIVATE chat). Fixed allowlist — any other or
+ * malformed `chat.type` value is treated as ABSENT (fail closed).
+ */
+const KNOWN_CHAT_TYPES: ReadonlySet<string> = new Set([
+  'private',
+  'group',
+  'supergroup',
+  'channel',
+]);
+
+/** Bounded chat-type extraction: known values only, everything else absent. */
+function boundedChatType(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !KNOWN_CHAT_TYPES.has(value)) {
+    return undefined;
+  }
+  return value;
+}
+
 export interface ParsedMessageFields {
   readonly messageId?: number;
   /** Chat IDs may be negative (groups/channels) — any safe integer. */
@@ -48,6 +68,13 @@ export interface ParsedMessageFields {
    * ("/status@some_bot"); absent for unqualified commands.
    */
   readonly commandTarget?: string;
+  /**
+   * Exact Telegram chat type when it is one of the known values
+   * (private | group | supergroup | channel); absent otherwise. Presentation
+   * input for chat-scope rules (e.g. /language is private-chat only) — never
+   * logged.
+   */
+  readonly chatType?: string;
 }
 
 export interface ParsedCallbackFields {
@@ -186,6 +213,7 @@ function parseMessageLike(
     updateId,
     messageId: toSafeInteger(payload['message_id'], { min: 1 }),
     chatId: isRecord(chat) ? toSafeInteger(chat['id']) : undefined,
+    chatType: isRecord(chat) ? boundedChatType(chat['type']) : undefined,
     fromUserId: isRecord(from) ? toSafeInteger(from['id'], { min: 1 }) : undefined,
     text,
     command: parsedCommand?.command,

@@ -20,8 +20,21 @@
  *        execute twice.
  *   2. routing of the claimed update (command/authorization contracts are
  *      wired by their owning slices) producing TYPED actions (send_message /
- *      denied / answer_callback / noop). An authorization DENIAL is a
- *      successfully handled action, never a processing failure.
+ *      denied / answer_callback / set_admin_ui_language / noop). An
+ *      authorization DENIAL is a successfully handled action, never a
+ *      processing failure.
+ *   2b. ADMIN UI LANGUAGE (Phase 2B correction, v1.2.5, ADR-0034): for an
+ *      AUTHORIZED actor the pipeline loads the actor's durable admin UI
+ *      language preference (existing `settings` table, per-admin key
+ *      namespace; English default) and passes it to the router so every
+ *      response is rendered in the sender's own language. This preference is
+ *      presentation-only — it never touches editorial/channel language. A
+ *      `set_admin_ui_language` action persists the choice FIRST through the
+ *      update_id-fenced store (an older retried message can never overwrite
+ *      a newer choice; the fence outcome decides which pre-composed
+ *      confirmation is sent) and sends the confirmation ONLY after the write
+ *      applied — a storage failure propagates as a retryable failure and
+ *      never produces a false successful confirmation.
  *   3. a GENERATION-FENCED terminal transition (final correction v1.2.3):
  *      the pipeline retains the generation returned by the claim and passes
  *      it to EVERY terminal transition, so a stale Worker resuming after a
@@ -100,6 +113,8 @@ import type { ParsedUpdate } from '../adapters/telegram/update-parser';
 import type { ActorResolution, AuthorizationService } from '../admin/authorization';
 import type { CommandRouter, TelegramAction } from '../admin/command-router';
 import { isSafeTelegramHtml, type TelegramSafeHtml } from '../admin/telegram-html';
+import type { AdminUiLanguage } from '../admin/ui-language';
+import { createAdminUiLanguageStore } from '../adapters/db/admin-ui-language-store';
 import type { TelegramBotApiClient } from '../adapters/telegram/bot-api-client';
 import { AppError, toAppError, type AppErrorCode } from '../shared/errors/app-error';
 import type { Clock } from '../shared/time/clock';
@@ -182,6 +197,13 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
   const { executor, authorization, commandRouter, botApi, clock, logger } = deps;
 
   /**
+   * Per-admin admin-UI-language store over the EXISTING settings table,
+   * built on the same executor as every other D1 access in this pipeline
+   * (always wired — no separate dependency to forget).
+   */
+  const adminUiLanguageStore = createAdminUiLanguageStore(executor);
+
+  /**
    * An outbound action REQUIRES a client: without one the action is not
    * silently skipped — it fails retryably so the update is not falsely
    * marked processed (BOT_TOKEN absence never fakes success).
@@ -224,6 +246,21 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
           callbackQueryId: action.callbackQueryId,
         });
         return;
+      case 'set_admin_ui_language': {
+        // PERSIST FIRST, confirm second: a storage failure below throws
+        // before any confirmation can exist, so the admin is never told a
+        // choice was saved when it was not (honest acknowledgement).
+        const outcome = await adminUiLanguageStore.savePreference({
+          telegramUserId: action.telegramUserId,
+          language: action.language,
+          updateId: action.updateId,
+          changedAtMs: clock.now(),
+        });
+        logger.info('telegram.action.ui_language_result', { outcome: outcome.kind });
+        const text = outcome.kind === 'saved' ? action.savedText : action.staleText;
+        await sendSafely(action.chatId, text, 'set_admin_ui_language');
+        return;
+      }
     }
   }
 
@@ -360,6 +397,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     // Route and execute the action. A failure here goes to the fenced
     // failure path; the processed transition below happens ONLY after the
     // action executed successfully.
+    const fromUserId = update.kind === 'unsupported' ? undefined : update.fromUserId;
     let actor: ActorResolution;
     let action: TelegramAction;
     try {
@@ -367,7 +405,17 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         update.kind === 'unsupported'
           ? { kind: 'unauthorized' }
           : await authorization.resolveActor(update.fromUserId);
-      action = commandRouter.route(update, actor);
+      // Admin UI language (ADR-0034): resolve the AUTHORIZED sender's own
+      // durable preference before routing — presentation only, never
+      // editorial. A preference-storage failure is a retryable processing
+      // failure (fail-safe toward redelivery), never a silent English
+      // fallback and never an authorization denial.
+      let uiLanguage: AdminUiLanguage | undefined;
+      if (actor.kind === 'authorized' && fromUserId !== undefined) {
+        const preference = await adminUiLanguageStore.findPreference(fromUserId);
+        uiLanguage = preference?.language;
+      }
+      action = commandRouter.route(update, actor, uiLanguage);
       await executeAction(action);
     } catch (error) {
       return handleProcessingFailure(update.updateId, generation, error);
