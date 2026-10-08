@@ -15,7 +15,11 @@ import {
 describe('scheduled handler (engine disabled — default environment)', () => {
   it('resolves without throwing for the blueprint cron schedule', async () => {
     await expect(
-      worker.scheduled(createTestScheduledController(), createTestEnv(), createTestExecutionContext()),
+      worker.scheduled(
+        createTestScheduledController(),
+        createTestEnv(),
+        createTestExecutionContext(),
+      ),
     ).resolves.toBeUndefined();
   });
 
@@ -27,7 +31,11 @@ describe('scheduled handler (engine disabled — default environment)', () => {
 
   it('is a structured no-op for arbitrary cron expressions', async () => {
     await expect(
-      worker.scheduled(createTestScheduledController('17 3 * * 1'), createTestEnv(), createTestExecutionContext()),
+      worker.scheduled(
+        createTestScheduledController('17 3 * * 1'),
+        createTestEnv(),
+        createTestExecutionContext(),
+      ),
     ).resolves.toBeUndefined();
   });
 });

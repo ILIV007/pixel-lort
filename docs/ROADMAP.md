@@ -1,8 +1,11 @@
 # Roadmap
 
 Phase order follows blueprint §26 ("Roadmap implementation order"). Phases
-**0**, **1A**, **1B**, and **2A** are marked complete; everything else is
-pending and intentionally not started.
+**0**, **1A**, **1B**, **2A**, and **2B** are marked complete; **Phase 3** is
+implemented OFFLINE (code + tests + docs on
+`phase/03-job-queue-engine`, application version 1.3.0) with live queue
+activation gated on the operator runbook; everything else is pending and
+intentionally not started.
 
 ## Phase 0 — product/config freeze + repository foundation ✅
 
@@ -158,9 +161,10 @@ Cloudflare secret configuration; the ingress flag ships `false` everywhere):
       redirect safety, target safety, token validation), all offline;
       Phase 1A suites remain green.
 
-DEFERRED to Phase 2B (live wiring): real BOT_TOKEN / WEBHOOK_SECRET /
-OWNER_TELEGRAM_ID / TARGET_CHANNEL configuration in Cloudflare, webhook
-registration, live Telegram traffic, degraded-readiness semantics.
+_(The Phase 2B live wiring below completed the deferred items: real secrets
+in Cloudflare, webhook registration, and live Telegram traffic on the
+preview Worker. `degraded` readiness semantics remain open under the Phase 2
+umbrella.)_
 
 ### Phase 2 (umbrella) — remaining after 2A/2B
 
@@ -176,14 +180,67 @@ registration, live Telegram traffic, degraded-readiness semantics.
       subset in Phase 2A; full editorial renderer later)_
 - [ ] `degraded` readiness semantics per ADR-0015 (ready/degraded/not_ready).
 
-## Phase 3 — job/queue framework and idempotency ⬜
+## Phase 3 — job/queue framework and idempotency ◑ (implemented offline; activation gated)
 
-- [ ] `pixel-jobs`/`pixel-dlq` queue bindings (planned resource names per
-      ADR-0016) and envelope schema validation — Zod introduced here
-      (ADR-0010), replacing the Phase-0 ack-all skeleton per ADR-0011.
-- [ ] D1-backed job claim queries with leases; retry policy with full jitter.
-- [ ] Deterministic idempotency keys wired to all externally visible actions.
-- [ ] Cron dispatch of due work (no inline fetching/publishing).
+Implemented on `phase/03-job-queue-engine` (application version **1.3.0**,
+schema **3** via incremental migration 0003; ADR-0036). No resources were
+provisioned and nothing was deployed by this pass — activation follows
+`docs/RUNBOOK_PHASE3_QUEUE_SETUP.md` after independent review.
+
+- [x] Envelope schema validation with Zod (ADR-0010; strict `{version, jobId,
+type, attempt, traceId}` reference-only envelope) and per-type Zod
+      payload schemas; canonical (key-sorted) payload storage with size
+      bounds at creation and re-validation before execution.
+- [x] Durable lifecycle on the EXISTING `jobs` table: idempotent creation
+      (UNIQUE `idempotency_key`; conflicting same-key type/payload is a
+      reported conflict, never an overwrite), atomic claim awarding one
+      execution generation (`attempts + 1`) with a 2-minute lease,
+      generation-fenced terminal transitions (succeeded / retry_wait /
+      dead_letter), stale-owner rejection, terminal immutability, and
+      atomic reclaim of expired-lease claims by delivery or by the bounded
+      cron recovery scan. Migration 0003 adds `dlq_delivered_at` +
+      `idx_jobs_dlq_pending` for DLQ-delivery reconciliation (schema 3).
+- [x] Reliable dispatch (blueprint §6 order): durable-create-FIRST, then
+      reference-only enqueue; both uncertainty windows solved (failed/unknown
+      enqueue → recoverable row; lost queued marker → grace-window re-kick);
+      bounded, indexed, deterministic cron scans (`run_after ASC, priority
+DESC, id ASC LIMIT 25`); overlapping crons produce duplicate REFERENCES
+      that claim fencing absorbs — no duplicate durable effects; cron never
+      executes handlers.
+- [x] Consumer replacing the Phase-0 ack-all skeleton (ADR-0011): validated
+      dispatch → D1 claim → registered handler → fenced persistence →
+      persist-before-ack. Full decision table for duplicate/not-due/
+      active-lease/expired-lease/missing/poison/cancelled/storage-failure/
+      lost-fence deliveries; retry NEVER acknowledged before its D1 schedule
+      (`run_after`) is durably persisted. Bounded exponential backoff with
+      full jitter (injected clock/random, 2s base / 1h cap), `retry_after`
+      floor support, `max_attempts` 3 default (5-attempt P0 publication
+      policy documented, not built), no sleeps, no blind retries of
+      permanent/semantic errors.
+- [x] Poison handling and DLQ: unregistered types and corrupt payloads
+      dead-letter fail-safe (no fake handlers, no hot loops); malformed
+      envelopes/unsupported versions acknowledged without durable mutation;
+      exhaustion → durable `dead_letter` then bounded SAFE reference to the
+      DLQ (no payload/credentials/provider text) reconciled from
+      `dlq_delivered_at`; platform (`max_retries`) DLQ path needs no D1
+      mutation (cron reclaim + re-dispatch converge on D1). Controlled
+      offline-documented operator replay procedure (no replay UI/endpoint).
+- [x] Fail-closed activation: `JOBS_ENABLED` flag (default false) preserves
+      the exact Telegram-only deployment when off; enabled-but-misconfigured
+      paths (missing DB/JOBS/DLQ bindings) never dispatch and never
+      acknowledge uncertain work. Preview wrangler bindings DECLARED
+      (`JOBS`→`pixel-jobs-preview`, `DLQ`→`pixel-dlq-preview`, consumer with
+      `dead_letter_queue`, `max_retries` 3, batch 10/5s) — resources are
+      provisioned by the operator runbook ONLY. Production bindings remain
+      future-only.
+- [x] One harmless registered handler proves the engine end-to-end:
+      `jobs.maintenance_heartbeat` (idempotent D1-only settings upsert in
+      the dedicated `jobs_maintenance:` namespace). No public smoke
+      endpoint; working Telegram commands remain synchronous.
+- [x] Real-workerd D1 acceptance suites (store lifecycle, engine, consumer
+      decision table, DLQ reconciliation, entrypoint activation matrix) +
+      unit contract/config suites; full baseline remains green (see the
+      Phase 3 handoff for recorded numbers).
 
 ## Phase 4 — source registry and initial connectors ⬜
 
@@ -255,3 +312,32 @@ registration, live Telegram traffic, degraded-readiness semantics.
 - [x] Deploy and verify `pixel-preview`.
 - [x] Connect the GitHub repository through Cloudflare Workers Builds.
 - [ ] Keep production infrastructure unprovisioned until its release gate.
+
+### Phase 2B — Preview live wiring and admin UI language ✅ (delivered v1.2.5; review corrections v1.2.6; merged to main `d7872db`)
+
+- [x] Owner-authorized preview live wiring: BOT_TOKEN / WEBHOOK_SECRET /
+      OWNER_TELEGRAM_ID configured as Cloudflare secrets (never in the
+      repository), `TELEGRAM_INGRESS_ENABLED=true` on the preview
+      environment only, webhook registered, live Telegram traffic verified
+      (operator runbook: `handoff/PHASE_02B_PREVIEW_TELEGRAM_WIRING.md`).
+- [x] Admin UI language feature (ADR-0034; v1.2.5): English default,
+      per-admin `/language en|fa` preference persisted in the dedicated
+      `admin_ui_language:` settings namespace with owner bootstrap,
+      authorization, private-chat and non-edited-message guards, honest
+      persist-first acknowledgements, and STRICT separation from
+      editorial/channel language.
+- [x] Independent review corrections (v1.2.6 — CHANGES REQUIRED verdict
+      resolved): preference ordering re-fenced by VALIDATED Telegram
+      message-order metadata `(date, message_id)` after Telegram's documented
+      update_id randomization following one idle week (update_id retained as
+      the durable deduplication boundary; ADR-0035); safe atomic corrupt-row
+      recovery (`json_valid` guard BEFORE `json_extract`; malformed JSON and
+      valid-JSON-invalid-types rows repaired by the next legitimate write
+      inside the same namespace); delivery integrity normalized (executable
+      bits verified against the index with `core.filemode=true`, handoff
+      file counts corrected) plus the final lockfile fix restoring
+      `word-wrap@1.2.5` inside an internally consistent lock (application
+      versions stayed 1.2.6).
+- [x] Reviewer regression suites added and green (message-order fencing,
+      corrupt-row recovery); full gate re-run on clean installs at every
+      round.

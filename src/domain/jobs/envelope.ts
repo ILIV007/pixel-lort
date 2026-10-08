@@ -31,13 +31,14 @@ export const ENVELOPE_ATTEMPT_MAX = 1_000_000;
  * can be dead-lettered fail-safe (poison JOB handling, ADR-0036 §4) instead
  * of being silently dropped as a parse error.
  */
-export const QueueEnvelopeSchema = z.object({
-  version: z.literal(ENVELOPE_VERSION),
-  jobId: z.string().min(1).max(ENVELOPE_JOB_ID_MAX_LENGTH),
-  type: z.string().max(JOB_TYPE_MAX_LENGTH).regex(JOB_TYPE_PATTERN),
-  attempt: z.number().int().min(1).max(ENVELOPE_ATTEMPT_MAX),
-  traceId: z.string().min(1).max(ENVELOPE_TRACE_ID_MAX_LENGTH),
-})
+export const QueueEnvelopeSchema = z
+  .object({
+    version: z.literal(ENVELOPE_VERSION),
+    jobId: z.string().min(1).max(ENVELOPE_JOB_ID_MAX_LENGTH),
+    type: z.string().max(JOB_TYPE_MAX_LENGTH).regex(JOB_TYPE_PATTERN),
+    attempt: z.number().int().min(1).max(ENVELOPE_ATTEMPT_MAX),
+    traceId: z.string().min(1).max(ENVELOPE_TRACE_ID_MAX_LENGTH),
+  })
   // STRICT: the envelope is a reference — any extra field (e.g. smuggled
   // payload content) is malformed by contract.
   .strict();

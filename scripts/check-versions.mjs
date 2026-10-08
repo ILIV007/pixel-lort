@@ -19,7 +19,7 @@
  *   - .dev.vars.example        (# APP_VERSION=)
  *   - tests/helpers/test-env.ts     (APP_VERSION: '<version>-test')
  *
- * Checked schema-version touch points (expected: 2 — migrations 0001+0002):
+ * Checked schema-version touch points (expected: 3 — migrations 0001+0002+0003):
  *   - src/shared/config/phase1a.ts  (EXPECTED_SCHEMA_VERSION)
  *   - wrangler.jsonc           (every SCHEMA_VERSION var)
  *   - .env.example             (SCHEMA_VERSION=)
@@ -118,10 +118,10 @@ if (typeof appVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(appVersion)) {
 }
 
 // ---------------------------------------------------------------------------
-// Schema version — the applied migrations 0001+0002 define version 2.
+// Schema version — the applied migrations 0001+0002+0003 define version 3.
 // ---------------------------------------------------------------------------
 
-const EXPECTED_SCHEMA_VERSION = '2';
+const EXPECTED_SCHEMA_VERSION = '3';
 
 expectEveryMatch(
   'src/shared/config/phase1a.ts',

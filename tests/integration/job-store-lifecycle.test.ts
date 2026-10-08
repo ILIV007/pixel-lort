@@ -176,7 +176,9 @@ describe('idempotent creation', () => {
     const kinds = [a.kind, b.kind].sort();
     expect(kinds).toEqual(['created', 'existing']);
     expect(a.jobId).toBe('job-race');
-    const rows = await executor.query<{ n: number }>({ sql: "SELECT COUNT(*) AS n FROM jobs WHERE idempotency_key = 'idem-race'" });
+    const rows = await executor.query<{ n: number }>({
+      sql: "SELECT COUNT(*) AS n FROM jobs WHERE idempotency_key = 'idem-race'",
+    });
     expect(rows.rows[0]?.n).toBe(1);
   });
 });
@@ -240,7 +242,16 @@ describe('atomic claim — generation fencing and boundaries', () => {
 
     // Stale generation 1 attempts every owner-dependent mutation.
     expect(await completeJob(executor, 'job-c6', 1, NOW + 1500)).toBe(false);
-    expect(await markJobRetryWait(executor, 'job-c6', 1, NOW + 9999, 'job_handler_retryable_error', NOW + 1500)).toBe(false);
+    expect(
+      await markJobRetryWait(
+        executor,
+        'job-c6',
+        1,
+        NOW + 9999,
+        'job_handler_retryable_error',
+        NOW + 1500,
+      ),
+    ).toBe(false);
     expect(await markJobDeadLetter(executor, 'job-c6', 1, 'job_exhausted', NOW + 1500)).toBe(false);
 
     const row = await findJobById(executor, 'job-c6');
@@ -263,7 +274,16 @@ describe('atomic claim — generation fencing and boundaries', () => {
 
     await seedJob({ id: 'job-c8' });
     await claimJob(executor, 'job-c8', NOW);
-    expect(await markJobRetryWait(executor, 'job-c8', 1, NOW + 5000, 'job_handler_retryable_error', NOW + 10)).toBe(true);
+    expect(
+      await markJobRetryWait(
+        executor,
+        'job-c8',
+        1,
+        NOW + 5000,
+        'job_handler_retryable_error',
+        NOW + 10,
+      ),
+    ).toBe(true);
     const waiting = await findJobById(executor, 'job-c8');
     expect(waiting?.status).toBe('retry_wait');
     expect(waiting?.run_after).toBe(NOW + 5000);
@@ -290,14 +310,18 @@ describe('atomic claim — generation fencing and boundaries', () => {
 
   it('dead-letters an unclaimed dispatchable poison row without burning a generation', async () => {
     await seedJob({ id: 'job-c13', type: 'future.not_implemented', status: 'queued' });
-    expect(await markJobDeadLetter(executor, 'job-c13', null, 'job_type_unregistered', NOW)).toBe(true);
+    expect(await markJobDeadLetter(executor, 'job-c13', null, 'job_type_unregistered', NOW)).toBe(
+      true,
+    );
     const row = await findJobById(executor, 'job-c13');
     expect(row?.status).toBe('dead_letter');
     expect(row?.attempts).toBe(0);
     expect(row?.last_error).toBe('job_type_unregistered');
     expect(row?.dlq_delivered_at ?? null).toBeNull();
     // A second poison pass is a no-op (guarded by dispatchable statuses).
-    expect(await markJobDeadLetter(executor, 'job-c13', null, 'job_type_unregistered', NOW + 1)).toBe(false);
+    expect(
+      await markJobDeadLetter(executor, 'job-c13', null, 'job_type_unregistered', NOW + 1),
+    ).toBe(false);
   });
 });
 

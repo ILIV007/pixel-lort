@@ -38,10 +38,18 @@ function createMockBatch(messages: MockQueueMessage[]): MessageBatch<unknown> {
 describe('queue handler (engine disabled — default environment)', () => {
   it('retries every message instead of acknowledging uncertain work', async () => {
     const batch = createMockBatch([
-      createMockMessage('m1', { version: 1, jobId: 'job-1', type: 'jobs.maintenance_heartbeat', attempt: 1, traceId: 't1' }),
+      createMockMessage('m1', {
+        version: 1,
+        jobId: 'job-1',
+        type: 'jobs.maintenance_heartbeat',
+        attempt: 1,
+        traceId: 't1',
+      }),
       createMockMessage('m2', 'plain-payload'),
     ]);
-    await expect(worker.queue(batch, createTestEnv(), createTestExecutionContext())).resolves.toBeUndefined();
+    await expect(
+      worker.queue(batch, createTestEnv(), createTestExecutionContext()),
+    ).resolves.toBeUndefined();
 
     for (const message of batch.messages as unknown as MockQueueMessage[]) {
       expect(message.retry).toHaveBeenCalledTimes(1);
@@ -51,11 +59,19 @@ describe('queue handler (engine disabled — default environment)', () => {
 
   it('resolves for an empty batch', async () => {
     const batch = createMockBatch([]);
-    await expect(worker.queue(batch, createTestEnv(), createTestExecutionContext())).resolves.toBeUndefined();
+    await expect(
+      worker.queue(batch, createTestEnv(), createTestExecutionContext()),
+    ).resolves.toBeUndefined();
   });
 
   it('does not mutate or inspect message bodies', async () => {
-    const payload = { version: 1, jobId: 'job-9', type: 'jobs.maintenance_heartbeat', attempt: 2, traceId: 't9' };
+    const payload = {
+      version: 1,
+      jobId: 'job-9',
+      type: 'jobs.maintenance_heartbeat',
+      attempt: 2,
+      traceId: 't9',
+    };
     const message = createMockMessage('m9', payload);
     const batch = createMockBatch([message]);
 

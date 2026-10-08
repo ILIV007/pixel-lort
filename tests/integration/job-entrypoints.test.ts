@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { env } from 'cloudflare:test';
 import { applyMigrations } from '../helpers/migrations';
 import worker from '../../src/entrypoints/worker';
-import { createTestEnv, createTestExecutionContext, createTestScheduledController } from '../helpers/test-env';
+import {
+  createTestEnv,
+  createTestExecutionContext,
+  createTestScheduledController,
+} from '../helpers/test-env';
 import type { WorkerEnv } from '../../src/shared/types/env';
 
 /**
@@ -67,7 +71,11 @@ describe('scheduled entrypoint activation', () => {
       DB: env.DB,
     };
     await expect(
-      worker.scheduled(createTestScheduledController('*/5 * * * *', NOW), envJobs, createTestExecutionContext()),
+      worker.scheduled(
+        createTestScheduledController('*/5 * * * *', NOW),
+        envJobs,
+        createTestExecutionContext(),
+      ),
     ).resolves.toBeUndefined();
     // Fail closed: no producer → the row is NOT marked queued.
     const row = await env.DB.prepare('SELECT status FROM jobs WHERE id = ?')
@@ -79,7 +87,11 @@ describe('scheduled entrypoint activation', () => {
   it('enabled without DB: config_invalid — no dispatch, no crash', async () => {
     const envNoDb: WorkerEnv = { ...createTestEnv(), JOBS_ENABLED: 'true' };
     await expect(
-      worker.scheduled(createTestScheduledController('*/5 * * * *', NOW), envNoDb, createTestExecutionContext()),
+      worker.scheduled(
+        createTestScheduledController('*/5 * * * *', NOW),
+        envNoDb,
+        createTestExecutionContext(),
+      ),
     ).resolves.toBeUndefined();
   });
 
@@ -104,10 +116,19 @@ describe('scheduled entrypoint activation', () => {
         },
       } as unknown as Queue<unknown>,
     };
-    await worker.scheduled(createTestScheduledController('*/5 * * * *', NOW), envJobs, createTestExecutionContext());
+    await worker.scheduled(
+      createTestScheduledController('*/5 * * * *', NOW),
+      envJobs,
+      createTestExecutionContext(),
+    );
     expect(sentEnvelopes).toHaveLength(1);
     const wire = JSON.parse(sentEnvelopes[0] as string) as Record<string, unknown>;
-    expect(wire).toMatchObject({ version: 1, jobId: 'cron-2', type: 'jobs.maintenance_heartbeat', attempt: 1 });
+    expect(wire).toMatchObject({
+      version: 1,
+      jobId: 'cron-2',
+      type: 'jobs.maintenance_heartbeat',
+      attempt: 1,
+    });
     const row = await env.DB.prepare('SELECT status FROM jobs WHERE id = ?')
       .bind('cron-2')
       .first<{ status: string }>();
@@ -120,7 +141,18 @@ describe('queue entrypoint activation', () => {
     const ack = vi.fn();
     const retry = vi.fn();
     const batch = fakeBatch([
-      { id: 'm1', body: { version: 1, jobId: 'gone', type: 'jobs.maintenance_heartbeat', attempt: 1, traceId: 't' }, ack, retry },
+      {
+        id: 'm1',
+        body: {
+          version: 1,
+          jobId: 'gone',
+          type: 'jobs.maintenance_heartbeat',
+          attempt: 1,
+          traceId: 't',
+        },
+        ack,
+        retry,
+      },
     ]);
     await worker.queue(batch, createTestEnv(), createTestExecutionContext());
     expect(retry).toHaveBeenCalledTimes(1);
@@ -141,7 +173,13 @@ describe('queue entrypoint activation', () => {
     const batch = fakeBatch([
       {
         id: 'm1',
-        body: { version: 1, jobId: 'q-1', type: 'jobs.maintenance_heartbeat', attempt: 1, traceId: 't' },
+        body: {
+          version: 1,
+          jobId: 'q-1',
+          type: 'jobs.maintenance_heartbeat',
+          attempt: 1,
+          traceId: 't',
+        },
         ack,
         retry,
       },

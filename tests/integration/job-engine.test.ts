@@ -275,7 +275,10 @@ describe('dispatch uncertainty windows (ADR-0036 §3)', () => {
     await h.engine.dispatchDueJobs();
     // Simulate a lost marker: the row is back to pending though a message
     // was already delivered to the queue.
-    await h.executor.run({ sql: "UPDATE jobs SET status = 'pending' WHERE id = ?", params: [jobId] });
+    await h.executor.run({
+      sql: "UPDATE jobs SET status = 'pending' WHERE id = ?",
+      params: [jobId],
+    });
 
     // The pending row is DUE: the very next pass re-kicks it (window 2 is
     // closed by immediate re-dispatch, not by the grace timer).
@@ -368,7 +371,11 @@ describe('dispatch uncertainty windows (ADR-0036 §3)', () => {
     // 30 due rows against a 25-row dispatch batch: the scan is capped, and
     // the remainder stays recoverable for the next bounded pass.
     for (let i = 0; i < 30; i++) {
-      await seedRow(h.executor, { id: `b-${String(i).padStart(2, '0')}`, runAfter: NOW, priority: i });
+      await seedRow(h.executor, {
+        id: `b-${String(i).padStart(2, '0')}`,
+        runAfter: NOW,
+        priority: i,
+      });
     }
     const summary = await h.engine.dispatchDueJobs();
     expect(summary.dueScanned).toBe(25);
@@ -396,15 +403,42 @@ describe('consumer decision table (ADR-0036 §4)', () => {
       action: 'ack',
       outcome: 'poison_malformed_envelope',
     });
-    expect(await h.engine.consumeMessage('m2', envelope('x', 1, 'a.b') && { version: 2, jobId: 'x', type: 'a.b', attempt: 1, traceId: 't' })).toEqual({
+    expect(
+      await h.engine.consumeMessage(
+        'm2',
+        envelope('x', 1, 'a.b') && {
+          version: 2,
+          jobId: 'x',
+          type: 'a.b',
+          attempt: 1,
+          traceId: 't',
+        },
+      ),
+    ).toEqual({
       action: 'ack',
       outcome: 'poison_unsupported_version',
     });
-    expect(await h.engine.consumeMessage('m3', { version: 1, jobId: 'nope', type: 'a.b', attempt: 1, traceId: 't' })).toEqual({
+    expect(
+      await h.engine.consumeMessage('m3', {
+        version: 1,
+        jobId: 'nope',
+        type: 'a.b',
+        attempt: 1,
+        traceId: 't',
+      }),
+    ).toEqual({
       action: 'ack',
       outcome: 'job_missing',
     });
-    expect(await h.engine.consumeMessage('m4', { version: 1, jobId: 'x', type: 'BAD TYPE', attempt: 1, traceId: 't' })).toEqual({
+    expect(
+      await h.engine.consumeMessage('m4', {
+        version: 1,
+        jobId: 'x',
+        type: 'BAD TYPE',
+        attempt: 1,
+        traceId: 't',
+      }),
+    ).toEqual({
       action: 'ack',
       outcome: 'poison_malformed_envelope',
     });
@@ -442,7 +476,12 @@ describe('consumer decision table (ADR-0036 §4)', () => {
 
   it('retries while an active lease is held elsewhere (never a false duplicate)', async () => {
     const h = createHarness();
-    const jobId = await seedRow(h.executor, { id: 'lease-1', status: 'claimed', attempts: 1, leaseUntil: NOW + 60_000 });
+    const jobId = await seedRow(h.executor, {
+      id: 'lease-1',
+      status: 'claimed',
+      attempts: 1,
+      leaseUntil: NOW + 60_000,
+    });
     const action = await h.engine.consumeMessage('m1', envelope(jobId, 1));
     expect(action).toEqual({ action: 'retry', outcome: 'active_elsewhere' });
     const row = await h.executor.first<{ attempts: number }>({
@@ -468,8 +507,14 @@ describe('consumer decision table (ADR-0036 §4)', () => {
 
   it('poisons unregistered types and corrupt payloads without execution', async () => {
     const h = createHarness();
-    const unknownType = await seedRow(h.executor, { id: 'poison-1', type: 'future.not_implemented', status: 'queued' });
-    expect(await h.engine.consumeMessage('m1', envelope(unknownType, 1, 'future.not_implemented'))).toEqual({
+    const unknownType = await seedRow(h.executor, {
+      id: 'poison-1',
+      type: 'future.not_implemented',
+      status: 'queued',
+    });
+    expect(
+      await h.engine.consumeMessage('m1', envelope(unknownType, 1, 'future.not_implemented')),
+    ).toEqual({
       action: 'ack',
       outcome: 'poisoned_job_type_unregistered',
     });
@@ -497,7 +542,11 @@ describe('consumer decision table (ADR-0036 §4)', () => {
     const jobZero = await seedRow(zero.executor, { id: 'retry-0' });
     const a = await zero.engine.consumeMessage('m1', envelope(jobZero, 1));
     expect(a).toEqual({ action: 'ack', outcome: 'retry_scheduled' });
-    const rowZero = await zero.executor.first<{ status: string; run_after: number; last_error: string }>({
+    const rowZero = await zero.executor.first<{
+      status: string;
+      run_after: number;
+      last_error: string;
+    }>({
       sql: 'SELECT status, run_after, last_error FROM jobs WHERE id = ?',
       params: [jobZero],
     });
@@ -521,7 +570,11 @@ describe('consumer decision table (ADR-0036 §4)', () => {
 
     // A retry_after floor from the handler raises the delay (bounded by cap).
     const floored = createHarness({ random: () => 1 });
-    floored.setHandlerOutcome({ kind: 'retry', reasonCode: 'job_handler_retryable_error', retryAfterMs: 30_000 });
+    floored.setHandlerOutcome({
+      kind: 'retry',
+      reasonCode: 'job_handler_retryable_error',
+      retryAfterMs: 30_000,
+    });
     const jobFloor = await seedRow(floored.executor, { id: 'retry-2' });
     await floored.engine.consumeMessage('m1', envelope(jobFloor, 1));
     const rowFloor = await floored.executor.first<{ run_after: number }>({
@@ -540,11 +593,18 @@ describe('consumer decision table (ADR-0036 §4)', () => {
       const action = await h.engine.consumeMessage(`m-${generation}`, envelope(jobId, generation));
       expect(action).toEqual({ action: 'ack', outcome: 'retry_scheduled' });
       // Make the rescheduled row due again for the next delivery.
-      await h.executor.run({ sql: 'UPDATE jobs SET run_after = ? WHERE id = ?', params: [NOW, jobId] });
+      await h.executor.run({
+        sql: 'UPDATE jobs SET run_after = ? WHERE id = ?',
+        params: [NOW, jobId],
+      });
     }
     const third = await h.engine.consumeMessage('m-3', envelope(jobId, 3));
     expect(third).toEqual({ action: 'ack', outcome: 'job_dead_lettered' });
-    const row = await h.executor.first<{ status: string; last_error: string; dlq_delivered_at: number | null }>({
+    const row = await h.executor.first<{
+      status: string;
+      last_error: string;
+      dlq_delivered_at: number | null;
+    }>({
       sql: 'SELECT status, last_error, dlq_delivered_at FROM jobs WHERE id = ?',
       params: [jobId],
     });
@@ -601,7 +661,11 @@ describe('consumer decision table (ADR-0036 §4)', () => {
     // A handler that throws at exhaustion-time is dead-lettered (bounded).
     const exhausting = createHarness();
     exhausting.setHandlerOutcome(new Error('boom'));
-    const exhId = await seedRow(exhausting.executor, { id: 'throw-2', attempts: 3, maxAttempts: 3 });
+    const exhId = await seedRow(exhausting.executor, {
+      id: 'throw-2',
+      attempts: 3,
+      maxAttempts: 3,
+    });
     expect(await exhausting.engine.consumeMessage('m1', envelope(exhId, 4))).toEqual({
       action: 'ack',
       outcome: 'job_dead_lettered',
@@ -710,11 +774,11 @@ describe('DLQ reconciliation (ADR-0036 §4)', () => {
 describe('observability hygiene', () => {
   it('logs carry stable events and never payloads, secrets, or provider text', async () => {
     const h = createHarness();
-    const jobId = await h.engine.createDurableJob({
+    await h.engine.createDurableJob({
       type: 'jobs.maintenance_heartbeat',
       idempotencyKey: 'log-1',
       payload: { note: 'secret-note-value-xyz' },
-    }).then((r) => (r.kind === 'created' ? r.jobId : ''));
+    });
     h.setHandlerOutcome({ kind: 'retry', reasonCode: 'job_handler_retryable_error' });
     await h.engine.dispatchDueJobs();
     await h.engine.consumeMessage('m1', h.sentEnvelopes[0]);

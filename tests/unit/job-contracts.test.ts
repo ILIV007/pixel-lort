@@ -14,7 +14,13 @@ import { computeBackoffDelayMs, decideRetry } from '../../src/domain/jobs/lifecy
  */
 
 describe('queue envelope contract', () => {
-  const valid = { version: 1 as const, jobId: 'job-1', type: 'jobs.maintenance_heartbeat', attempt: 1, traceId: 'trace-1' };
+  const valid = {
+    version: 1 as const,
+    jobId: 'job-1',
+    type: 'jobs.maintenance_heartbeat',
+    attempt: 1,
+    traceId: 'trace-1',
+  };
 
   it('accepts a valid envelope', () => {
     const parsed = parseQueueEnvelope(valid);
