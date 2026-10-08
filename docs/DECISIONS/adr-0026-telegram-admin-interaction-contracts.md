@@ -1,6 +1,6 @@
 # ADR-0026: Telegram admin interaction contracts (roles, commands, HTML, callback tokens)
 
-- **Status:** Accepted
+- **Status:** Accepted (amended v1.2.5 by ADR-0034: the unauthorized-sender denial is now the fixed minimal ENGLISH string "Access denied.", the allowlist gains `/language`, and command responses are rendered in the sender's persisted admin UI language — English default. The security model is unchanged.)
 - **Phase:** 2A
 - **Date:** 2026-10-04
 - **Decided by:** Alexios
@@ -36,10 +36,12 @@ this phase.
   normalized update + actor to TYPED actions
   (`send_message` / `answer_callback` / `noop` / `denied`) — never an
   immediate fetch. Phase 2A allowlist: `/start`, `/help`, `/status`,
-  `/version`. Authorized senders get static Persian admin responses;
-  unauthorized senders get a minimal fixed denial
-  ("دسترسی مجاز نیست."); commands outside the allowlist are IGNORED for
-  every sender (no probe feedback). No role-mutation endpoints and no
+  `/version` (extended to `/language` by ADR-0034). Authorized senders get
+  static Persian admin responses (since v1.2.5: in the sender's persisted
+  admin UI language, English default — ADR-0034); unauthorized senders get
+  a minimal fixed denial (Phase 2A: "دسترسی مجاز نیست."; since v1.2.5:
+  "Access denied." — ADR-0034); commands outside the allowlist are IGNORED
+  for every sender (no probe feedback). No role-mutation endpoints and no
   publishing controls exist in Phase 2A.
 - **Offline-mode action execution.** Actions execute through the injected
   Bot API client only when `BOT_TOKEN` is configured (ADR-0024); otherwise

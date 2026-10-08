@@ -33,8 +33,17 @@ correction rounds v1.2.2–v1.2.3 — schema v2):
   like an unknown route.
 - Bounded Telegram Update parser (message / edited_message / callback_query)
   with safe-integer numerics, bounded strings, the 64-byte callback data
-  limit, bot-command target extraction (`/cmd@bot`), and crash-free
-  classification of unknown update kinds.
+  limit, bot-command target extraction (`/cmd@bot`), known chat-type
+  extraction (`chatType`, v1.2.5), and crash-free classification of unknown
+  update kinds.
+- Admin UI language selection (v1.2.5, ADR-0034): ENGLISH default admin bot
+  UI; per-admin `/language` (bare | `en` | `fa`) with durable per-admin
+  persistence in the existing `settings` table under the dedicated
+  `admin_ui_language:<user_id>` namespace (schema stays 2); update_id-fenced
+  writes so older retried messages never overwrite newer choices; honest
+  confirmations only after the fenced write applies (storage failures are
+  retryable 503, never false success); private-chat + fresh-message guards;
+  strict separation from the Persian/RTL editorial and channel language.
 - Durable update idempotency in D1 (`telegram_updates`, ADR-0025/0027,
   lifecycle completed by ADR-0030/0031, fenced by the final correction
   round v1.2.3): update_id claim boundary with SIX explicit outcomes
@@ -66,13 +75,14 @@ correction rounds v1.2.2–v1.2.3 — schema v2):
 - Authorization foundation: owner bootstrap identity + active D1 admins
   across the six approved roles (verbatim permission map); fail closed for
   disabled admins, unknown users, and identity-less updates.
-- Command routing contracts: `/start` `/help` `/status` `/version` for
-  authorized senders (static Persian admin responses), minimal denial for
-  unauthorized senders, ignore-list for everything else, and bot-target
-  safety — a command addressed to another bot (`/cmd@other_bot`) is ignored
-  (stable `command_for_other_bot` reason), matched case-insensitively when
-  an expected username is configured. Typed Telegram actions decoupled from
-  HTTP routing.
+- Command routing contracts: `/start` `/help` `/status` `/version` `/language`
+  for authorized senders (rendered in the sender's persisted admin UI
+  language — English DEFAULT, per-admin Persian selectable via `/language`,
+  ADR-0034), minimal English denial for unauthorized senders, ignore-list
+  for everything else, and bot-target safety — a command addressed to
+  another bot (`/cmd@other_bot`) is ignored (stable `command_for_other_bot`
+  reason), matched case-insensitively when an expected username is
+  configured. Typed Telegram actions decoupled from HTTP routing.
 - Telegram Bot API client boundary (getMe / sendMessage / editMessageText /
   answerCallbackQuery): injectable fetch, strict timeout, single attempt,
   `redirect: "error"`, bounded 1 MiB response streaming on success and
@@ -202,11 +212,12 @@ src/
   entrypoints/    Worker entrypoints: fetch/HTTP (incl. Telegram webhook), scheduled, queue
   domain/         (planned) pure domain models — no platform types
   application/    telegram-ingress.ts — durable update lifecycle (Phase 2A)
-  adapters/       db/ D1 boundary (Phase 1A); telegram/ parser, claims, lookup,
-                  action tokens, Bot API client (Phase 2A); queue/kv/r2/ai planned
+  adapters/       db/ D1 boundary + admin UI language store (settings table,
+                  ADR-0034); telegram/ parser, claims, lookup, action tokens,
+                  Bot API client (Phase 2A); queue/kv/r2/ai planned
   editorial/      (planned) deterministic renderer, Persian normalization, prompts
-  admin/          roles, authorization, command router, Telegram-safe HTML,
-                  callback token contract (Phase 2A foundation)
+  admin/          roles, authorization, command router, admin UI language
+                  (ADR-0034), Telegram-safe HTML, callback token contract
   observability/  structured logging, redaction (implemented in Phase 0)
   shared/         errors, config validation, ids, clock, timing-safe compare
 tests/

@@ -39,6 +39,8 @@ in [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md).
 | [ADR-0030](adr-0030-claim-lease-stale-reclaim.md)            | Claimed-update lease and stale-claim recovery (schema v2, migration 0002)          | Accepted (amended v1.2.3: generation fencing)                 |
 | [ADR-0031](adr-0031-failure-class-persistence.md)            | Persisted failure classes: permanent failures are terminal, retryable reclaimable  | Accepted (amended v1.2.3: fenced transitions)                 |
 | [ADR-0032](adr-0032-at-least-once-side-effects.md)           | Honest at-least-once side-effect semantics (bounded duplicate risk, no outbox yet) | Accepted (amended v1.2.3: 200 only after durable persistence) |
+| [ADR-0033](adr-0033-live-compatible-redirect-rejection.md)   | Live-compatible Telegram redirect rejection (manual mode, 3xx fail closed)         | Accepted                                                      |
+| [ADR-0034](adr-0034-admin-ui-language.md)                    | Admin UI language: English default, per-admin persistence, update_id-fenced writes | Accepted (amends ADR-0026: English denial, /language command) |
 
 All Phase-0 open decisions (OD-001..OD-008) are now **closed**; see
 [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md) for the preserved history. An
@@ -56,3 +58,4 @@ ADR is written only when a decision is actually made.
 - [ADR-0032: Honest at-least-once side-effect semantics](adr-0032-at-least-once-side-effects.md)
 
 - [ADR-0033 — Live-compatible Telegram redirect rejection](adr-0033-live-compatible-redirect-rejection.md)
+- [ADR-0034 — Admin UI language selection (English default, per-admin persistence)](adr-0034-admin-ui-language.md)
