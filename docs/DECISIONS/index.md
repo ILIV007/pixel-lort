@@ -42,6 +42,7 @@ in [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md).
 | [ADR-0033](adr-0033-live-compatible-redirect-rejection.md)   | Live-compatible Telegram redirect rejection (manual mode, 3xx fail closed)         | Accepted                                                                                  |
 | [ADR-0034](adr-0034-admin-ui-language.md)                    | Admin UI language: English default, per-admin persistence, update_id-fenced writes | Accepted (amended v1.2.6 by ADR-0035; amends ADR-0026: English denial, /language command) |
 | [ADR-0035](adr-0035-admin-ui-language-ordering.md)           | Admin UI language ordering by Telegram message metadata + corrupt-row recovery     | Accepted (amends ADR-0034: message-order fence, v1.2.6)                                   |
+| [ADR-0036](adr-0036-job-queue-engine.md)                     | Durable job/queue engine: lifecycle, fencing, dispatch, retry, DLQ, activation     | Accepted (Phase 3; migration 0003, schema 3)                                              |
 
 All Phase-0 open decisions (OD-001..OD-008) are now **closed**; see
 [`../OPEN_DECISIONS.md`](../OPEN_DECISIONS.md) for the preserved history. An
@@ -61,3 +62,4 @@ ADR is written only when a decision is actually made.
 - [ADR-0033 — Live-compatible Telegram redirect rejection](adr-0033-live-compatible-redirect-rejection.md)
 - [ADR-0034 — Admin UI language selection (English default, per-admin persistence)](adr-0034-admin-ui-language.md)
 - [ADR-0035 — Admin UI language ordering by Telegram message metadata](adr-0035-admin-ui-language-ordering.md)
+- [ADR-0036 — Durable job/queue engine (lifecycle, fencing, dispatch, retry, DLQ)](adr-0036-job-queue-engine.md)
