@@ -90,10 +90,14 @@ export async function setupPreviewWebhook(
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
-        redirect: 'error',
+        redirect: 'manual',
         signal: controller.signal,
       });
       stage = 'http_status';
+      if (response.status >= 300 && response.status < 400) {
+        await cancelQuietly(response.body);
+        throw new TelegramSetupError('redirect_rejected');
+      }
       if (!response.ok) {
         await cancelQuietly(response.body);
         throw new TelegramSetupError(

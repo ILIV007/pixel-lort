@@ -41,7 +41,7 @@ test('checks identity/status, registers shared secret, preserves pending updates
   assert.equal(calls[2].payload.drop_pending_updates, false);
   assert.equal(calls[2].payload.max_connections, 4);
   assert.equal(calls[2].payload.url, target);
-  assert.ok(calls.every((c) => c.init.redirect === 'error' && c.init.signal));
+  assert.ok(calls.every((c) => c.init.redirect === 'manual' && c.init.signal));
 });
 
 test('refuses to replace a different existing webhook', async () => {
@@ -152,4 +152,19 @@ test('network-body cleanup cannot mask a token rejection', async () => {
     },
   });
   await assert.rejects(setupPreviewWebhook(config, fetchImpl), { code: 'token_rejected' });
+});
+
+test('manual redirect mode rejects 3xx without following or copying Location', async () => {
+  let calls = 0;
+  await assert.rejects(
+    setupPreviewWebhook(config, async () => {
+      calls++;
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'https://example.com/untrusted' },
+      });
+    }),
+    { code: 'redirect_rejected' },
+  );
+  assert.equal(calls, 1);
 });
