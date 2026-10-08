@@ -133,3 +133,27 @@ npm run check && npm run test:db` — all green (see §7 for the recorded
 - No live operations were performed: no credentials, no push, no merge, no
   deploy, no webhook re-registration, no remote migrations, no live Telegram
   calls.
+
+## 8. CORRECTION (appended v1.2.6 — history above preserved verbatim)
+
+The independent review returned CHANGES REQUIRED on this handoff. The
+following corrections are recorded in
+[`PHASE_02B_UI_LANGUAGE_V126_HANDOFF.md`](PHASE_02B_UI_LANGUAGE_V126_HANDOFF.md)
+and [ADR-0035](../docs/DECISIONS/adr-0035-admin-ui-language-ordering.md):
+
+1. The §4.2 update_id fence was WRONG as a chronological order (Telegram
+   may randomize update_id after one week without updates); preference
+   ordering now uses validated Telegram message-order metadata
+   `(message.date, message.message_id)`. update_id remains only the durable
+   deduplication boundary (ADR-0025).
+2. The §4.2 claim that COALESCE "lets the next write repair" a corrupt row
+   was false for MALFORMED JSON (`json_extract` throws, wedging the row)
+   and for valid JSON with invalid field types; recovery is now an atomic
+   `json_valid`-guarded repair inside the single UPSERT (ADR-0035).
+3. The tracked-file count is corrected: the v1.2.5 delivery tree contained
+   **177** tracked files (`git ls-tree -r b44db13a --name-only | wc -l`),
+   not the 176 reported. (The v1.2.6 correction itself adds 4 more files —
+   see the v1.2.6 handoff for the current count.) Tracked executable bits
+   are normalized to the Git index and verified with `core.filemode=true`
+   (mode drift is no longer hidden).
+4. Application version corrected to **1.2.6** (schema 2 unchanged).
