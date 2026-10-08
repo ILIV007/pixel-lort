@@ -153,3 +153,39 @@ gate):
 - `npm run check:versions`: application 1.2.6 / schema 2 consistent.
 - `npm run lint`, `npm run format:check`, `npm run typecheck`: clean.
 - `npm run build`: wrangler dry-run bundle OK (never a deploy).
+
+## 9. Final lockfile delivery fix (post-review, functional review PASSED)
+
+Applied after the v1.2.6 functional review PASSED — all three FIXes (§2,
+§3, §4) accepted; reviewed HEAD
+`5e60d2a6436c042cf4caa007485eb8b1f0201357`. Nothing was redesigned and the
+feature was not restarted.
+
+- **Single defect:** in `package-lock.json`,
+  `packages["node_modules/word-wrap"].version` recorded `"1.2.6"` while
+  its `resolved` URL and `integrity` correctly pin word-wrap **1.2.5** —
+  an internally inconsistent lock entry introduced by the v1.2.6
+  version-bump tooling sweep (word-wrap is a transitive dev dependency
+  via eslint → optionator; its version field must never follow the
+  application version).
+- **Fix scope — verified one-line diff (`6bc64fe`, 1 file, +1/−1):** ONLY
+  the version field was restored to `"1.2.5"`. `resolved` and
+  `integrity` are byte-identical; the `"word-wrap": "^1.2.5"` range and
+  every other dependency resolution are untouched; both the root
+  lockfile package version and the application version remain
+  **1.2.6** (no global version-string replacement). One focused
+  correction commit; linear history, nothing rewritten.
+- **Re-verification on a clean `npm ci`:**
+  - installed `node_modules/word-wrap` version = **1.2.5**, matching the
+    lock (`npm ls word-wrap`: eslint 9.39.5 → optionator 0.9.4 →
+    word-wrap@1.2.5);
+  - `npm run check` green end-to-end: lint, format, typecheck,
+    **519/519** unit tests, telegram-setup 14/14, secrets 10/10,
+    `scan:secrets` **181 files / 0 findings**, `check:versions`
+    application 1.2.6 / schema 2, wrangler dry-run build OK;
+  - `npm run test:db`: **47/47**.
+- The single v1.2.6 ZIP was rebuilt at this final HEAD and re-verified
+  by full extraction with `core.filemode=true` ENABLED: `git status`
+  clean, every tracked file mode equal to the index, ancestry intact
+  (b44db13 → 5e60d2a → 6bc64fe), and the lock inside the archive
+  carries word-wrap 1.2.5 with unchanged resolved/integrity.
