@@ -126,3 +126,17 @@ test('checks actual webhook URL and allowed update types after registration', as
     code: 'webhook_verification_failed',
   });
 });
+
+test('default fetch keeps the global receiver required by the Worker runtime', async () => {
+  const original = globalThis.fetch;
+  const { fetchImpl } = fixtures([identity, info, true, verified]);
+  globalThis.fetch = function (...args) {
+    assert.equal(this, globalThis);
+    return fetchImpl(...args);
+  };
+  try {
+    assert.equal((await setupPreviewWebhook(config)).status, 'verified');
+  } finally {
+    globalThis.fetch = original;
+  }
+});

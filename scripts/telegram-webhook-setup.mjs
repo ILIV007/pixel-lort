@@ -50,7 +50,10 @@ async function readBounded(response) {
 }
 
 /** Safe result contains normalized PUBLIC bot identity, never provider bodies. */
-export async function setupPreviewWebhook({ botToken, webhookSecret, ownerId }, fetchImpl = fetch) {
+export async function setupPreviewWebhook(
+  { botToken, webhookSecret, ownerId },
+  fetchImpl = (...args) => globalThis.fetch(...args),
+) {
   if (
     typeof botToken !== 'string' ||
     !/^[0-9]{6,16}:[A-Za-z0-9_-]{30,}$/.test(botToken) ||
