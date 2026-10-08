@@ -204,6 +204,82 @@ describe('parseTelegramUpdate — string bounds', () => {
   });
 });
 
+describe('parseTelegramUpdate — chat type extraction (v1.2.5)', () => {
+  it('extracts the exact known chat types', () => {
+    for (const type of ['private', 'group', 'supergroup', 'channel']) {
+      const result = parseTelegramUpdate(messageUpdate({ chat: { id: 555, type } }));
+      expect(result.ok).toBe(true);
+      if (!result.ok || result.update.kind !== 'message') return;
+      expect(result.update.chatType).toBe(type);
+    }
+  });
+
+  it('treats unknown, non-string, and missing chat types as absent (fail closed)', () => {
+    for (const type of ['secret_chat', 'Private', 7, null, undefined]) {
+      const chat: Record<string, unknown> = { id: 555 };
+      if (type !== undefined) chat['type'] = type;
+      const result = parseTelegramUpdate(messageUpdate({ chat }));
+      expect(result.ok).toBe(true);
+      if (!result.ok || result.update.kind !== 'message') return;
+      expect(result.update.chatType).toBeUndefined();
+    }
+  });
+
+  it('keeps chatType absent when the chat object itself is missing', () => {
+    const result = parseTelegramUpdate(messageUpdate({ chat: undefined }));
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.update.kind !== 'message') return;
+    expect(result.update.chatType).toBeUndefined();
+    expect(result.update.chatId).toBeUndefined();
+  });
+});
+
+describe('parseTelegramUpdate — message date (order metadata, v1.2.6 ADR-0035)', () => {
+  it('extracts a valid server-assigned date (Unix seconds) for messages and edited messages', () => {
+    const result = parseTelegramUpdate(messageUpdate({ date: 1_700_000_000 }));
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.update.kind !== 'message') return;
+    expect(result.update.date).toBe(1_700_000_000);
+
+    const edited = parseTelegramUpdate({
+      update_id: 102,
+      edited_message: { message_id: 7, date: 1_700_000_001, chat: { id: 5 }, from: { id: 5 } },
+    });
+    expect(edited.ok).toBe(true);
+    if (!edited.ok || edited.update.kind !== 'edited_message') return;
+    expect(edited.update.date).toBe(1_700_000_001);
+  });
+
+  it('treats missing, non-integer, negative, and out-of-bound dates as ABSENT (fail safe)', () => {
+    for (const date of [
+      undefined,
+      '1700000000',
+      1_700_000_000.5,
+      Number.NaN,
+      -1,
+      4_102_444_801,
+      99_999_999_999,
+    ]) {
+      const payload: Record<string, unknown> = {};
+      if (date !== undefined) payload['date'] = date;
+      const result = parseTelegramUpdate(messageUpdate(payload));
+      expect(result.ok).toBe(true);
+      if (!result.ok || result.update.kind !== 'message') return;
+      expect(result.update.date).toBeUndefined();
+    }
+  });
+
+  it('keeps date absent for updates without message-order metadata (callback/unsupported)', () => {
+    const callback = parseTelegramUpdate({
+      update_id: 103,
+      callback_query: { id: 'cb', from: { id: 5 }, date: 1_700_000_000 },
+    });
+    expect(callback.ok).toBe(true);
+    if (!callback.ok || callback.update.kind !== 'callback_query') return;
+    expect('date' in callback.update).toBe(false);
+  });
+});
+
 describe('extractBotCommand', () => {
   it('extracts and lowercases the command word', () => {
     expect(extractBotCommand('/status')).toEqual({ command: 'status' });
