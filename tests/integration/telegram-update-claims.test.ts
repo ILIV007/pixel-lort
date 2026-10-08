@@ -13,7 +13,7 @@ import { createDbExecutor } from '../../src/adapters/db/db-executor';
 /**
  * Durable Telegram update claims — lifecycle, LEASE, GENERATION FENCING, and
  * idempotency tests (Phase 2A, ADR-0025, lifecycle completed by ADR-0030/0031
- * and FENCED by the final correction round v1.2.3 — schema v2). All
+ * and FENCED by the final correction round v1.2.4 — schema v2). All
  * statements run against the isolated workerd D1 binding; no network and no
  * real Telegram involvement.
  */
@@ -223,7 +223,7 @@ describe('claim lease — expiry boundary (ADR-0030)', () => {
   });
 });
 
-describe('claim generation fencing — attempt_count is the fencing token (v1.2.3)', () => {
+describe('claim generation fencing — attempt_count is the fencing token (v1.2.4)', () => {
   it('a stale owner can never terminate a newer generation', async () => {
     const executor = createDbExecutor(env.DB);
     // Generation 1 claims...

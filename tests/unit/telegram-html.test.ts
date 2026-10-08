@@ -87,7 +87,7 @@ describe('builder helpers', () => {
     const composed = composeTelegramHtml([
       telegramBold('وضعیت'),
       escapeTelegramHtml('سیستم: فعال'),
-      telegramCode('1.2.3'),
+      telegramCode('1.2.4'),
     ]);
     expect(isSafeTelegramHtml(composed)).toBe(true);
   });

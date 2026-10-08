@@ -1,6 +1,6 @@
 # Preview Telegram live wiring — operator runbook
 
-This slice activates the accepted v1.2.3 application on Preview. Schema stays
+This slice activates the accepted Phase 2A application, with the v1.2.4 live-client correction on Preview. Schema stays
 at version 2; there is no migration 0003, no production deployment, and no
 publishing functionality. Phase 2A historical offline handoffs remain intact.
 
@@ -57,9 +57,16 @@ role changes, and duplicate Telegram deliveries before rollout.
 
 ## Quality gates
 
-`npm run check` includes the existing 449-test Vitest suite and the offline
+`npm run check` includes the Vitest suite (including native Worker setup and redirect tests) and the offline
 operator-bootstrap tests. `npm run test:db` independently verifies the 47
 schema/migration tests. The bootstrap helper has bounded response reads,
 timeouts, redirect rejection, stable errors, and no provider-body logging.
 Development-toolchain audit findings remain tracked in GitHub issue #6;
 this wiring is not production security clearance.
+
+## Registered Preview webhook
+
+The owner-authorized one-time registration was verified against Telegram.
+The temporary scheduled wrapper and schedule were removed. The app-level
+manual-redirect correction is specified in ADR-0033; real owner command
+round-trip validation still requires the owner to send /start in Telegram.

@@ -457,7 +457,7 @@ describe('createBotApiClient — bounded response reading (ADR-0028)', () => {
 });
 
 describe('createBotApiClient — redirect safety (ADR-0028)', () => {
-  it('explicitly sends redirect: "error" on every request', async () => {
+  it('explicitly sends redirect: "manual" on every request', async () => {
     const inits: RequestInit[] = [];
     const client = createBotApiClient({
       botToken: FAKE_TOKEN,
@@ -474,7 +474,7 @@ describe('createBotApiClient — redirect safety (ADR-0028)', () => {
     await client.sendMessage({ chatId: CHAT_ID, text: TEXT });
     expect(inits.length).toBe(2);
     for (const init of inits) {
-      expect(init['redirect']).toBe('error');
+      expect(init['redirect']).toBe('manual');
     }
   });
 
@@ -483,7 +483,7 @@ describe('createBotApiClient — redirect safety (ADR-0028)', () => {
     // Simulate workerd's redirect failure: the raw error may carry the
     // redirect target and even the original URL (with the embedded token).
     const hostileFetch = async (_url: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.redirect !== 'error') {
+      if (init?.redirect !== 'manual') {
         return jsonResponse({ ok: true, result: true });
       }
       throw new Error(
@@ -578,5 +578,31 @@ describe('createBotApiClient — no secret or payload leakage in logs', () => {
     const errorLine = lines.find((l) => l.msg === 'telegram.api.error');
     expect(errorLine?.['method']).toBe('sendMessage');
     expect(errorLine?.['code']).toBe('telegram_bad_request');
+  });
+});
+
+describe('live-compatible redirect rejection (ADR-0033)', () => {
+  it('treats a manual 3xx as retryable without following or leaking Location', async () => {
+    const { lines, logger } = captureLogger();
+    let calls = 0;
+    const client = createBotApiClient({
+      botToken: FAKE_TOKEN,
+      logger,
+      fetchImpl: async (_url, init) => {
+        calls++;
+        expect(init?.redirect).toBe('manual');
+        return new Response(null, {
+          status: 302,
+          headers: { location: `https://evil.example.com/${FAKE_TOKEN}` },
+        });
+      },
+    });
+    await expect(client.getMe()).rejects.toMatchObject({
+      code: 'telegram_network_error',
+      retryable: true,
+    });
+    expect(calls).toBe(1);
+    expect(JSON.stringify(lines)).not.toContain(FAKE_TOKEN);
+    expect(JSON.stringify(lines)).not.toContain('evil.example.com');
   });
 });

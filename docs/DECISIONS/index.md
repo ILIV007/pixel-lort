@@ -54,3 +54,5 @@ ADR is written only when a decision is actually made.
 - [ADR-0030: Claimed-update lease and stale-claim recovery](adr-0030-claim-lease-stale-reclaim.md)
 - [ADR-0031: Permanent versus retryable failure persistence](adr-0031-failure-class-persistence.md)
 - [ADR-0032: Honest at-least-once side-effect semantics](adr-0032-at-least-once-side-effects.md)
+
+- [ADR-0033 — Live-compatible Telegram redirect rejection](adr-0033-live-compatible-redirect-rejection.md)
