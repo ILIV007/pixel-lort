@@ -95,7 +95,7 @@ async function process(
       ownerTelegramId: OWNER_ID,
       lookup: createAdminRoleLookup(executor),
     }),
-    commandRouter: createCommandRouter({ applicationVersion: '1.2.5' }),
+    commandRouter: createCommandRouter({ applicationVersion: '1.2.6' }),
     botApi: stubBotApi(sent),
     clock: { now: () => NOW },
     logger,

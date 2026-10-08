@@ -15,10 +15,11 @@ import { createLogger, type LogSink } from '../../src/observability/logger';
 
 /**
  * Admin UI language end-to-end behavior over the real workerd D1 binding
- * (v1.2.5, ADR-0034): English default, per-admin persistence, admin
- * isolation, bootstrap-owner support without an admins row, fencing of
- * older retried messages, honest failure handling, and STRICT separation
- * from the editorial language settings.
+ * (v1.2.5, ADR-0034; write ordering corrected in v1.2.6 — ADR-0035):
+ * English default, per-admin persistence, admin isolation, bootstrap-owner
+ * support without an admins row, ordering by Telegram message metadata
+ * (older retried messages never overwrite newer choices), honest failure
+ * handling, and STRICT separation from the editorial language settings.
  *
  * The pipeline runs exactly as the webhook handler wires it; the Bot API
  * client is a stub that CAPTURES outbound messages so the rendered admin UI
@@ -66,10 +67,39 @@ function messageUpdate(
     update_id: updateId,
     message: {
       message_id: updateId,
+      // Server-assigned message time (Unix seconds): Telegram always sends
+      // it; the ordering fence (ADR-0035) reads it. Derived from the update
+      // id here so the classic fixtures stay chronologically monotonic.
+      date: 1_700_000_000 + updateId,
       chat: { id: fromId, type: 'private' },
       from: { id: fromId },
       text,
       ...overrides,
+    },
+  };
+}
+
+/**
+ * A private message update with EXPLICIT order metadata — used to build the
+ * correction scenarios Telegram can really produce: a newer message with a
+ * LOWER update_id (randomized after a week idle), a same-second pair, or an
+ * older message delivered late.
+ */
+function orderedMessageUpdate(
+  updateId: number,
+  messageId: number,
+  dateSeconds: number,
+  fromId: number,
+  text: string,
+): Record<string, unknown> {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: messageId,
+      date: dateSeconds,
+      chat: { id: fromId, type: 'private' },
+      from: { id: fromId },
+      text,
     },
   };
 }
@@ -107,7 +137,7 @@ async function process(
       ownerTelegramId: OWNER_ID,
       lookup: createAdminRoleLookup(executor),
     }),
-    commandRouter: createCommandRouter({ applicationVersion: '1.2.5' }),
+    commandRouter: createCommandRouter({ applicationVersion: '1.2.6' }),
     botApi: stubBotApi(sent),
     clock: { now: () => NOW },
     logger,
@@ -147,7 +177,7 @@ describe('English default (no stored preference)', () => {
     expect(help.sent[0]).toContain('Commands');
 
     const version = await process(messageUpdate(9003, EDITOR_ID, '/version'));
-    expect(version.sent[0]).toBe('Application version: 1.2.5');
+    expect(version.sent[0]).toBe('Application version: 1.2.6');
   });
 
   it('answers the bare /language with the English status and usage hint', async () => {
@@ -173,7 +203,7 @@ describe('selection, switching back, and persistence across new requests', () =>
     expect(help.sent[0]).toContain('دستورها');
 
     const version = await process(messageUpdate(9013, EDITOR_ID, '/version'));
-    expect(version.sent[0]).toBe('نسخه برنامه: 1.2.5');
+    expect(version.sent[0]).toBe('نسخه برنامه: 1.2.6');
   });
 
   it('switches back to English and confirms in English', async () => {
@@ -270,6 +300,34 @@ describe('authorization and chat-scope guards', () => {
     expect(await storedLanguage(OWNER_ID)).toBeNull();
   });
 
+  it('ignores a /language change without ordering metadata — no feedback and no write', async () => {
+    // A private /language fa whose message carries NO `date`: there is no
+    // trustworthy message order, so the change fails safely (noop) — no
+    // reply, no state change, no invented ordering from local arrival time.
+    const noDate = messageUpdate(9067, OWNER_ID, '/language fa');
+    delete (noDate['message'] as Record<string, unknown>)['date'];
+    const missing = await process(noDate);
+    expect(missing.status).toBe(200);
+    expect(missing.sent).toEqual([]);
+    const processed = missing.lines.find((l) => l.msg === 'telegram.update.processed');
+    expect(processed?.['noopReason']).toBe('language_missing_ordering_metadata');
+    expect(await storedLanguage(OWNER_ID)).toBeNull();
+
+    // An INVALID date (numeric string, garbage, beyond the validated bound)
+    // is treated as absent by the parser — the same fail-safe path.
+    for (const [updateId, date] of [
+      [9068, '1700000000'],
+      [9069, 99_999_999_999],
+      [9070, 1.5],
+    ] as const) {
+      const update = messageUpdate(updateId, OWNER_ID, '/language fa', { date });
+      const result = await process(update);
+      expect(result.status).toBe(200);
+      expect(result.sent).toEqual([]);
+      expect(await storedLanguage(OWNER_ID)).toBeNull();
+    }
+  });
+
   it('answers malformed arguments with the usage text and NO state change', async () => {
     for (const [updateId, text] of [
       [9064, '/language fr'],
@@ -286,7 +344,7 @@ describe('authorization and chat-scope guards', () => {
 
 describe('durable fencing of older retried messages', () => {
   it('rejects an older retried language change and keeps the newer choice', async () => {
-    // Newer choice first (update_id 9071).
+    // Newer choice first (message sent later per Telegram order).
     await process(messageUpdate(9071, EDITOR_ID, '/language fa'));
     // An OLDER message (update_id 9070) is redelivered afterwards.
     const stale = await process(messageUpdate(9070, EDITOR_ID, '/language en'));
@@ -304,6 +362,71 @@ describe('durable fencing of older retried messages', () => {
     const duplicate = await process(messageUpdate(9080, EDITOR_ID, '/language fa'));
     expect(duplicate.status).toBe(200);
     expect(duplicate.sent).toEqual([]);
+  });
+});
+
+describe('message-order fencing, not update_id (v1.2.6, ADR-0035)', () => {
+  const S0 = 1_700_000_000;
+
+  it('accepts a genuinely newer private message with a LOWER update_id (randomized after idle)', async () => {
+    // Telegram may randomize update_id after one week without updates: the
+    // first message carries a HIGH update_id, the later one a LOW one.
+    await process(orderedMessageUpdate(9200, 9200, S0, EDITOR_ID, '/language fa'));
+    expect(await storedLanguage(EDITOR_ID)).toBe('fa');
+
+    // Eight days NEWER by Telegram's server date, lower update_id: accepted.
+    const newer = await process(
+      orderedMessageUpdate(9100, 9201, S0 + 8 * 86400, EDITOR_ID, '/language en'),
+    );
+    expect(newer.status).toBe(200);
+    expect(newer.sent).toEqual(['Admin UI language set to English.']);
+    expect(await storedLanguage(EDITOR_ID)).toBe('en');
+  });
+
+  it('never lets an older message that arrives later overwrite the newer choice', async () => {
+    await process(orderedMessageUpdate(9300, 9300, S0 + 200, EDITOR_ID, '/language fa'));
+    expect(await storedLanguage(EDITOR_ID)).toBe('fa');
+
+    // A genuinely OLDER message (earlier server date AND lower message_id)
+    // delivered late under a FRESH update id: rejected, nothing overwritten.
+    const late = await process(
+      orderedMessageUpdate(9400, 9299, S0 + 50, EDITOR_ID, '/language en'),
+    );
+    expect(late.status).toBe(200);
+    expect(late.sent).toEqual(['اعمال نشد: انتخاب جدیدتری برای زبان ذخیره شده است.']);
+    expect(await storedLanguage(EDITOR_ID)).toBe('fa');
+  });
+
+  it('orders same-second messages by message_id and treats duplicates idempotently', async () => {
+    const S1 = S0 + 300;
+    // Two commands inside the SAME server second: the higher message_id is
+    // the later message, whichever order they are DELIVERED in.
+    const laterFirst = await process(
+      orderedMessageUpdate(9500, 9501, S1, EDITOR_ID, '/language fa'),
+    );
+    expect(laterFirst.sent).toEqual(['زبان رابط مدیریت به فارسی تغییر کرد.']);
+    const earlierSameSecond = await process(
+      orderedMessageUpdate(9501, 9500, S1, EDITOR_ID, '/language en'),
+    );
+    expect(earlierSameSecond.status).toBe(200);
+    expect(earlierSameSecond.sent).toEqual(['اعمال نشد: انتخاب جدیدتری برای زبان ذخیره شده است.']);
+    expect(await storedLanguage(EDITOR_ID)).toBe('fa');
+
+    // A genuine same-second LATER message (higher message_id) wins.
+    const newerSameSecond = await process(
+      orderedMessageUpdate(9502, 9502, S1, EDITOR_ID, '/language en'),
+    );
+    expect(newerSameSecond.sent).toEqual(['Admin UI language set to English.']);
+    expect(await storedLanguage(EDITOR_ID)).toBe('en');
+
+    // Duplicate delivery of the SAME update: terminal duplicate — answered
+    // 200 without re-execution and without re-writing anything.
+    const duplicate = await process(
+      orderedMessageUpdate(9502, 9502, S1, EDITOR_ID, '/language en'),
+    );
+    expect(duplicate.status).toBe(200);
+    expect(duplicate.sent).toEqual([]);
+    expect(await storedLanguage(EDITOR_ID)).toBe('en');
   });
 });
 

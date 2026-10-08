@@ -7,15 +7,15 @@ import {
 import type { ActorResolution } from '../../src/admin/authorization';
 import type { ParsedUpdate } from '../../src/adapters/telegram/update-parser';
 
-/** Command routing contract tests (Phase 2A; /language added in v1.2.5). */
+/** Command routing contract tests (Phase 2A; /language added in v1.2.5, order metadata guard v1.2.6). */
 
 const OWNER: ActorResolution = { kind: 'authorized', role: 'owner' };
 const VIEWER: ActorResolution = { kind: 'authorized', role: 'viewer' };
 const UNAUTHORIZED: ActorResolution = { kind: 'unauthorized' };
 
-const router = createCommandRouter({ applicationVersion: '1.2.5' });
+const router = createCommandRouter({ applicationVersion: '1.2.6' });
 const targetedRouter = createCommandRouter({
-  applicationVersion: '1.2.5',
+  applicationVersion: '1.2.6',
   expectedBotUsername: 'Pixel_Admin_Bot',
 });
 
@@ -24,6 +24,10 @@ function message(overrides: Partial<ParsedUpdate> = {}): ParsedUpdate {
     kind: 'message',
     updateId: 1,
     messageId: 10,
+    // Server-assigned order metadata (ADR-0035): present by default so the
+    // set-action tests exercise the happy path; missing-metadata tests
+    // override it to undefined.
+    date: 1_700_000_000,
     chatId: 555,
     chatType: 'private',
     fromUserId: 1000000001,
@@ -126,7 +130,7 @@ describe('admin UI language localization (v1.2.5)', () => {
       'Application version:',
     );
     expect(asSent(router.route(message({ command: 'version' }), OWNER)).text).toBe(
-      'Application version: 1.2.5',
+      'Application version: 1.2.6',
     );
   });
 
@@ -138,16 +142,16 @@ describe('admin UI language localization (v1.2.5)', () => {
       'دستورها',
     );
     expect(asSent(router.route(message({ command: 'version' }), OWNER, 'fa')).text).toBe(
-      'نسخه برنامه: 1.2.5',
+      'نسخه برنامه: 1.2.6',
     );
   });
 
   it('interpolates the escaped application version into /version and /status', () => {
     const versionAction = asSent(router.route(message({ command: 'version' }), OWNER));
-    expect(versionAction.text).toContain('1.2.5');
+    expect(versionAction.text).toContain('1.2.6');
 
     const statusAction = asSent(router.route(message({ command: 'status' }), OWNER));
-    expect(statusAction.text).toContain('1.2.5');
+    expect(statusAction.text).toContain('1.2.6');
   });
 
   it('lists /language in every help rendering', () => {
@@ -188,7 +192,12 @@ describe('/language routing (v1.2.5)', () => {
     expect(action.chatId).toBe(555);
     expect(action.telegramUserId).toBe(1000000001);
     expect(action.language).toBe('en');
+    // update_id rides along as the durable dedup/audit value only.
     expect(action.updateId).toBe(1);
+    // The ordering fence is Telegram's message metadata (ADR-0035):
+    // server-assigned date in epoch ms + the per-chat message_id tiebreak.
+    expect(action.changedAtMs).toBe(1_700_000_000_000);
+    expect(action.messageId).toBe(10);
     expect(action.savedText).toBe('Admin UI language set to English.');
   });
 
@@ -269,6 +278,31 @@ describe('/language routing (v1.2.5)', () => {
     // address another admin's preference.
     expect(action.telegramUserId).toBe(1000000001);
     expect(action.telegramUserId).not.toBe(2000000002);
+  });
+
+  it('ignores /language changes without validated order metadata (fail safe, ADR-0035)', () => {
+    // Missing server date: there is no trustworthy message order, so the
+    // change is a silent noop — never an order guessed from arrival time.
+    expect(
+      router.route(message({ command: 'language', text: '/language fa', date: undefined }), OWNER),
+    ).toEqual({ type: 'noop', reason: 'language_missing_ordering_metadata' });
+    // Missing message_id: the same-second tiebreak is unavailable — the
+    // change is equally refused.
+    expect(
+      router.route(
+        message({ command: 'language', text: '/language fa', messageId: undefined }),
+        OWNER,
+      ),
+    ).toEqual({ type: 'noop', reason: 'language_missing_ordering_metadata' });
+  });
+
+  it('still answers the READ-ONLY bare /language when order metadata is missing', () => {
+    // The status/usage response changes nothing, so it needs no ordering
+    // metadata and keeps working for legitimate clients.
+    const action = asSent(
+      router.route(message({ command: 'language', text: '/language', date: undefined }), OWNER),
+    );
+    expect(action.text).toContain('Admin UI language');
   });
 
   it('denies unauthorized /language senders (minimal English denial)', () => {
