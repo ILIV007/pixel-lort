@@ -16,10 +16,18 @@ export class TelegramSetupError extends Error {
   }
 }
 
+async function cancelQuietly(stream) {
+  try {
+    await stream?.cancel();
+  } catch {
+    // Cleanup is best effort and must not mask the original result.
+  }
+}
+
 async function readBounded(response) {
   const length = response.headers.get('content-length');
   if (length !== null && (!/^\d+$/.test(length) || Number(length) > MAX_BYTES)) {
-    await response.body?.cancel();
+    await cancelQuietly(response.body);
     throw new TelegramSetupError('response_invalid');
   }
   const reader = response.body?.getReader();
@@ -32,7 +40,7 @@ async function readBounded(response) {
       if (done) break;
       size += value.byteLength;
       if (size > MAX_BYTES) {
-        await reader.cancel();
+        await cancelQuietly(reader);
         throw new TelegramSetupError('response_invalid');
       }
       chunks.push(value);
@@ -45,7 +53,13 @@ async function readBounded(response) {
     }
     return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
   } finally {
-    reader.releaseLock();
+    // Native network streams may reject lock release after close/cancel.
+    // Cleanup must never mask a valid response or a classified API failure.
+    try {
+      reader.releaseLock();
+    } catch {
+      // The stream is already consumed or explicitly cancelled.
+    }
   }
 }
 
@@ -67,6 +81,7 @@ export async function setupPreviewWebhook(
   }
 
   async function call(method, payload = {}) {
+    let stage = 'request';
     try {
       const response = await fetchImpl(`https://api.telegram.org/bot${botToken}/${method}`, {
         method: 'POST',
@@ -75,12 +90,14 @@ export async function setupPreviewWebhook(
         redirect: 'error',
         signal: AbortSignal.timeout(10_000),
       });
+      stage = 'http_status';
       if (!response.ok) {
-        await response.body?.cancel();
+        await cancelQuietly(response.body);
         throw new TelegramSetupError(
           response.status === 401 ? 'token_rejected' : 'api_unavailable',
         );
       }
+      stage = 'read_response';
       const body = await readBounded(response);
       if (body === null || typeof body !== 'object' || body.ok !== true) {
         throw new TelegramSetupError('api_rejected');
@@ -89,11 +106,13 @@ export async function setupPreviewWebhook(
     } catch (error) {
       if (error instanceof TelegramSetupError) {
         error.method = method;
+        error.stage = stage;
         throw error;
       }
       // Stable diagnostic names only; never transport messages/URLs/causes.
       const safe = new TelegramSetupError('transport_or_response_error');
       safe.method = method;
+      safe.stage = stage;
       safe.errorKind = ['TypeError', 'SyntaxError', 'TimeoutError', 'AbortError', 'Error'].includes(
         error?.name,
       )

@@ -140,3 +140,16 @@ test('default fetch keeps the global receiver required by the Worker runtime', a
     globalThis.fetch = original;
   }
 });
+
+test('network-body cleanup cannot mask a token rejection', async () => {
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 401,
+    body: {
+      cancel: async () => {
+        throw new TypeError('fake native cleanup failure');
+      },
+    },
+  });
+  await assert.rejects(setupPreviewWebhook(config, fetchImpl), { code: 'token_rejected' });
+});
