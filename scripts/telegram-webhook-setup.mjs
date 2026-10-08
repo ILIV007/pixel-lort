@@ -81,14 +81,17 @@ export async function setupPreviewWebhook(
   }
 
   async function call(method, payload = {}) {
-    let stage = 'request';
+    let stage = 'request_options';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
     try {
+      stage = 'fetch';
       const response = await fetchImpl(`https://api.telegram.org/bot${botToken}/${method}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
         redirect: 'error',
-        signal: AbortSignal.timeout(10_000),
+        signal: controller.signal,
       });
       stage = 'http_status';
       if (!response.ok) {
@@ -113,12 +116,25 @@ export async function setupPreviewWebhook(
       const safe = new TelegramSetupError('transport_or_response_error');
       safe.method = method;
       safe.stage = stage;
+      const message = typeof error?.message === 'string' ? error.message : '';
+      const hints = [
+        ['Illegal invocation', 'receiver'],
+        ['AbortSignal.timeout', 'timeout_api'],
+        ['Invalid URL', 'url'],
+        ['Network connection lost', 'network_lost'],
+        ['Cannot perform I/O', 'request_context'],
+        ['Decompression', 'decompression'],
+        ['Failed to fetch', 'fetch_failed'],
+      ];
+      safe.hint = hints.find(([text]) => message.includes(text))?.[1] ?? 'unknown';
       safe.errorKind = ['TypeError', 'SyntaxError', 'TimeoutError', 'AbortError', 'Error'].includes(
         error?.name,
       )
         ? error.name
         : 'unknown';
       throw safe;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
