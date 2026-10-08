@@ -20,7 +20,7 @@ import { DEFAULT_LOG_LEVEL, isLogLevel, type LogLevel } from '../types/log-level
  * The approved Phase 2A application version (kept in sync with package.json
  * and wrangler.jsonc — see handoff/PHASE_02A_HANDOFF.md).
  */
-export const DEFAULT_APP_VERSION = '1.2.4';
+export const DEFAULT_APP_VERSION = '1.2.5';
 
 export const KNOWN_ENVIRONMENTS = ['development', 'preview', 'production'] as const;
 export type Environment = (typeof KNOWN_ENVIRONMENTS)[number];
