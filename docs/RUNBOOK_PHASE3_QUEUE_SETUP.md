@@ -38,8 +38,16 @@ npm run db:migrations:list:preview
 npm run db:migrations:apply:preview
 ```
 
-Verify `/health/ready` on the preview Worker reports `ready` afterwards
-(`SCHEMA_VERSION=3` is already part of this branch's configuration).
+**Sequencing warning (temporary `not_ready` is EXPECTED here).** Applying
+migration 0003 upgrades the LIVE database metadata to schema version 3
+while the currently deployed Preview Worker (v1.2.6) still runs code that
+expects schema version 2. Between the migration and the matching Phase 3
+deployment (Step 3), `/health/ready` may legitimately report `not_ready`:
+the deployed code and the database schema are temporarily INCOMPATIBLE
+states, and the readiness gate must not paper over that. Do not treat this
+window as a failure, do not roll the migration back to chase a green check,
+and do not require `ready` until the matching deployment (Step 3) has
+landed. The Telegram ingress path itself is unaffected by migration 0003.
 
 ## Step 2 — Provision the two Preview queues
 
@@ -69,11 +77,24 @@ Deploy the accepted Phase 3 commit with `JOBS_ENABLED` still `"false"`
 - Worker logs show the `*/5` cron trigger firing as `cron.triggered` with
   `cron.jobs_disabled` — the structured no-op (flag still off).
 
+**Queue attachment happens AT THIS DEPLOYMENT, not at the flag flip.** The
+consumer for `pixel-jobs-preview` is DECLARED in `wrangler.jsonc` and binds
+to the Worker when this deploy lands — even though `JOBS_ENABLED` is still
+`"false"`. The business flag gates PROCESSING (dispatch and handler
+execution), never ATTACHMENT: from this point the platform may already
+deliver messages to the deployed `queue()` handler, which fail-closes by
+RETRYING every message while the engine is disabled or misconfigured (never
+ack-all — ADR-0011/ADR-0036 §7). No work is lost by a disabled deployment;
+the platform retry budget and the DLQ bound the redelivery loop.
+
 ## Step 4 — Activate the engine (flag on)
 
 Set the preview var `JOBS_ENABLED="true"` (wrangler vars or dashboard) and
-redeploy/apply. The queue consumer registers with the deployed Worker at
-this point.
+redeploy/apply. This step changes PROCESSING only: the queue consumer is
+ALREADY attached since the Step 3 deployment (attachment is declared by the
+`wrangler.jsonc` consumer binding and is independent of the business flag);
+flipping the flag lets the attached consumer actually claim and execute
+jobs instead of retrying them.
 
 Activation gating is strict (ADR-0037): an ENABLED engine requires the D1
 binding AND both queue bindings (`JOBS`, `DLQ`) to be present, and any
@@ -82,6 +103,11 @@ silently treated as disabled. After the flag flip, verify that
 `GET /health/ready` reports `ready` (a missing binding or an invalid flag
 returns 503 with the stable reason `jobs_config_invalid`), and that the
 cron log shows real dispatch passes instead of `cron.jobs_disabled`.
+
+Do not expect `ready` between incompatible schema/config states: an enabled
+runtime against a database that has not received migration 0003 (or the
+reverse ordering from Step 1) reports `not_ready` until the deployment and
+the schema agree — that is the fail-closed gate working as designed.
 
 ## Step 5 — Harmless live verification job
 

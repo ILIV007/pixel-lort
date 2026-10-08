@@ -213,3 +213,76 @@ the final report). Version touch points aligned to 1.3.1 by
 (full tree + complete `.git`, same packaging and verification recipe as
 §7). **STOP — awaiting independent review of the corrective release; no
 activation, provisioning, or Phase 4 work performed.**
+
+Verification counts by release context (correction per the v1.3.1 review —
+historical numbers are retained ONLY with their original release context):
+
+| Release context                              | Tracked files | Full suite           | test:db |
+| -------------------------------------------- | ------------- | -------------------- | ------- |
+| v1.3.0 (Phase 3 initial delivery, §5)        | 202           | 600 tests / 46 files | 98/98   |
+| v1.3.1 corrective delivery (§8, as reviewed) | **205**       | 616 tests / 48 files | 103/103 |
+| v1.3.1 final correction (§9, current tree)   | see §9        | see §9               | see §9  |
+
+## 9. Final review correction — still v1.3.1 (same branch, same history)
+
+The independent review of the v1.3.1 corrective release found ONE remaining
+defect — the engine's no-throw contract was not fully honored — plus two
+items from the previous instruction that were still absent. All are fixed
+in this final correction WITHOUT a version bump (app stays **1.3.1**, schema
+stays **3**) and without any redesign:
+
+1. **Engine error boundary (the defect).** `consumeMessage` resolved the
+   claimed case with a bare `return executeClaimed(...)` — the promise
+   escaped the try, so a storage exception thrown by the fenced
+   succeeded/retry_wait/dead_letter persistence REJECTED the engine's
+   promise instead of resolving the safe retry action. The worker.queue
+   backstop still retried (no ack was lost — confirmed by the reviewer),
+   but the contract was violated. Fix: `return await executeClaimed(...)`
+   inside the existing try; the no-throw consumer contract is now
+   documented on the engine.
+2. **Reviewer's 10-test fault suite delivered VERBATIM** (assertion
+   strength unchanged) at
+   `tests/integration/phase03-v131-review-faults.test.ts`: persistence
+   false/throw matrix over ALL THREE terminal transitions (never acks
+   uncertain state; row stays claimed), boundary exhaustion-write faults
+   (never acks or executes), repeated completion-write failures reaching
+   the budget with NO fourth handler execution, and an active final lease
+   never prematurely exhausted. Before the fix: 6/10; after: **10/10**.
+3. **worker.queue-level additions** in `tests/integration/job-entrypoints.test.ts`:
+   producer→consumer round trip (real cron dispatch output delivered to
+   `worker.queue` → durable success; duplicate delivery stays safe with a
+   byte-identical heartbeat marker), an entrypoint-level terminal-write
+   persistence fault (retry, never ack, row left claimed — the backstop is
+   preserved), each missing DB/JOBS/DLQ binding failing configuration
+   SEPARATELY with the exact issue, and an invalid activation retrying
+   without executing a handler. Direct/Cron exhaustion races, repeated
+   crash/completion-write failures, and no-fourth-execution remain pinned
+   by the fault suite plus the existing store/engine suites.
+4. **Maintenance settings SQL moved out of the application handler** into
+   the small typed DB adapter `upsertMaintenanceHeartbeat`
+   (`src/adapters/db/jobs-maintenance-store.ts`) — behavior byte-identical,
+   no framework, the ADR-0022 repository SQL boundary restored.
+5. **Runbook corrected** (`docs/RUNBOOK_PHASE3_QUEUE_SETUP.md`): Step 1
+   now states that upgrading the live schema metadata while the old
+   deployed Worker still expects schema 2 may temporarily yield
+   `not_ready` until the matching deployment (expected; never roll back to
+   chase green); Steps 3–4 now state that the declared Queue consumer
+   ATTACHES at deployment even with the business flag false — the flag
+   gates PROCESSING, not ATTACHMENT — and `ready` is not promised between
+   incompatible schema/config states.
+6. **Verification counts corrected.** The as-reviewed v1.3.1 tree held 205
+   tracked files (the "202" reported in the v1.3.1 round belonged to the
+   v1.3.0 release context — see the table in §8). This final correction
+   adds 2 tracked files (the fault suite + the maintenance-store adapter);
+   the delivered tree holds **207** tracked files.
+
+Verification for this final correction (measured on the final tree, clean
+install): full suite **632 tests / 49 files, all passing**; `test:db`
+**109/109 in 9 files**; reviewer fault suite 10/10; reviewer regression
+suite (v1.3.0 round) 6/6; secret scan **207 files, 0 findings**;
+`check:versions` 1.3.1 / schema 3; lint + format:check + typecheck clean;
+preview wrangler dry-run binds JOBS/DLQ/DB with APP_VERSION 1.3.1.
+Artifact: `pixel-lort-phase03-job-queue-v1.3.1.zip` (REBUILT — the single
+current final artifact; full tree + complete `.git`, same packaging recipe).
+**STOP — awaiting independent review; no activation, provisioning, or
+Phase 4 work performed.**

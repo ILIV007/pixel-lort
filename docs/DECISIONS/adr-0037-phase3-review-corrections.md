@@ -127,3 +127,42 @@ each demonstrated by a real integration path rather than a mocked one:
   stays at version 3 (migration 0003 untouched); lifecycle, fencing,
   dispatch reconciliation, retry/backoff, DLQ semantics, and the
   activation runbook otherwise follow ADR-0036 unchanged.
+
+## Final correction (same release v1.3.1 — no-throw consumer boundary)
+
+The independent review of the v1.3.1 corrective release found ONE remaining
+defect in the same area: `consumeMessage` resolved the claimed case with a
+bare `return executeClaimed(...)`. The promise was returned OUTSIDE the
+engine's try boundary, so a storage exception thrown by the fenced
+succeeded/retry_wait/dead_letter persistence later rejected the whole
+`consumeMessage` promise instead of resolving the safe retry action. The
+queue entrypoint's defensive backstop still retried (no ack was lost), but
+the engine's advertised no-throw contract was violated and the fault
+coverage was incomplete (an independent 10-test persistence false/throw
+matrix failed 4 cases).
+
+Decision: the claimed execution AND its fenced terminal persistence run
+AWAITED inside the existing try (`return await executeClaimed(...)`), so
+every storage exception resolves `{ action: 'retry', outcome:
+'consumer_error' }` with a stable code only — never a rejected promise. The
+entrypoint backstop is preserved unchanged (defense in depth, not the
+primary boundary).
+
+Coverage pinned by the reviewer's fault suite, delivered VERBATIM as
+`tests/integration/phase03-v131-review-faults.test.ts` (persistence
+false/throw matrix over all three terminal transitions, boundary
+exhaustion-write faults, repeated completion-write failures reaching the
+budget with NO fourth handler execution, and an active final lease that is
+never prematurely exhausted), plus worker.queue-level additions in
+`tests/integration/job-entrypoints.test.ts` (producer→consumer round trip
+with safe duplicate delivery; entrypoint-level terminal-write fault →
+retry/no-ack with the row left claimed; each missing DB/JOBS/DLQ binding
+failing configuration SEPARATELY; invalid activation retrying without a
+handler execution). Maintenance settings SQL moved from the application
+handler into the typed DB adapter `upsertMaintenanceHeartbeat`
+(`src/adapters/db/jobs-maintenance-store.ts`) — behavior unchanged, no new
+framework. Runbook Step 1 and Steps 3–4 corrected: a live schema upgrade
+while the old Worker still expects schema 2 may temporarily report
+`not_ready` (expected, fail-closed), and the queue consumer attaches AT
+deployment regardless of the `JOBS_ENABLED` flag — the flag gates
+processing, never attachment.

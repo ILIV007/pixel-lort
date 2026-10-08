@@ -201,6 +201,16 @@ provisioned and nothing was deployed by this pass — activation follows
       activation gating — validation runs before the flag is read, an
       enabled engine requires DB + JOBS + DLQ bindings, and `/health/ready`
       returns 503 for invalid or incomplete activation.
+- [x] v1.3.1 final review correction (ADR-0037 appendix): the claimed
+      execution and its fenced terminal persistence run AWAITED inside the
+      engine's no-try-escape boundary — a storage exception on any terminal
+      write resolves the safe retry action (never a rejected promise);
+      reviewer's 10-test persistence false/throw fault suite delivered
+      verbatim (10/10); worker.queue-level producer→consumer round trip,
+      entrypoint terminal-write fault retry/no-ack, and per-binding
+      configuration checks added; maintenance settings SQL moved to the
+      typed DB adapter; runbook schema-2 window and queue-attachment-vs-flag
+      wording corrected.
 
 - [x] Envelope schema validation with Zod (ADR-0010; strict `{version, jobId,
 type, attempt, traceId}` reference-only envelope) and per-type Zod
