@@ -100,10 +100,10 @@
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
         "SCHEMA_VERSION": "2",
-        // Phase 2A: ingress stays DISABLED on preview — BOT_TOKEN,
-        // WEBHOOK_SECRET and OWNER_TELEGRAM_ID are intentionally NOT
-        // configured yet (Phase 2B wiring). Readiness remains honest.
-        "TELEGRAM_INGRESS_ENABLED": "false",
+        // Owner-authorized Preview live wiring. Secret VALUES remain in
+        // Cloudflare only: BOT_TOKEN, WEBHOOK_SECRET, OWNER_TELEGRAM_ID.
+        // Production is unchanged; local defaults above remain disabled.
+        "TELEGRAM_INGRESS_ENABLED": "true",
       },
       "d1_databases": [
         {

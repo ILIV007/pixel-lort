@@ -2,7 +2,7 @@
   "name": "pixel",
   "version": "1.2.3",
   "private": true,
-  "description": "Pixel — Persian-language autonomous Telegram gaming editorial agent for the PIXEL LORT channel (@pixellort). Cloudflare Workers foundation.",
+  "description": "Pixel \u2014 Persian-language autonomous Telegram gaming editorial agent for the PIXEL LORT channel (@pixellort). Cloudflare Workers foundation.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -21,11 +21,12 @@
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "db:migrations:list": "wrangler d1 migrations list DB --local",
     "db:migrations:apply": "wrangler d1 migrations apply DB --local",
-    "check": "npm run lint && npm run format:check && npm run typecheck && npm run test && npm run test:secrets && npm run scan:secrets && npm run check:versions && npm run build",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm run test && npm run test:telegram-setup && npm run test:secrets && npm run scan:secrets && npm run check:versions && npm run build",
     "db:migrations:list:preview": "wrangler d1 migrations list DB --env preview --remote",
     "db:migrations:apply:preview": "wrangler d1 migrations apply DB --env preview --remote",
     "deploy:preview": "node scripts/deploy-preview.mjs",
-    "build:preview": "wrangler deploy --dry-run --env preview --outdir dist/preview"
+    "build:preview": "wrangler deploy --dry-run --env preview --outdir dist/preview",
+    "test:telegram-setup": "node --test scripts/telegram-webhook-setup.test.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
