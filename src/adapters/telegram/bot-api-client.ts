@@ -5,9 +5,9 @@
  * - injectable fetch implementation (tests NEVER touch the network);
  * - strict timeout via AbortSignal (single attempt — NO automatic retries,
  *   hence no retry storm; callers decide policy from the error class);
- * - `redirect: "error"` on every request — a redirected Bot API response is
- *   a transport failure, mapped to a retryable network error without ever
- *   exposing the token or the request URL;
+ * - `redirect: "manual"` on every request — redirects are NEVER followed;
+ *   any 3xx is a retryable network error without exposing Location, the
+ *   token or the request URL (live-compatibility correction, ADR-0033);
  * - BOUNDED response reading (shared bounded-stream reader): an early,
  *   untrusted Content-Length check plus a strict byte cap enforced while
  *   streaming (the stream is CANCELLED once the cap is crossed) — the full
@@ -159,6 +159,7 @@ function isAbortLike(error: unknown): boolean {
 }
 
 function classifyHttpStatus(status: number): TelegramApiErrorCode {
+  if (status >= 300 && status < 400) return 'telegram_network_error';
   if (status === 429) return 'telegram_rate_limited';
   if (status >= 500) return 'telegram_server_error';
   if (status === 401) return 'telegram_unauthorized';
@@ -222,10 +223,10 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
-        // A redirected Bot API response is a transport anomaly: fail it at
-        // the fetch layer instead of following (which could leak the token
-        // into a redirect target). Never expose the URL in errors.
-        redirect: 'error',
+        // Observe and reject 3xx ourselves; never follow a redirect or
+        // read/log Location. This preserves the token boundary on live
+        // Cloudflare fetch, including runtimes that reject error mode.
+        redirect: 'manual',
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {

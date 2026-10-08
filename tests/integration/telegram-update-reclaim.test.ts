@@ -170,7 +170,7 @@ function buildDeps(overrides: Partial<TelegramIngressDeps> = {}): TelegramIngres
         ownerTelegramId: OWNER_ID,
         lookup: createAdminRoleLookup(executor),
       }),
-    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.3' }),
+    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.4' }),
     botApi: overrides.botApi,
     clock: overrides.clock ?? fixedClock(NOW),
     logger: overrides.logger ?? createLogger({ level: 'error', sink: () => {} }),
@@ -567,7 +567,7 @@ describe('honest side-effect semantics — the ambiguous window (ADR-0032)', () 
 });
 
 /**
- * Final correction round (v1.2.3) — terminal transitions are FENCED by the
+ * Final correction round (v1.2.4) — terminal transitions are FENCED by the
  * claim generation and NEVER falsely acknowledged:
  * - a terminal transition rejected by the attempt_count fence (stale owner)
  *   or hit by a storage error answers safe retryable 503 — never 200 — even
@@ -578,7 +578,7 @@ describe('honest side-effect semantics — the ambiguous window (ADR-0032)', () 
  * The simulated interleavings use the SAME guarded statement shapes as the
  * real stale reclaim, so the fencing WHERE clause is exercised for real.
  */
-describe('terminal transitions are fenced and never falsely acknowledged (v1.2.3)', () => {
+describe('terminal transitions are fenced and never falsely acknowledged (v1.2.4)', () => {
   function captureLogger() {
     const lines: string[] = [];
     const sink: LogSink = (_level, line) => {

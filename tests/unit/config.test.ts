@@ -13,7 +13,7 @@ describe('validateConfig — Phase 0 subset', () => {
     expect(result.ok).toBe(true);
     expect(result.config['ENVIRONMENT']).toBe('development');
     expect(result.config['LOG_LEVEL']).toBe('info');
-    expect(result.config['APP_VERSION']).toBe('1.2.3');
+    expect(result.config['APP_VERSION']).toBe('1.2.4');
   });
 
   it('accepts valid enum values', () => {
@@ -93,7 +93,7 @@ describe('config errors do not leak secrets', () => {
     expect(result.ok).toBe(false);
     expect(config.LOG_LEVEL).toBe('info');
     expect(config.ENVIRONMENT).toBe('development');
-    expect(config.APP_VERSION).toBe('1.2.3');
+    expect(config.APP_VERSION).toBe('1.2.4');
   });
 
   it('parseWorkerConfig accepts well-formed environments', () => {
