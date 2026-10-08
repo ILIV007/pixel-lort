@@ -1,7 +1,14 @@
 # ADR-0034 — Admin UI language selection (English default, per-admin persistence)
 
-Status: Accepted (Phase 2B correction, v1.2.5). Amends ADR-0026 (denial
-language and command allowlist) without superseding its security model.
+Status: Accepted (Phase 2B correction, v1.2.5). **Amended v1.2.6 by
+[ADR-0035](adr-0035-admin-ui-language-ordering.md): the update_id write
+fence described below is superseded by ordering on validated Telegram
+message-order metadata `(message.date, message.message_id)`, and corrupt-row
+recovery is strengthened (malformed JSON and invalid-typed rows are repaired
+atomically). The English default, per-admin persistence, denial language,
+guards, and strict editorial separation below remain in force.** Amends
+ADR-0026 (denial language and command allowlist) without superseding its
+security model.
 
 ## Context
 
