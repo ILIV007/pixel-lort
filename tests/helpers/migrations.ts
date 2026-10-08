@@ -1,5 +1,6 @@
 import migration0001 from '../../migrations/0001_initial_schema.sql?raw';
 import migration0002 from '../../migrations/0002_telegram_update_lifecycle.sql?raw';
+import migration0003 from '../../migrations/0003_job_dlq_delivery.sql?raw';
 import migration0002Synthetic from '../fixtures/migration-0002-synthetic.sql?raw';
 
 /**
@@ -59,6 +60,7 @@ export interface MigrationDescriptor {
 export const MIGRATIONS: readonly MigrationDescriptor[] = [
   { id: '0001_initial_schema', version: 1, sql: migration0001 },
   { id: '0002_telegram_update_lifecycle', version: 2, sql: migration0002 },
+  { id: '0003_job_dlq_delivery', version: 3, sql: migration0003 },
 ];
 
 /** Synthetic version-2 descriptor — TEST INFRASTRUCTURE ONLY. */

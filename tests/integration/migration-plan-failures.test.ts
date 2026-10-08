@@ -135,13 +135,14 @@ describe('applyMigrations — failure atomicity (proof 6)', () => {
 
     // Version-1 objects are intact and the database can still be upgraded by
     // a valid pending migration afterwards (recovery path) — here via the
-    // REAL migration 0002, landing at the shipped schema version 2.
+    // REAL pending migrations, landing at the shipped schema version 3.
     const recovery = await applyMigrations(db);
     expect(recovery.observedVersion).toBe(1);
     expect(recovery.applied.map((migration) => migration.id)).toEqual([
       '0002_telegram_update_lifecycle',
+      '0003_job_dlq_delivery',
     ]);
-    expect(await appliedSchemaVersion()).toBe(2);
-    expect(await appliedMigrationId()).toBe('0002_telegram_update_lifecycle');
+    expect(await appliedSchemaVersion()).toBe(3);
+    expect(await appliedMigrationId()).toBe('0003_job_dlq_delivery');
   });
 });

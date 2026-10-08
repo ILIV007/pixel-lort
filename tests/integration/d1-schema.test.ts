@@ -50,7 +50,8 @@ const EXPECTED_TABLES: readonly string[] = [
   'telegram_updates',
 ];
 
-/** All 29 approved blueprint indexes + the Phase 2A lifecycle index (0002). */
+/** All 29 approved blueprint indexes + the Phase 2A lifecycle index (0002)
+ *  + the Phase 3 DLQ-reconciliation index (0003). */
 const EXPECTED_INDEXES: readonly string[] = [
   'idx_action_tokens_user_exp',
   'idx_admin_sessions_user_exp',
@@ -64,6 +65,7 @@ const EXPECTED_INDEXES: readonly string[] = [
   'idx_entity_alias_lookup',
   'idx_fingerprints_story',
   'idx_jobs_aggregate',
+  'idx_jobs_dlq_pending',
   'idx_jobs_due',
   'idx_media_expiry',
   'idx_media_hash',
@@ -115,15 +117,15 @@ beforeEach(async () => {
 });
 
 describe('migration application', () => {
-  it('applies every migration as an atomic batch and reports metadata (schema v2)', async () => {
+  it('applies every migration as an atomic batch and reports metadata (schema v3)', async () => {
     expect(await namedTables()).toEqual([...EXPECTED_TABLES].sort());
 
     const metadata = await db
       .prepare(`SELECT key, value FROM schema_metadata ORDER BY key`)
       .all<{ key: string; value: string }>();
     const byKey = new Map(metadata.results.map((row) => [row.key, row.value]));
-    expect(byKey.get('schema_version')).toBe('2');
-    expect(byKey.get('migration_id')).toBe('0002_telegram_update_lifecycle');
+    expect(byKey.get('schema_version')).toBe('3');
+    expect(byKey.get('migration_id')).toBe('0003_job_dlq_delivery');
     expect(byKey.get('applied_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -155,10 +157,28 @@ describe('schema contracts', () => {
     expect(tables).toEqual([...EXPECTED_TABLES].sort());
   });
 
-  it('creates exactly the 30 expected indexes (29 approved + lifecycle index)', async () => {
+  it('creates exactly the 31 expected indexes (29 approved + lifecycle + DLQ index)', async () => {
     const indexes = await namedIndexes();
-    expect(indexes).toHaveLength(30);
+    expect(indexes).toHaveLength(31);
     expect(indexes).toEqual([...EXPECTED_INDEXES].sort());
+  });
+
+  it('carries the jobs DLQ-delivery reconciliation column (migration 0003)', async () => {
+    const columns = await db.prepare(`PRAGMA table_info('jobs')`).all<{ name: string }>();
+    const names = columns.results.map((row) => row['name']);
+    expect(names).toContain('dlq_delivered_at');
+
+    // A dead_letter job row starts with dlq_delivered_at NULL (reconcilable).
+    await db
+      .prepare(
+        `INSERT INTO jobs (id, type, status, run_after, attempts, max_attempts, idempotency_key, payload_json, last_error, created_at, updated_at)
+         VALUES ('job-dlq-1', 'fetch_source', 'dead_letter', 1, 3, 3, 'idem-dlq-001', '{}', 'job_exhausted', 1, 1)`,
+      )
+      .run();
+    const row = await db
+      .prepare(`SELECT dlq_delivered_at FROM jobs WHERE id = 'job-dlq-1'`)
+      .first<{ dlq_delivered_at: number | null }>();
+    expect(row?.dlq_delivered_at ?? null).toBeNull();
   });
 
   it('carries the telegram_updates lifecycle columns with enforced CHECKs (migration 0002)', async () => {
