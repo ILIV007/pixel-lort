@@ -84,9 +84,19 @@ export async function setupPreviewWebhook({ botToken, webhookSecret, ownerId }, 
       }
       return body.result;
     } catch (error) {
-      if (error instanceof TelegramSetupError) throw error;
-      // Do not retain raw transport messages, provider descriptions or causes.
-      throw new TelegramSetupError('transport_or_response_error');
+      if (error instanceof TelegramSetupError) {
+        error.method = method;
+        throw error;
+      }
+      // Stable diagnostic names only; never transport messages/URLs/causes.
+      const safe = new TelegramSetupError('transport_or_response_error');
+      safe.method = method;
+      safe.errorKind = ['TypeError', 'SyntaxError', 'TimeoutError', 'AbortError', 'Error'].includes(
+        error?.name,
+      )
+        ? error.name
+        : 'unknown';
+      throw safe;
     }
   }
 
