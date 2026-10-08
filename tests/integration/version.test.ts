@@ -36,9 +36,9 @@ describe('GET /version via SELF', () => {
       'environment',
       'schemaVersion',
     ]);
-    expect(body['applicationVersion']).toBe('1.1.0');
+    expect(body['applicationVersion']).toBe('1.2.3');
     expect(body['commit']).toBe('local-dev');
-    expect(body['schemaVersion']).toBe(1);
+    expect(body['schemaVersion']).toBe(2);
     expect(body['environment']).toBe('development');
   });
 
@@ -130,16 +130,34 @@ describe('GET /health/ready — Phase 1A schema health (DB binding present)', ()
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['status']).toBe('not_ready');
     expect(Object.keys(body).sort()).toEqual(['ok', 'service', 'status']);
+
+    // Restore the application metadata (schema v2) so later tests in this
+    // file do not treat the migrations as pending again (shared storage);
+    // re-applying migration 0002 would fail on its ALTER TABLE statements.
+    await env.DB.prepare(
+      `INSERT INTO schema_metadata (key, value, updated_at_ms) VALUES
+         ('schema_version', '2', 1),
+         ('migration_id', '0002_telegram_update_lifecycle', 1),
+         ('applied_at', '1970-01-01T00:00:00.000Z', 1)`,
+    ).run();
   });
 
   it('reports not_ready when the schema version mismatches the configuration', async () => {
+    // The applied schema is at version 2 (migrations 0001+0002); force an
+    // OLDER recorded version to prove the mismatch path still fails closed.
     await env.DB.prepare(
-      `UPDATE schema_metadata SET value = '2' WHERE key = 'schema_version'`,
+      `UPDATE schema_metadata SET value = '1' WHERE key = 'schema_version'`,
     ).run();
 
     const res = await SELF.fetch('https://example.com/health/ready');
     expect(res.status).toBe(503);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['status']).toBe('not_ready');
+
+    // Restore the recorded version so later storage in this file does not
+    // treat migration 0002 as pending again (shared file storage).
+    await env.DB.prepare(
+      `UPDATE schema_metadata SET value = '2' WHERE key = 'schema_version'`,
+    ).run();
   });
 });

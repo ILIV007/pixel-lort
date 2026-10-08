@@ -10,21 +10,25 @@ import {
 } from '../helpers/migrations';
 
 /**
- * Future-safe migration-plan contract tests (Phase 1A correction — review
- * item 2).
+ * Append-only migration-plan contract tests (Phase 1A correction — review
+ * item 2; extended for the REAL migration 0002 in the Phase 2A second
+ * correction round, schema v2).
  *
- * The test migration helper must keep working when a future `0002_*.sql` is
- * appended to `MIGRATIONS`: a database already at version 1 must UPGRADE by
- * applying only the pending migrations, never skip them, and never re-apply
- * what is already applied. A synthetic TEST-ONLY version-2 descriptor
- * (`tests/fixtures/migration-0002-synthetic.sql`) proves the full lifecycle
- * without creating any real future migration.
+ * The test migration helper applies only PENDING migrations in strict
+ * ascending order: a database already at version 1 must UPGRADE by applying
+ * only the pending version-2 migration, never re-apply version 1, and a
+ * re-run at the latest version must be a no-op. The synthetic TEST-ONLY
+ * version-2 descriptor (`tests/fixtures/migration-0002-synthetic.sql`)
+ * proves the helper's plan mechanics independently of the real migration;
+ * the REAL v1 -> v2 upgrade of a POPULATED database is proven in
+ * `tests/integration/migration-0002.test.ts`, and the real plan's end state
+ * on a fresh database is pinned by `tests/integration/d1-schema.test.ts`.
  *
- * Proofs in this file (incremental semantics):
- *  1. version 1 applies to an empty DB;
- *  2. synthetic version 2 applies to a version-1 DB;
+ * Proofs in this file:
+ *  1. version 1 applies to an empty DB (partial plan);
+ *  2. the pending version 2 applies to a version-1 DB (synthetic descriptor);
  *  3. version 1 is not reapplied;
- *  4. version 2 is not reapplied (re-run at latest version is a no-op);
+ *  4. re-running at the latest version is a no-op (real AND synthetic plans);
  *  5. metadata advances to version 2.
  *
  * Failure atomicity (proof 6) and invalid-plan (proof 7) proofs live in
@@ -35,11 +39,15 @@ import {
 
 const db: D1Database = env.DB;
 
-/** The real approved migration (target schema version 1). */
+/** The real approved migrations (0001 = schema v1; 0002 = lifecycle, schema v2). */
 const V1 = MIGRATIONS[0]!;
+const REAL_V2 = MIGRATIONS[1]!;
 
 /** A plan with the synthetic TEST-ONLY version-2 migration appended. */
-const PLAN_V1_V2: readonly MigrationDescriptor[] = [V1, SYNTHETIC_MIGRATION_0002];
+const PLAN_V1_SYNTHETIC_V2: readonly MigrationDescriptor[] = [V1, SYNTHETIC_MIGRATION_0002];
+
+/** A plan containing ONLY migration 0001 (for building version-1 databases). */
+const PLAN_V1_ONLY: readonly MigrationDescriptor[] = [V1];
 
 async function appliedSchemaVersion(): Promise<number> {
   const row = await db
@@ -59,8 +67,13 @@ async function appliedMigrationId(): Promise<string | null> {
 
 describe('migration plan validation (pure — no database access)', () => {
   it('accepts the real append-only MIGRATIONS list (guards the shipped default)', () => {
+    expect(MIGRATIONS.map((migration) => migration.id)).toEqual([
+      '0001_initial_schema',
+      '0002_telegram_update_lifecycle',
+    ]);
+    expect(REAL_V2.version).toBe(2);
     expect(() => validateMigrationPlan(MIGRATIONS)).not.toThrow();
-    expect(() => validateMigrationPlan(PLAN_V1_V2)).not.toThrow();
+    expect(() => validateMigrationPlan(PLAN_V1_SYNTHETIC_V2)).not.toThrow();
   });
 
   it('rejects an empty plan', () => {
@@ -128,8 +141,8 @@ describe('migration plan validation (pure — no database access)', () => {
 });
 
 describe('applyMigrations — incremental, future-safe semantics', () => {
-  it('applies version 1 to an empty database (proof 1)', async () => {
-    const result = await applyMigrations(db);
+  it('applies version 1 to an empty database via the partial plan (proof 1)', async () => {
+    const result = await applyMigrations(db, PLAN_V1_ONLY);
 
     expect(result.observedVersion).toBe(0);
     expect(result.applied.map((migration) => migration.id)).toEqual(['0001_initial_schema']);
@@ -138,9 +151,7 @@ describe('applyMigrations — incremental, future-safe semantics', () => {
     expect(await appliedMigrationId()).toBe('0001_initial_schema');
   });
 
-  it('applies the synthetic version 2 to a version-1 database without re-applying version 1 (proofs 2, 3, 5)', async () => {
-    await applyMigrations(db); // database is now at version 1 (fresh or previously applied)
-
+  it('upgrades the version-1 database by applying ONLY the pending version 2 (proofs 2, 3, 5)', async () => {
     // Sentinel row: if version 1 were re-executed, this state would be
     // disturbed (and its CREATE TABLE statements would fail loudly).
     await db
@@ -150,7 +161,7 @@ describe('applyMigrations — incremental, future-safe semantics', () => {
       )
       .run();
 
-    const result = await applyMigrations(db, PLAN_V1_V2);
+    const result = await applyMigrations(db, PLAN_V1_SYNTHETIC_V2);
 
     // Proof 3: only the PENDING migration was applied — version 1 skipped.
     expect(result.observedVersion).toBe(1);
@@ -174,14 +185,18 @@ describe('applyMigrations — incremental, future-safe semantics', () => {
     expect(sentinel?.id).toBe('src-plan-sentinel');
   });
 
-  it('re-running at the latest version is a no-op — version 2 is not reapplied (proof 4)', async () => {
-    await applyMigrations(db, PLAN_V1_V2); // database at version 2
+  it('re-running at the latest version is a no-op — nothing is reapplied (proof 4)', async () => {
+    await applyMigrations(db, PLAN_V1_SYNTHETIC_V2); // database at version 2
 
-    const again = await applyMigrations(db, PLAN_V1_V2);
+    const again = await applyMigrations(db, PLAN_V1_SYNTHETIC_V2);
+    const andAgain = await applyMigrations(db, MIGRATIONS);
 
     expect(again.observedVersion).toBe(2);
     expect(again.applied).toEqual([]);
     expect(again.finalVersion).toBe(2);
+    expect(andAgain.observedVersion).toBe(2);
+    expect(andAgain.applied).toEqual([]);
+    expect(andAgain.finalVersion).toBe(2);
 
     // No duplicate probe rows: the version-2 statements did not run again.
     const count = await db.prepare(`SELECT COUNT(*) AS n FROM migration_v2_probe`).first<{

@@ -1,14 +1,24 @@
-# src/admin — planned (not implemented in Phase 0)
+# src/admin — Telegram admin foundation (Phase 2A)
 
-Private Telegram admin interface (blueprint §17–§21):
+Private Telegram admin interface foundation (blueprint §17–§21). The admin
+panel is the ONLY administration UI in v1.
 
-- RBAC with atomic permission strings (owner, chief_editor, editor,
-  reviewer, source_manager, viewer).
-- Command map and screens: dashboard, inbox, review, story, source, queue,
-  calendar, system.
-- Opaque one-time action tokens (`a:<base64url_token>`, 64-byte callback
-  limit) persisted in D1 `admin_action_tokens`.
-- Multi-step admin sessions with TTL, one active flow per admin per chat.
+Implemented in Phase 2A:
 
-The Telegram admin panel is the ONLY administration UI in v1. No code exists
-in Phase 0.
+- `roles.ts` — the six approved roles and the verbatim role-to-permission
+  map from `docs/blueprint/v1/pixel_admin_map_v1.json` (owner wildcard).
+- `authorization.ts` — fail-closed actor resolution: `OWNER_TELEGRAM_ID`
+  bootstrap identity plus active admins from D1; numeric user IDs only.
+- `command-router.ts` — allowlist (/start /help /status /version) mapped to
+  TYPED Telegram actions; static Persian responses; minimal denial for
+  unauthorized senders; ignore-list semantics outside the allowlist.
+- `telegram-html.ts` — Telegram-safe HTML: `&<>` escaper, allowlisted tag
+  builders, validated https-only links, bounded structural validator.
+- `callback-tokens.ts` — the `a:<base64url_token>` callback contract
+  (≤ 64 bytes, base64url token, no embedded payload).
+
+Still planned (later phases): command screens, multi-step admin sessions
+(`admin_sessions`), role-mutation flows, opaque action token issuance for
+real menus (Phase 9), editorial review workflows.
+
+Authorization NEVER uses usernames and NEVER mutates roles from chat input.

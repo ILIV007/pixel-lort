@@ -17,6 +17,14 @@ declare namespace Cloudflare {
     APP_VERSION: string;
     ENVIRONMENT: string;
     LOG_LEVEL: string;
+    /** Phase 2A ingress flag (non-secret). Optional in arbitrary test envs. */
+    TELEGRAM_INGRESS_ENABLED?: string;
+    /** Phase 2A non-secret target channel. */
+    TARGET_CHANNEL?: string;
+    /** Phase 2 secrets — names only; tests inject explicit fake fixtures. */
+    BOT_TOKEN?: string;
+    WEBHOOK_SECRET?: string;
+    OWNER_TELEGRAM_ID?: string;
   }
 }
 

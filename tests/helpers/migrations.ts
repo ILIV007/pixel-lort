@@ -1,4 +1,5 @@
 import migration0001 from '../../migrations/0001_initial_schema.sql?raw';
+import migration0002 from '../../migrations/0002_telegram_update_lifecycle.sql?raw';
 import migration0002Synthetic from '../fixtures/migration-0002-synthetic.sql?raw';
 
 /**
@@ -17,9 +18,10 @@ import migration0002Synthetic from '../fixtures/migration-0002-synthetic.sql?raw
  * - The currently applied APPLICATION schema version is read safely from
  *   `schema_metadata` (0 when the table/row does not exist yet).
  * - Only migrations with a version GREATER than the observed version are
- *   applied, in strict ascending order — so appending a future `0002_*`
- *   migration to `MIGRATIONS` upgrades a version-1 database instead of being
- *   silently skipped (which could hide migration defects).
+ *   applied, in strict ascending order — so a database at an older version
+ *   (e.g. a populated schema-v1 database meeting migration 0002) upgrades by
+ *   applying ONLY the pending migrations instead of being silently skipped
+ *   (which could hide migration defects).
  * - Re-running the helper at the latest version is a no-op.
  * - Plans are validated BEFORE any database access; an invalid plan can
  *   never alter the database (see `validateMigrationPlan`).
@@ -47,8 +49,8 @@ export interface MigrationDescriptor {
 
 /**
  * Ordered migration list — APPEND-ONLY and strictly ascending by version
- * (AGENTS.md §6: applied migrations are never edited or reordered; new
- * schema changes append `0002_*.sql` and newer).
+ * (AGENTS.md §6: applied migrations are never edited or reordered; newer
+ * schema changes append `0003_*.sql` and newer).
  *
  * TEST-ONLY synthetic descriptors (see
  * `tests/fixtures/migration-0002-synthetic.sql`) are injected via the `plan`
@@ -56,6 +58,7 @@ export interface MigrationDescriptor {
  */
 export const MIGRATIONS: readonly MigrationDescriptor[] = [
   { id: '0001_initial_schema', version: 1, sql: migration0001 },
+  { id: '0002_telegram_update_lifecycle', version: 2, sql: migration0002 },
 ];
 
 /** Synthetic version-2 descriptor — TEST INFRASTRUCTURE ONLY. */

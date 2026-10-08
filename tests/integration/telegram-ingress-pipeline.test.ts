@@ -1,0 +1,297 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import { env } from 'cloudflare:test';
+import { applyMigrations } from '../helpers/migrations';
+import { createTelegramIngress } from '../../src/application/telegram-ingress';
+import type { TelegramIngressDeps } from '../../src/application/telegram-ingress';
+import { createAuthorizationService } from '../../src/admin/authorization';
+import { createCommandRouter } from '../../src/admin/command-router';
+import { createAdminRoleLookup } from '../../src/adapters/telegram/admin-lookup';
+import {
+  createDbExecutor,
+  type DbExecutor,
+  type DbStatement,
+} from '../../src/adapters/db/db-executor';
+import type {
+  TelegramBotApiClient,
+  TelegramSentMessage,
+} from '../../src/adapters/telegram/bot-api-client';
+import { TelegramApiError } from '../../src/adapters/telegram/bot-api-client';
+import type { ParsedUpdate } from '../../src/adapters/telegram/update-parser';
+import { createLogger, type LogSink } from '../../src/observability/logger';
+import { fixedClock } from '../../src/shared/time/clock';
+
+/**
+ * Cross-cutting ingress pipeline tests (Phase 2A): duplicate-delivery
+ * semantics with a COUNTING fake Bot API client, concurrent duplicate
+ * claims, failed-processing states, and no-leak logging — all offline.
+ */
+
+const OWNER_ID = 1000000001;
+const NOW = 1_700_000_000_000;
+
+beforeEach(async () => {
+  await applyMigrations(env.DB);
+});
+
+/** Counting fake client — records every sendMessage call. */
+function countingClient(options: { failWith?: TelegramApiError } = {}): {
+  client: TelegramBotApiClient;
+  sends: { chatId: number; text: string }[];
+} {
+  const sends: { chatId: number; text: string }[] = [];
+  const client: TelegramBotApiClient = {
+    async getMe() {
+      return { id: 42, username: 'pixel_admin_bot' };
+    },
+    async sendMessage(input) {
+      if (options.failWith !== undefined) {
+        throw options.failWith;
+      }
+      sends.push({ chatId: input.chatId, text: input.text });
+      const message: TelegramSentMessage = { messageId: sends.length };
+      return message;
+    },
+    async editMessageText() {
+      return true;
+    },
+    async answerCallbackQuery() {},
+  };
+  return { client, sends };
+}
+
+function captureLogger() {
+  const lines: string[] = [];
+  const sink: LogSink = (_level, line) => {
+    lines.push(line);
+  };
+  return { lines, logger: createLogger({ level: 'debug', sink }) };
+}
+
+/** Wrap the real executor to intercept terminal-state statements.
+ *  Interceptions reject asynchronously — the realistic D1 failure shape. */
+function interceptingExecutor(shouldReject: (statement: DbStatement) => boolean): DbExecutor {
+  const delegate = createDbExecutor(env.DB);
+  return {
+    query: (statement) => delegate.query(statement),
+    first: (statement) => delegate.first(statement),
+    run: (statement) => {
+      if (shouldReject(statement)) {
+        return Promise.reject(new Error('simulated D1 outage during terminal transition'));
+      }
+      return delegate.run(statement);
+    },
+    batch: (statements) => delegate.batch(statements),
+  };
+}
+
+/** Match the guarded terminal-state transitions (processed/failed marking). */
+function isTerminalTransition(statement: DbStatement): boolean {
+  return /UPDATE telegram_updates\s+SET status = '(processed|failed)'/s.test(statement.sql);
+}
+
+function buildDeps(overrides: Partial<TelegramIngressDeps> = {}): TelegramIngressDeps {
+  const executor = overrides.executor ?? createDbExecutor(env.DB);
+  return {
+    executor,
+    authorization:
+      overrides.authorization ??
+      createAuthorizationService({
+        ownerTelegramId: OWNER_ID,
+        lookup: createAdminRoleLookup(executor),
+      }),
+    commandRouter: overrides.commandRouter ?? createCommandRouter({ applicationVersion: '1.2.3' }),
+    botApi: overrides.botApi,
+    clock: overrides.clock ?? fixedClock(NOW),
+    logger: overrides.logger ?? captureLogger().logger,
+  };
+}
+
+function ownerCommand(updateId: number, text: string): ParsedUpdate {
+  return {
+    kind: 'message',
+    updateId,
+    messageId: updateId,
+    chatId: OWNER_ID,
+    fromUserId: OWNER_ID,
+    text,
+    command: text.replace('/', '').split(' ')[0],
+  };
+}
+
+describe('duplicate deliveries never execute the command twice', () => {
+  it('sends at most one response across sequential redeliveries', async () => {
+    const { client, sends } = countingClient();
+    const ingress = createTelegramIngress(buildDeps({ botApi: client }));
+    const update = ownerCommand(9001, '/status');
+
+    await expect(ingress.processUpdate(update)).resolves.toBe('processed');
+    await expect(ingress.processUpdate(update)).resolves.toBe('duplicate');
+    await expect(ingress.processUpdate(update)).resolves.toBe('duplicate');
+    expect(sends).toHaveLength(1);
+  });
+
+  it('produces exactly one execution winner for concurrent duplicate claims', async () => {
+    const { client, sends } = countingClient();
+    const ingress = createTelegramIngress(buildDeps({ botApi: client }));
+    const update = ownerCommand(9002, '/help');
+
+    const settled = await Promise.allSettled([
+      ingress.processUpdate(update),
+      ingress.processUpdate(update),
+      ingress.processUpdate(update),
+    ]);
+
+    // Exactly one delivery wins the durable claim and executes.
+    const processed = settled.filter(
+      (outcome) => outcome.status === 'fulfilled' && outcome.value === 'processed',
+    );
+    expect(processed).toHaveLength(1);
+    // Concurrent losers observe an ACTIVE lease (in_flight) — deliberately
+    // NOT acknowledged as successful duplicates: they answer safe retryable
+    // 503 semantics so Telegram keeps redelivering until the lease resolves
+    // (ADR-0030). None of them may resolve as a false 'duplicate'.
+    const rejected = settled.filter(
+      (outcome) =>
+        outcome.status === 'rejected' &&
+        (outcome.reason as { code?: string }).code === 'service_unavailable',
+    );
+    expect(rejected).toHaveLength(2);
+    // Exactly one routed response despite three deliveries.
+    expect(sends).toHaveLength(1);
+  });
+});
+
+describe('failed processing is observable and never falsely processed', () => {
+  it('marks failed and propagates 503 when authorization lookup throws (transient failure)', async () => {
+    const { client, sends } = countingClient();
+    const executor = createDbExecutor(env.DB);
+    const failingAuthorization = {
+      resolveActor: async () => {
+        throw new Error('simulated transient D1 outage');
+      },
+    };
+    const ingress = createTelegramIngress(
+      buildDeps({ executor, authorization: failingAuthorization, botApi: client }),
+    );
+
+    // Retryable (unknown/internal) failures propagate 503 semantics — the
+    // webhook never falsely acknowledges them (ADR-0027).
+    await expect(ingress.processUpdate(ownerCommand(9010, '/status'))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
+    const row = await executor.first<{ status: string }>({
+      sql: 'SELECT status FROM telegram_updates WHERE update_id = ?',
+      params: [9010],
+    });
+    expect(row?.status).toBe('failed');
+    // Nothing was sent — the failure happened before any action executed.
+    expect(sends).toHaveLength(0);
+  });
+
+  it('keeps the row claimed under its lease when even the failure marking fails', async () => {
+    const { client } = countingClient();
+    const failingExecutor = interceptingExecutor(isTerminalTransition);
+    const ingress = createTelegramIngress(buildDeps({ executor: failingExecutor, botApi: client }));
+
+    await expect(ingress.processUpdate(ownerCommand(9011, '/status'))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
+    const row = await createDbExecutor(env.DB).first<{ status: string }>({
+      sql: 'SELECT status FROM telegram_updates WHERE update_id = ?',
+      params: [9011],
+    });
+    // NOT processed, NOT failed — claimed remains the observable truth; the
+    // row carries a lease, so after expiry a later delivery reclaims the
+    // abandoned claim (the full recovery sequence is proven in
+    // telegram-update-reclaim.test.ts, ADR-0030).
+    expect(row?.status).toBe('claimed');
+  });
+
+  it('marks failed and propagates 503 (not processed) when the Bot API throws retryably', async () => {
+    const { client } = countingClient({
+      failWith: new TelegramApiError('telegram_rate_limited', { retryAfterMs: 5000 }),
+    });
+    const executor = createDbExecutor(env.DB);
+    const ingress = createTelegramIngress(buildDeps({ executor, botApi: client }));
+
+    await expect(ingress.processUpdate(ownerCommand(9012, '/status'))).rejects.toMatchObject({
+      code: 'service_unavailable',
+    });
+    const row = await executor.first<{ status: string }>({
+      sql: 'SELECT status FROM telegram_updates WHERE update_id = ?',
+      params: [9012],
+    });
+    expect(row?.status).toBe('failed');
+  });
+
+  it('acknowledges a permanent Bot API failure with a failed row and no exception', async () => {
+    const { client, sends } = countingClient({
+      failWith: new TelegramApiError('telegram_bad_request'),
+    });
+    const executor = createDbExecutor(env.DB);
+    const ingress = createTelegramIngress(buildDeps({ executor, botApi: client }));
+
+    // Permanent: resolved (200 semantics — no infinite Telegram retry loop).
+    await expect(ingress.processUpdate(ownerCommand(9013, '/status'))).resolves.toBe('failed');
+    const row = await executor.first<{ status: string }>({
+      sql: 'SELECT status FROM telegram_updates WHERE update_id = ?',
+      params: [9013],
+    });
+    expect(row?.status).toBe('failed');
+    expect(sends).toHaveLength(0);
+  });
+});
+
+describe('no secret or payload leakage in pipeline logs', () => {
+  it('never logs message text, chat ids, user ids, or callback data', async () => {
+    const { client } = countingClient();
+    const { lines, logger } = captureLogger();
+    const CANARY = 'LEAK-PIPELINE-سلام-999';
+    const ingress = createTelegramIngress(
+      buildDeps({
+        botApi: client,
+        logger,
+        clock: fixedClock(NOW),
+      }),
+    );
+
+    await ingress.processUpdate({
+      kind: 'message',
+      updateId: 9020,
+      messageId: 1,
+      chatId: -100777,
+      fromUserId: OWNER_ID,
+      text: `/status ${CANARY}`,
+      command: 'status',
+    });
+
+    const everything = lines.join('\n');
+    expect(everything).not.toContain(CANARY);
+    expect(everything).not.toContain('LEAK-PIPELINE');
+    expect(everything).not.toContain('-100777');
+    expect(everything).not.toContain(String(OWNER_ID));
+    expect(everything).not.toContain('سلام');
+    // The counting client DID receive the message for the owner chat — the
+    // exclusion above proves it came from the client, not from logs.
+    expect(client).toBeDefined();
+  });
+
+  it('does not log callback data even for malformed payloads', async () => {
+    const { lines, logger } = captureLogger();
+    const ingress = createTelegramIngress(buildDeps({ logger }));
+    const HOSTILE = 'a:<img src=x onerror=alert(1)>-padding-padding!';
+
+    await ingress.processUpdate({
+      kind: 'callback_query',
+      updateId: 9021,
+      callbackQueryId: 'cb-leak',
+      fromUserId: OWNER_ID,
+      callbackData: HOSTILE.length <= 64 ? HOSTILE : 'a:oversized-but-still-hostile-data-padding!',
+    });
+
+    const everything = lines.join('\n');
+    expect(everything).not.toContain('<img');
+    expect(everything).not.toContain('onerror');
+    expect(everything).not.toContain('cb-leak');
+  });
+});

@@ -129,15 +129,22 @@ by ADR-0014).
   framework phase.
 - Clock abstraction (`systemClock`, `fixedClock`) for deterministic tests.
 
-### 3.7 Data foundation (Phase 1A — ADR-0019/0020/0021/0022)
+### 3.7 Data foundation (Phase 1A — ADR-0019/0020/0021/0022; schema v2 via migration 0002 — ADR-0030/0031)
 
-- **Migration:** `migrations/0001_initial_schema.sql` — verbatim port of the
+- **Migrations (append-only):**
+  `migrations/0001_initial_schema.sql` — verbatim port of the
   blueprint schema (27 tables, 29 indexes, all CHECK/FK/UNIQUE constraints)
-  plus the application `schema_metadata` table. The blueprint's
+  plus the application `schema_metadata` table; the blueprint's
   `PRAGMA foreign_keys = ON` is not ported (D1 enforces foreign keys by
-  default; proven by tests). Migrations are append-only.
+  default; proven by tests).
+  `migrations/0002_telegram_update_lifecycle.sql` — the Phase 2A lifecycle
+  migration: `telegram_updates.claim_expires_at` (claim lease),
+  `failure_class` (CHECK retryable/permanent/NULL), `attempt_count`
+  (NOT NULL DEFAULT 0, CHECK >= 0), the `idx_tg_updates_lifecycle`
+  recovery index, and the documented fail-safe backfill of legacy failed
+  rows to `retryable` (ADR-0030/0031).
 - **Schema metadata:** `schema_metadata` (key/value/updated_at_ms) records
-  `schema_version` (= 1), `migration_id`, `applied_at` — the runtime contract
+  `schema_version` (= 2), `migration_id`, `applied_at` — the runtime contract
   used by readiness; distinct from Wrangler's `d1_migrations` bookkeeping.
 - **D1 boundary (`src/adapters/db/`):** typed `DbExecutor`
   (query/first/run/atomic batch), safe D1 error classification into stable
@@ -150,6 +157,108 @@ by ADR-0014).
 - **Readiness:** `/health/ready` verifies schema health whenever a D1
   binding is present; offline development without a binding stays ready
   (ADR-0021).
+
+### 3.8 Telegram ingress and admin foundation (Phase 2A — ADR-0024/0025/0026/0027/0028/0029, lifecycle completed by ADR-0030/0031/0032, fenced by the final correction round v1.2.3)
+
+**HTTP edge** (`src/entrypoints/http/handlers/telegram-webhook.ts`):
+`POST /telegram/webhook` exists only behind the fail-closed
+`TELEGRAM_INGRESS_ENABLED` flag with a fully valid Phase 2 configuration; a
+disabled or misconfigured ingress is a uniform unknown route. Request
+lifecycle: timing-safe secret verification (fresh-key HMAC-SHA256 via Web
+Crypto) -> JSON content type -> TRUE bounded body reading (ADR-0028: strict
+Content-Length pre-check, then a streamed byte cap at 64 KiB that stops and
+cancels after the first chunk crossing the limit; strict UTF-8 decode) ->
+strict JSON parse -> bounded Update parse. Rejections carry stable reason
+codes and never echo values.
+
+**Update parsing** (`src/adapters/telegram/update-parser.ts`): small explicit
+parser for `message` / `edited_message` / `callback_query` (no Zod — ADR-0010
+boundary). Safe-integer numerics only; strings bounded by omission; 64-byte
+callback data limit; unknown kinds classified `unsupported`; bot commands
+carry their optional lowercased target username (`/cmd@bot`) in
+`commandTarget`.
+
+**Durable idempotency** (`src/application/telegram-ingress.ts` +
+`src/adapters/telegram/update-claims.ts`): update_id is the claim boundary
+with SIX outcomes (ADR-0027, completed by ADR-0030/0031, fenced by the
+final correction round v1.2.3; schema v2 via migration 0002): `claimed`
+(new; lease + `failure_class = NULL` + `attempt_count = 1` written),
+`reclaimed_retryable` (atomic `failed(retryable) -> claimed`),
+`reclaimed_stale` (atomic `claimed(expired lease) -> claimed`),
+`already_processed` (terminal, ack), `permanently_failed` (terminal, ack,
+never re-executed), `in_flight` (active unexpired lease held elsewhere —
+answered with safe retryable 503 semantics, NEVER a false-success 200).
+The three execution-owning outcomes CARRY their claim generation
+(`attempt_count` — the fencing token, not merely an audit counter). Every
+claim carries a conservative 5-minute lease
+(`TELEGRAM_UPDATE_CLAIM_LEASE_MS`, centralized, boundary-tested): a Worker
+that dies after claiming leaves a claim that the next delivery recovers
+after lease expiry (exactly one concurrent stale reclaim winner; losers
+observe the winner's fresh lease). Reclaims are additionally fenced by the
+previously observed generation, and every terminal transition requires the
+caller's `expectedAttemptCount` (`AND attempt_count = ?`) — the generation
+fences stale owners from newer claims, so a resumed stale Worker can never
+mutate a newer owner's claim. HTTP 200 is emitted only after a terminal
+state is durably persisted; terminal-transition uncertainty (rejected by
+the fence, or a storage error) produces safe retryable 503 semantics.
+Retryable failures mark the row `failed` with `failure_class = 'retryable'`
+and propagate HTTP 503 semantics so Telegram redelivery reclaims them;
+permanent failures mark `failed` with `failure_class = 'permanent'` and
+answer 200 — the persisted class makes the row TERMINAL (reclaim is guarded
+to retryable rows only). If even the failure marking fails (throws or is
+rejected by the fence), the row stays claimed under its lease and is
+recovered after expiry (tested end to end). `claimed -> processed | failed`
+transitions stay generation-fenced; `processed` is never reclaimable; D1 is
+the only dedup authority (ADR-0025/0030).
+
+**Delivery guarantee — honest wording (ADR-0032):** the pipeline provides
+durable at-least-once processing with duplicate suppression BEFORE
+execution, plus bounded duplicate risk for ambiguous external side effects.
+Exactly-once database claim ownership does NOT imply exactly-once Telegram
+message delivery: if Telegram accepts a send and the Worker then loses the
+response or the processed transition fails, the next delivery may send the
+same message again (no application-provided idempotency key exists on
+sendMessage). The ambiguous window is a tested, documented scenario.
+Publishing-side duplicate mitigation and reconciliation are a recorded
+roadmap GATE before autonomous channel publishing is enabled.
+
+**Authorization** (`src/admin/roles.ts`, `src/admin/authorization.ts`,
+`src/adapters/telegram/admin-lookup.ts`): owner bootstrap via
+`OWNER_TELEGRAM_ID` plus active D1 admins; six approved roles with the
+verbatim `pixel_admin_map_v1.json` permission map; numeric user IDs only;
+fail closed everywhere. A denial is a handled action, not a failure.
+
+**Command routing** (`src/admin/command-router.ts`): allowlist /start /help
+/status /version; output is a TYPED action (`send_message` / `answer_callback`
+/ `noop` / `denied`) — never an immediate fetch; unauthorized senders get a
+minimal fixed Persian denial; outside-allowlist commands are ignored;
+explicitly-targeted commands (`/cmd@bot`) execute only for the configured
+expected username (case-insensitive) and are otherwise ignored with the
+stable `command_for_other_bot` reason (no expected username is wired in
+Phase 2A — every explicit target is ignored, fail closed).
+
+**Bot API boundary** (`src/adapters/telegram/bot-api-client.ts`): typed
+getMe / sendMessage / editMessageText / answerCallbackQuery; injectable
+fetch; strict timeout; single attempt (no retries); `redirect: "error"`;
+bounded 1 MiB response streaming on success and error/429 paths (ADR-0028);
+retryable/permanent error classification with safe `retry_after` parsing;
+runtime Telegram-safe HTML gate before every text-bearing call (a forged
+cast cannot bypass it); token and bodies never logged. Without `BOT_TOKEN`
+the pipeline runs in documented OFFLINE mode: noop actions complete, OUTBOUND
+actions fail retryably as `service_unavailable` (never silently skipped and
+acked — ADR-0027).
+
+**Admin contracts** (`src/admin/telegram-html.ts`,
+`src/admin/callback-tokens.ts`, `src/adapters/telegram/action-tokens.ts`):
+Telegram-safe HTML escaper/builder; link targets validated by URL parsing
+(https only, no credentials, no hazard characters), canonicalized, and
+attribute-escaped before interpolation, with the validator accepting exactly
+builder-shaped hrefs (ADR-0029); `a:<base64url_token>` callback contract
+(≤ 64 bytes) with the `admin_action_tokens` single-use, user-bound
+repository boundary; issue/consume inputs validated BEFORE any database
+access (positive safe-integer user ids and timestamps, future expiry, token
+shape, approved permissions only, bounded action descriptors, JSON-object
+payload) and never echo rejected values.
 
 ## 4. Testing approach
 
@@ -168,3 +277,13 @@ Source connectors, story/evidence engine, AI adapters, renderer, media
 pipeline, publisher, Telegram admin panel, D1 repositories/business queries,
 deployments, Cloudflare resource creation, webhook registration, remote
 migrations — all planned, none implemented.
+
+## 6. Non-goals in Phase 2A
+
+No Telegram credentials exist and none are configured in Cloudflare; the
+ingress flag ships `false` everywhere. No webhook registration, no live
+Telegram traffic, no `getMe`/`sendMessage` calls against the real API, no
+admin menus/screens or multi-step sessions (`admin_sessions` untouched), no
+role-mutation endpoints, no publishing controls, no source connectors, no AI
+adapters, no queues, no schema changes (migration set stays at 0001). Live
+preview wiring is explicitly Phase 2B.

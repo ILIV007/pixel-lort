@@ -8,13 +8,19 @@
 # --- Non-secret (local overrides) ----------------------------------------------
 # ENVIRONMENT=development
 # LOG_LEVEL=debug
-# APP_VERSION=1.1.0
+# APP_VERSION=1.2.3
+# Phase 2A Telegram ingress flag (non-secret). Turn on locally ONLY together
+# with the three Phase 2 secrets below (fake local fixtures are fine).
+# TELEGRAM_INGRESS_ENABLED=false
+# TARGET_CHANNEL=
 
 # --- Secrets (names only; leave empty unless your phase requires them) ----------
+# Phase 2 formats (ADR-0024):
+#   BOT_TOKEN "<bot id>:<token body>", WEBHOOK_SECRET >= 32 chars
+#   of [A-Za-z0-9_-], OWNER_TELEGRAM_ID positive decimal integer.
 # BOT_TOKEN=
 # WEBHOOK_SECRET=
 # OWNER_TELEGRAM_ID=
-# TARGET_CHANNEL=
 # GEMINI_API_KEY=
 # GROQ_API_KEY=
 # YOUTUBE_API_KEY=
