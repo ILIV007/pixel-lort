@@ -123,10 +123,10 @@
         // Cloudflare only: BOT_TOKEN, WEBHOOK_SECRET, OWNER_TELEGRAM_ID.
         // Production is unchanged; local defaults above remain disabled.
         "TELEGRAM_INGRESS_ENABLED": "true",
-        // Phase 3 engine flag stays "false" until the operator runbook
-        // provisions pixel-jobs-preview / pixel-dlq-preview and review
-        // approves activation (ADR-0036 §7 — fail closed).
-        "JOBS_ENABLED": "false",
+        // Owner-authorized Phase 3 Preview activation after independent review,
+        // queue provisioning and migration 0003. Local defaults stay disabled;
+        // production resources remain unprovisioned.
+        "JOBS_ENABLED": "true",
       },
       "d1_databases": [
         {
