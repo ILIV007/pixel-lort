@@ -161,3 +161,55 @@ without re-sending every dead-letter row forever.
   modes preserved and verified with `core.filemode=true` on extraction.
 - No push, merge, deploy, provisioning, remote migration, or webhook change
   was performed. **STOP — awaiting independent review.**
+
+## 8. Review corrections — v1.3.1 (same branch, same history; ADR-0037)
+
+The independent review of v1.3.0 returned three critical findings, each
+demonstrated by a real integration path. All three are fixed in this
+corrective release; the six reviewer regression tests
+(`tests/integration/phase03-review-regressions.test.ts`) pass verbatim —
+no assertion was weakened. Blueprint files remain byte-identical; schema
+stays at version 3; ADR-0037 records the decisions.
+
+1. **Wire contract (producer → delivered body → consumer).** The JOBS
+   producer adapter pre-stringified the envelope while the consumer
+   expected the object Cloudflare Queues delivers — a valid message was
+   classified `poison_malformed_envelope` and no handler ran. Fix: ONE
+   canonical wire form — producers send the Zod-validated envelope OBJECT
+   (`toWireEnvelope`; DLQ producer likewise sends the structured bounded
+   reference), and the consumer normalizes a JSON-encoded string
+   defensively (one bounded parse, identical validation) so pre-upgrade
+   in-flight messages and replay tooling still resolve. The end-to-end
+   path (real adapter output consumed by the engine, no manual
+   `JSON.parse`) is pinned by the reviewer's test 1 plus adapter unit
+   tests.
+2. **Attempt budget at the atomic claim/recovery boundary.** A job at
+   `attempts = max_attempts` whose final generation crashed before
+   persisting an outcome was re-claimed after lease expiry and executed a
+   fourth time. Fix: the boundary itself enforces the budget —
+   `claimJob` dead-letters a spent-budget row by ONE guarded UPDATE
+   (fenced by the observed state; the CAS also carries
+   `AND attempts < max_attempts`), `reclaimExpiredClaims` applies the same
+   rule with mutually exclusive guarded transitions, and the consumer
+   acknowledges `job_dead_lettered` only after the durable terminal write
+   (persist-before-ack). A new `reclaimedExhausted` dispatch metric and
+   honest tests (`handlerCalls() === 0`) pin the behavior.
+3. **Strict activation gating shared by runtime and readiness.** An
+   invalid present `JOBS_ENABLED` was silently treated as disabled, an
+   enabled engine without JOBS/DLQ bindings resolved ready, and
+   `/health/ready` returned 200. Fix: validation runs BEFORE the flag is
+   read; an enabled engine requires DB + JOBS + DLQ bindings
+   (`config_invalid` otherwise); `/health/ready` consumes the SAME
+   resolution and returns 503 (`jobs_config_invalid`). Disabled remains
+   the ordinary Telegram-only ready state; engine-layer ports stay
+   optional for offline harnesses (only the environment resolver is
+   strict).
+
+Verification for this round (measured, no totals chased): reviewer
+regression suite 6/6; jobs-related suites 92/92; full gate + test:db +
+preview dry-run re-run on the bumped version 1.3.1 — all green (numbers in
+the final report). Version touch points aligned to 1.3.1 by
+`scripts/check-versions.mjs`. Artifact: `pixel-lort-phase03-job-queue-v1.3.1.zip`
+(full tree + complete `.git`, same packaging and verification recipe as
+§7). **STOP — awaiting independent review of the corrective release; no
+activation, provisioning, or Phase 4 work performed.**

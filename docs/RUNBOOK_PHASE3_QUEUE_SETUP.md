@@ -63,7 +63,7 @@ Deploy the accepted Phase 3 commit with `JOBS_ENABLED` still `"false"`
 (default), then verify:
 
 - `GET /health/live`, `GET /health/ready`, `GET /version` unchanged in shape
-  (application version 1.3.0, schema version 3);
+  (application version 1.3.1, schema version 3);
 - Telegram owner commands still answer (`/start`, `/help`, `/status`,
   `/version`);
 - Worker logs show the `*/5` cron trigger firing as `cron.triggered` with
@@ -74,6 +74,14 @@ Deploy the accepted Phase 3 commit with `JOBS_ENABLED` still `"false"`
 Set the preview var `JOBS_ENABLED="true"` (wrangler vars or dashboard) and
 redeploy/apply. The queue consumer registers with the deployed Worker at
 this point.
+
+Activation gating is strict (ADR-0037): an ENABLED engine requires the D1
+binding AND both queue bindings (`JOBS`, `DLQ`) to be present, and any
+present-but-invalid `JOBS_ENABLED` value is a configuration error — never
+silently treated as disabled. After the flag flip, verify that
+`GET /health/ready` reports `ready` (a missing binding or an invalid flag
+returns 503 with the stable reason `jobs_config_invalid`), and that the
+cron log shows real dispatch passes instead of `cron.jobs_disabled`.
 
 ## Step 5 — Harmless live verification job
 

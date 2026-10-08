@@ -3,7 +3,8 @@
 Phase order follows blueprint §26 ("Roadmap implementation order"). Phases
 **0**, **1A**, **1B**, **2A**, and **2B** are marked complete; **Phase 3** is
 implemented OFFLINE (code + tests + docs on
-`phase/03-job-queue-engine`, application version 1.3.0) with live queue
+`phase/03-job-queue-engine`, application version 1.3.1 after the v1.3.1
+review-correction release) with live queue
 activation gated on the operator runbook; everything else is pending and
 intentionally not started.
 
@@ -182,10 +183,24 @@ umbrella.)_
 
 ## Phase 3 — job/queue framework and idempotency ◑ (implemented offline; activation gated)
 
-Implemented on `phase/03-job-queue-engine` (application version **1.3.0**,
-schema **3** via incremental migration 0003; ADR-0036). No resources were
+Implemented on `phase/03-job-queue-engine` (application version **1.3.1**,
+schema **3** via incremental migration 0003; ADR-0036 with review
+corrections ADR-0037). No resources were
 provisioned and nothing was deployed by this pass — activation follows
 `docs/RUNBOOK_PHASE3_QUEUE_SETUP.md` after independent review.
+
+- [x] v1.3.1 review corrections (ADR-0037, six reviewer regression tests
+      pinned): (1) ONE canonical wire transfer contract — producers send the
+      Zod-validated envelope OBJECT, consumers normalize JSON-encoded
+      strings defensively through the same validation; the real
+      producer → delivered body → consumer path executes with NO manual
+      JSON round trip. (2) The attempt budget is enforced AT the atomic
+      claim/recovery boundary — a spent-budget row (including a crashed
+      final generation with an expired lease) dead-letters WITHOUT
+      re-execution, fenced and persisted before any ack. (3) Strict
+      activation gating — validation runs before the flag is read, an
+      enabled engine requires DB + JOBS + DLQ bindings, and `/health/ready`
+      returns 503 for invalid or incomplete activation.
 
 - [x] Envelope schema validation with Zod (ADR-0010; strict `{version, jobId,
 type, attempt, traceId}` reference-only envelope) and per-type Zod
