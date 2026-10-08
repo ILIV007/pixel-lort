@@ -1,17 +1,20 @@
 /**
- * Queue producer ports and Cloudflare adapter (Phase 3 — ADR-0036 §3).
+ * Queue producer ports and Cloudflare adapter (Phase 3 — ADR-0036 §3;
+ * wire contract corrected by ADR-0037).
  *
  * The application engine depends on these minimal PORTS — never on the
  * Cloudflare `Queue` type directly — so dispatch/consume logic is testable
  * with controlled fakes (blueprint §3: infrastructure adapters wrap SDK
  * types; domain/application stay clean).
  *
- * The adapters are deliberately thin: they serialize the bounded reference
- * and delegate the send. NO payload, secret, source text, or provider
- * response ever enters a queue message (blueprint §7; AGENTS.md §3).
+ * The adapters are deliberately thin: they VALIDATE the bounded reference
+ * and delegate the send of the structured OBJECT (the single canonical
+ * wire transfer contract — ADR-0037; the platform serializes it and the
+ * consumer receives the same object). NO payload, secret, source text, or
+ * provider response ever enters a queue message (blueprint §7; AGENTS.md §3).
  */
 import type { QueueEnvelope } from '../../domain/jobs/envelope';
-import { serializeQueueEnvelope } from '../../domain/jobs/envelope';
+import { toWireEnvelope } from '../../domain/jobs/envelope';
 
 /** Port: send a durable job reference to the jobs queue. */
 export interface JobsQueueProducerPort {
@@ -38,13 +41,15 @@ export interface DlqProducerPort {
 
 /**
  * Cloudflare Queues adapter for the `JOBS` producer binding. The generic
- * parameter is the envelope; the wire body is the serialized bounded
- * reference (strings only at the boundary).
+ * parameter is the envelope; the wire body is the VALIDATED ENVELOPE OBJECT
+ * (one canonical transfer contract — ADR-0037). A contract-violating
+ * envelope fails the send (the engine records a recoverable enqueue
+ * failure) instead of putting a malformed body on the wire.
  */
 export function createJobsQueueProducer(queue: Queue<unknown>): JobsQueueProducerPort {
   return {
     async send(envelope: QueueEnvelope): Promise<void> {
-      await queue.send(serializeQueueEnvelope(envelope));
+      await queue.send(toWireEnvelope(envelope));
     },
   };
 }
@@ -53,16 +58,15 @@ export function createJobsQueueProducer(queue: Queue<unknown>): JobsQueueProduce
 export function createDlqQueueProducer(queue: Queue<unknown>): DlqProducerPort {
   return {
     async send(reference: DlqReference): Promise<void> {
-      // Bounded serialization: authored fields only, key order stable.
-      await queue.send(
-        JSON.stringify({
-          jobId: reference.jobId,
-          type: reference.type,
-          attempts: reference.attempts,
-          errorCode: reference.errorCode,
-          failedAtMs: reference.failedAtMs,
-        }),
-      );
+      // Bounded safe reference: authored fields only, sent as a STRUCTURED
+      // OBJECT — the same single canonical transfer contract (ADR-0037).
+      await queue.send({
+        jobId: reference.jobId,
+        type: reference.type,
+        attempts: reference.attempts,
+        errorCode: reference.errorCode,
+        failedAtMs: reference.failedAtMs,
+      });
     },
   };
 }

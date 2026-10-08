@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseQueueEnvelope, serializeQueueEnvelope } from '../../src/domain/jobs/envelope';
+import {
+  ENVELOPE_WIRE_JSON_MAX_CHARS,
+  parseQueueEnvelope,
+  toWireEnvelope,
+} from '../../src/domain/jobs/envelope';
 import {
   canonicalizeJson,
   parseJobPayload,
@@ -51,9 +55,32 @@ describe('queue envelope contract', () => {
     expect(parsed).toEqual({ ok: false, reason: 'malformed_envelope' });
   });
 
-  it('serializes with a stable field set (reference only — no payload possible)', () => {
-    const wire = JSON.parse(serializeQueueEnvelope(valid));
+  it('canonical wire body is the validated envelope OBJECT (ADR-0037)', () => {
+    const wire = toWireEnvelope(valid);
     expect(Object.keys(wire).sort()).toEqual(['attempt', 'jobId', 'traceId', 'type', 'version']);
+    // The producer sends THIS object; the consumer receives the same object.
+    expect(wire).toEqual(valid);
+  });
+
+  it('rejects a contract-violating envelope at the producer boundary', () => {
+    expect(() => toWireEnvelope({ ...valid, jobId: '' })).toThrow();
+    expect(() =>
+      toWireEnvelope({ ...valid, payload: { smuggled: true } } as unknown as typeof valid),
+    ).toThrow();
+  });
+
+  it('normalizes JSON-encoded string bodies through the SAME validation (ADR-0037)', () => {
+    // Defensive leniency: pre-upgrade in-flight strings and replay tooling.
+    expect(parseQueueEnvelope(JSON.stringify(valid))).toEqual({ ok: true, envelope: valid });
+    expect(parseQueueEnvelope(JSON.stringify({ ...valid, version: 2 }))).toEqual({
+      ok: false,
+      reason: 'unsupported_version',
+    });
+    expect(parseQueueEnvelope('not-json')).toEqual({ ok: false, reason: 'malformed_envelope' });
+    expect(parseQueueEnvelope('x'.repeat(ENVELOPE_WIRE_JSON_MAX_CHARS + 1))).toEqual({
+      ok: false,
+      reason: 'malformed_envelope',
+    });
   });
 });
 

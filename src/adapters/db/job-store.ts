@@ -26,6 +26,13 @@
  *   owner's claim. Terminal rows are never executable; an UNEXPIRED lease is
  *   never stolen (`lease_until <= now` is the reclaim boundary — exact
  *   expiry is stale, mirroring ADR-0030).
+ * - The ATTEMPT BUDGET is enforced AT the atomic claim/recovery boundary
+ *   (ADR-0037): a row whose `attempts` already equal `max_attempts` is never
+ *   granted another execution generation. The last granted generation may
+ *   have crashed before persisting an outcome (the crash window) — the only
+ *   safe transition is the terminal `dead_letter`, persisted by ONE guarded
+ *   UPDATE before any acknowledgement, by both the delivery-time claim
+ *   (`claimJob`) and the cron recovery pass (`reclaimExpiredClaims`).
  * - `poisonJob` dead-letters an UNCLAIMED dispatchable row (unregistered
  *   type / corrupt payload) guarded by the claimable statuses — fail-safe
  *   poison handling without burning a claim generation.
@@ -86,7 +93,13 @@ export type JobClaimOutcome =
   | { readonly kind: 'cancelled' }
   | { readonly kind: 'reserved_failed' }
   | { readonly kind: 'not_due'; readonly runAfterMs: number }
-  | { readonly kind: 'active_elsewhere' };
+  | { readonly kind: 'active_elsewhere' }
+  /**
+   * The attempt budget was spent and the row transitioned to terminal
+   * `dead_letter` AT the claim boundary (ADR-0037) — no execution was
+   * awarded. The caller may acknowledge AFTER this durable write.
+   */
+  | { readonly kind: 'budget_exhausted' };
 
 /** Input for idempotent creation (already validated by the engine). */
 export interface CreateJobRowInput {
@@ -208,17 +221,58 @@ export async function claimJob(
       // An UNEXPIRED lease is honored — never stolen (ADR-0036 §1).
       return { kind: 'active_elsewhere' };
     }
+    // Attempt-budget enforcement AT the atomic claim boundary (ADR-0037):
+    // the row is otherwise claimable here (dispatchable status, or claimed
+    // with an expired/absent lease), but its budget is spent — the granted
+    // generation died before persisting an outcome (crash window), or the
+    // row was left dispatchable with a spent budget. NO further execution
+    // may be awarded: the only safe transition is the terminal
+    // `dead_letter`, persisted by ONE guarded UPDATE fenced by the exact
+    // observed state. Its predicates are mutually exclusive with the claim
+    // CAS below (`attempts >= max_attempts` vs `attempts < max_attempts`),
+    // so no concurrent winner can flip between them. The caller may
+    // acknowledge only AFTER this durable write (persist-before-ack).
+    if (row.attempts >= row.max_attempts) {
+      const deadLettered =
+        row.status === 'claimed'
+          ? await executor.run({
+              sql: `UPDATE jobs
+                    SET status = 'dead_letter', last_error = ?, lease_until = NULL,
+                        dlq_delivered_at = NULL, updated_at = ?
+                    WHERE id = ? AND status = 'claimed' AND attempts = ?
+                      AND attempts >= max_attempts
+                      AND (lease_until IS NULL OR lease_until <= ?)`,
+              params: ['job_exhausted', nowMs, jobId, row.attempts, nowMs],
+            })
+          : await executor.run({
+              sql: `UPDATE jobs
+                    SET status = 'dead_letter', last_error = ?, lease_until = NULL,
+                        dlq_delivered_at = NULL, updated_at = ?
+                    WHERE id = ? AND status IN ('pending', 'queued', 'retry_wait')
+                      AND attempts = ? AND attempts >= max_attempts`,
+              params: ['job_exhausted', nowMs, jobId, row.attempts],
+            });
+      if (deadLettered.changes > 0) {
+        return { kind: 'budget_exhausted' };
+      }
+      // Lost the guarded transition (a concurrent writer moved the row):
+      // re-read and resolve against the winner's fresh state.
+      continue;
+    }
     // CAS claim (ADR-0036 §1; stale-reclaim mirrors ADR-0030): the winner
-    // must observe due-ness, the observed generation, AND either a
-    // dispatchable status or an EXPIRED lease on a claimed row (a stale
-    // owner's claim is atomically reclaimable by delivery — exactly one
-    // caller matches; an unexpired lease can never be stolen).
+    // must observe due-ness, the observed generation, a REMAINING attempt
+    // budget (redundant with the boundary check — the atomic statement
+    // itself can never over-grant), AND either a dispatchable status or an
+    // EXPIRED lease on a claimed row (a stale owner's claim is atomically
+    // reclaimable by delivery — exactly one caller matches; an unexpired
+    // lease can never be stolen).
     const won = await executor.run({
       sql: `UPDATE jobs
             SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ?
             WHERE id = ?
               AND run_after <= ?
               AND attempts = ?
+              AND attempts < max_attempts
               AND (
                 status IN ('pending', 'queued', 'retry_wait')
                 OR (status = 'claimed' AND (lease_until IS NULL OR lease_until <= ?))
@@ -367,34 +421,67 @@ export async function scanStrandedQueuedJobs(
   return result.rows;
 }
 
+/** Result of one bounded expired-lease recovery pass. */
+export interface ReclaimExpiredResult {
+  /** Rows moved back to `queued` for re-dispatch (attempt budget intact). */
+  readonly reclaimed: number;
+  /**
+   * Rows whose attempt budget was spent and which transitioned to terminal
+   * `dead_letter` AT the recovery boundary (ADR-0037) — the crashed
+   * generation is never re-executed.
+   */
+  readonly exhaustedToDeadLetter: number;
+}
+
 /**
- * Reclaim expired claimed leases (bounded): each row is moved back to
- * `queued` by a guarded UPDATE — attempts are NOT incremented (they count
- * execution generations, not recoveries). Returns the number of rows
- * reclaimed by THIS call.
+ * Reclaim expired claimed leases (bounded). Each row takes exactly one of
+ * two MUTUALLY EXCLUSIVE guarded transitions (ADR-0037):
+ * - budget spent (`attempts >= max_attempts`): the crashed generation can
+ *   never be re-executed — the row dead-letters AT the recovery boundary;
+ * - budget intact: the row moves back to `queued` for the bounded dispatch
+ *   scan. Attempts are NOT incremented (they count execution generations,
+ *   not recoveries).
  */
 export async function reclaimExpiredClaims(
   executor: DbExecutor,
   nowMs: number,
   limit: number,
-): Promise<number> {
-  const expired = await executor.query<Pick<JobRow, 'id' | 'lease_until'>>({
-    sql: `SELECT id, lease_until FROM jobs
+): Promise<ReclaimExpiredResult> {
+  const expired = await executor.query<Pick<JobRow, 'id' | 'attempts' | 'max_attempts'>>({
+    sql: `SELECT id, attempts, max_attempts FROM jobs
           WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ?
           ORDER BY lease_until ASC, id ASC
           LIMIT ?`,
     params: [nowMs, limit],
   });
   let reclaimed = 0;
+  let exhaustedToDeadLetter = 0;
   for (const row of expired.rows) {
+    if (row.attempts >= row.max_attempts) {
+      const deadLettered = await executor.run({
+        sql: `UPDATE jobs
+              SET status = 'dead_letter', last_error = ?, lease_until = NULL,
+                  dlq_delivered_at = NULL, updated_at = ?
+              WHERE id = ? AND status = 'claimed'
+                AND lease_until IS NOT NULL AND lease_until <= ?
+                AND attempts >= max_attempts`,
+        params: ['job_exhausted', nowMs, row.id, nowMs],
+      });
+      if (deadLettered.changes > 0) {
+        exhaustedToDeadLetter += 1;
+      }
+      continue;
+    }
     const result = await executor.run({
       sql: `UPDATE jobs SET status = 'queued', lease_until = NULL, updated_at = ?
-            WHERE id = ? AND status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ?`,
+            WHERE id = ? AND status = 'claimed'
+              AND lease_until IS NOT NULL AND lease_until <= ?
+              AND attempts < max_attempts`,
       params: [nowMs, row.id, nowMs],
     });
     reclaimed += result.changes > 0 ? 1 : 0;
   }
-  return reclaimed;
+  return { reclaimed, exhaustedToDeadLetter };
 }
 
 /** Dead-letter rows whose safe DLQ reference was never confirmed delivered. */

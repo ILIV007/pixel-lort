@@ -382,9 +382,10 @@ describe('dispatch uncertainty windows (ADR-0036 §3)', () => {
     expect(summary.dispatched).toBe(25);
     expect(h.handlerCalls()).toBe(0);
     // Deterministic order: run_after equal → priority DESC. (The engine
-    // hands ENVELOPE OBJECTS to the producer port; serialization to the wire
-    // string happens in the Cloudflare adapter — asserted in the entrypoint
-    // suite.)
+    // hands ENVELOPE OBJECTS to the producer port, and the Cloudflare
+    // adapter sends the SAME validated object on the wire — the single
+    // canonical transfer contract, asserted in the adapter unit suite and
+    // end-to-end in the review regression suite, ADR-0037.)
     expect(h.sentEnvelopes).toHaveLength(25);
     const first = h.sentEnvelopes[0] as { jobId: string };
     expect(first.jobId).toBe('b-29'); // priority 29 — the highest.
@@ -658,7 +659,8 @@ describe('consumer decision table (ADR-0036 §4)', () => {
     expect(thrownRow?.status).toBe('retry_wait');
     expect(thrownRow?.last_error).toBe('job_internal_error');
 
-    // A handler that throws at exhaustion-time is dead-lettered (bounded).
+    // A delivery whose attempt budget is already spent is dead-lettered AT
+    // the claim boundary — the fourth execution never happens.
     const exhausting = createHarness();
     exhausting.setHandlerOutcome(new Error('boom'));
     const exhId = await seedRow(exhausting.executor, {
@@ -670,6 +672,13 @@ describe('consumer decision table (ADR-0036 §4)', () => {
       action: 'ack',
       outcome: 'job_dead_lettered',
     });
+    expect(exhausting.handlerCalls()).toBe(0);
+    const exhRow = await exhausting.executor.first<{ status: string; attempts: number }>({
+      sql: 'SELECT status, attempts FROM jobs WHERE id = ?',
+      params: [exhId],
+    });
+    expect(exhRow?.status).toBe('dead_letter');
+    expect(exhRow?.attempts).toBe(3);
   });
 
   it('reclaims crash-after-claim: expired lease re-enters the pool via dispatch', async () => {
@@ -699,6 +708,43 @@ describe('consumer decision table (ADR-0036 §4)', () => {
     });
     expect(row?.status).toBe('succeeded');
     expect(row?.attempts).toBe(2);
+  });
+
+  it('recovery dead-letters a spent-budget expired claim without re-execution', async () => {
+    const h = createHarness({ useRealHeartbeat: true });
+    await seedRow(h.executor, {
+      id: 'budget-1',
+      status: 'claimed',
+      attempts: 3,
+      maxAttempts: 3,
+      leaseUntil: NOW - 1000,
+    });
+    // The final generation crashed before persisting an outcome. The
+    // recovery pass dead-letters the row AT the boundary (ADR-0037); the
+    // handler NEVER runs a fourth time.
+    h.clock.advance(2000);
+    const pass = await h.engine.dispatchDueJobs();
+    expect(pass.reclaimedLeases).toBe(0);
+    expect(pass.reclaimedExhausted).toBe(1);
+    expect(pass.dispatched).toBe(0);
+    expect(h.handlerCalls()).toBe(0);
+    const row = await h.executor.first<{ status: string; attempts: number; last_error: string }>({
+      sql: 'SELECT status, attempts, last_error FROM jobs WHERE id = ?',
+      params: ['budget-1'],
+    });
+    expect(row?.status).toBe('dead_letter');
+    expect(row?.attempts).toBe(3);
+    expect(row?.last_error).toBe('job_exhausted');
+    // The DLQ reference is now reconcilable from durable state.
+    const reconciled = await h.engine.reconcileDeadLetters();
+    expect(reconciled.delivered).toBe(1);
+    expect(h.dlqSent[0]).toEqual({
+      jobId: 'budget-1',
+      type: 'jobs.maintenance_heartbeat',
+      attempts: 3,
+      errorCode: 'job_exhausted',
+      failedAtMs: NOW + 2000,
+    });
   });
 });
 

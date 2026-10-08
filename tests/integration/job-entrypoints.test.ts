@@ -10,15 +10,18 @@ import {
 import type { WorkerEnv } from '../../src/shared/types/env';
 
 /**
- * Entrypoint activation tests on REAL workerd D1 (Phase 3 — ADR-0036 §7):
- * the fail-closed matrix for cron and queue paths.
+ * Entrypoint activation tests on REAL workerd D1 (Phase 3 — ADR-0036 §7;
+ * activation gating tightened by ADR-0037): the fail-closed matrix for cron
+ * and queue paths.
  *
  * - disabled (default): cron is a structured no-op; queue messages retry.
- * - enabled + DB (no producers): dispatch fails closed per send (stable
- *   logs, rows stay recoverable); consumption works end-to-end when a
- *   message is delivered (binding-independent consumer).
- * - enabled + DB + fake JOBS producer: full dispatch pass.
- * - enabled WITHOUT DB: config_invalid — no dispatch, no ack.
+ * - enabled WITHOUT both queue bindings (JOBS/DLQ) or the DB:
+ *   config_invalid — cron is a no-op, queue messages retry; nothing ever
+ *   half-runs, and readiness reports not_ready (covered in the review
+ *   regression suite).
+ * - enabled + DB + fake JOBS/DLQ producers: the full dispatch pass, with
+ *   the wire body asserted as the CANONICAL ENVELOPE OBJECT (ADR-0037 —
+ *   no manual JSON round trip anywhere in the path).
  */
 
 const NOW = 1_700_000_000_000;
@@ -45,6 +48,11 @@ function fakeBatch(messages: FakeMessage[]): MessageBatch<unknown> {
   } as unknown as MessageBatch<unknown>;
 }
 
+/** Minimal fake queue producer binding (records nothing; accepts sends). */
+function fakeQueue(): Queue<unknown> {
+  return { send: async () => {} } as unknown as Queue<unknown>;
+}
+
 describe('scheduled entrypoint activation', () => {
   it('disabled (default): a structured no-op that never dispatches', async () => {
     const envBase = createTestEnv();
@@ -56,7 +64,7 @@ describe('scheduled entrypoint activation', () => {
     expect(rows?.n).toBe(0);
   });
 
-  it('enabled + DB without producers: bounded pass fails closed, rows stay recoverable', async () => {
+  it('enabled without both queue bindings: config_invalid — cron no-op, rows stay recoverable', async () => {
     await env.DB.prepare(
       `INSERT INTO jobs (id, type, status, priority, run_after, attempts, max_attempts,
         idempotency_key, payload_json, created_at, updated_at, dlq_delivered_at)
@@ -77,7 +85,8 @@ describe('scheduled entrypoint activation', () => {
         createTestExecutionContext(),
       ),
     ).resolves.toBeUndefined();
-    // Fail closed: no producer → the row is NOT marked queued.
+    // Fail closed: a missing required binding is config_invalid — the pass
+    // never dispatches, and the row stays recoverable (ADR-0037).
     const row = await env.DB.prepare('SELECT status FROM jobs WHERE id = ?')
       .bind('cron-1')
       .first<{ status: string }>();
@@ -95,7 +104,7 @@ describe('scheduled entrypoint activation', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('enabled + fake JOBS producer: dispatches a bounded reference', async () => {
+  it('enabled + DB + fake JOBS/DLQ producers: dispatches the canonical envelope OBJECT', async () => {
     await env.DB.prepare(
       `INSERT INTO jobs (id, type, status, priority, run_after, attempts, max_attempts,
         idempotency_key, payload_json, created_at, updated_at, dlq_delivered_at)
@@ -115,6 +124,7 @@ describe('scheduled entrypoint activation', () => {
           return Promise.resolve();
         },
       } as unknown as Queue<unknown>,
+      DLQ: fakeQueue(),
     };
     await worker.scheduled(
       createTestScheduledController('*/5 * * * *', NOW),
@@ -122,7 +132,9 @@ describe('scheduled entrypoint activation', () => {
       createTestExecutionContext(),
     );
     expect(sentEnvelopes).toHaveLength(1);
-    const wire = JSON.parse(sentEnvelopes[0] as string) as Record<string, unknown>;
+    // The wire body IS the envelope object (single canonical transfer
+    // contract — ADR-0037). No string decode anywhere in the path.
+    const wire = sentEnvelopes[0] as Record<string, unknown>;
     expect(wire).toMatchObject({
       version: 1,
       jobId: 'cron-2',
@@ -159,7 +171,7 @@ describe('queue entrypoint activation', () => {
     expect(ack).not.toHaveBeenCalled();
   });
 
-  it('enabled + DB: processes a real delivery end-to-end and acks durable success', async () => {
+  it('enabled + DB + required bindings: processes a real delivery end-to-end and acks durable success', async () => {
     await env.DB.prepare(
       `INSERT INTO jobs (id, type, status, priority, run_after, attempts, max_attempts,
         idempotency_key, payload_json, created_at, updated_at, dlq_delivered_at)
@@ -184,7 +196,13 @@ describe('queue entrypoint activation', () => {
         retry,
       },
     ]);
-    const envJobs: WorkerEnv = { ...createTestEnv(), JOBS_ENABLED: 'true', DB: env.DB };
+    const envJobs: WorkerEnv = {
+      ...createTestEnv(),
+      JOBS_ENABLED: 'true',
+      DB: env.DB,
+      JOBS: fakeQueue(),
+      DLQ: fakeQueue(),
+    };
     await worker.queue(batch, envJobs, createTestExecutionContext());
     expect(ack).toHaveBeenCalledTimes(1);
     expect(retry).not.toHaveBeenCalled();
@@ -198,11 +216,47 @@ describe('queue entrypoint activation', () => {
     expect(heartbeat?.value_json).toContain('q-1');
   });
 
+  it('enabled but missing required bindings: config_invalid — retries instead of acknowledging', async () => {
+    const ack = vi.fn();
+    const retry = vi.fn();
+    const batch = fakeBatch([
+      {
+        id: 'm3',
+        body: {
+          version: 1,
+          jobId: 'q-2',
+          type: 'jobs.maintenance_heartbeat',
+          attempt: 1,
+          traceId: 't',
+        },
+        ack,
+        retry,
+      },
+    ]);
+    const envMisconfigured: WorkerEnv = {
+      ...createTestEnv(),
+      JOBS_ENABLED: 'true',
+      DB: env.DB,
+    };
+    await worker.queue(batch, envMisconfigured, createTestExecutionContext());
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(ack).not.toHaveBeenCalled();
+    // The durable row (if any) was never touched.
+    const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM jobs').first<{ n: number }>();
+    expect(row?.n).toBe(0);
+  });
+
   it('enabled + malformed message: acks the poison message (no hot loop)', async () => {
     const ack = vi.fn();
     const retry = vi.fn();
     const batch = fakeBatch([{ id: 'm2', body: 'garbage', ack, retry }]);
-    const envJobs: WorkerEnv = { ...createTestEnv(), JOBS_ENABLED: 'true', DB: env.DB };
+    const envJobs: WorkerEnv = {
+      ...createTestEnv(),
+      JOBS_ENABLED: 'true',
+      DB: env.DB,
+      JOBS: fakeQueue(),
+      DLQ: fakeQueue(),
+    };
     await worker.queue(batch, envJobs, createTestExecutionContext());
     expect(ack).toHaveBeenCalledTimes(1);
     expect(retry).not.toHaveBeenCalled();

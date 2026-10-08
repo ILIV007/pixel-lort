@@ -17,6 +17,9 @@
  *   work (grace-window re-kick).
  * - DLQ delivery is reconciled from durable state (`dlq_delivered_at IS
  *   NULL`), never from in-memory knowledge.
+ * - The ATTEMPT BUDGET is enforced AT the atomic claim/recovery boundary
+ *   (ADR-0037): a spent-budget row dead-letters WITHOUT re-execution —
+ *   a crashed generation can never burn an `max_attempts + 1`-th attempt.
  *
  * Logging: stable event names, counts, and authored codes only — never
  * payloads, envelope bodies, SQL text, or error strings (AGENTS.md §3,
@@ -109,6 +112,8 @@ export interface DispatchSummary {
   readonly sendFailures: number;
   readonly poisonedUnregistered: number;
   readonly reclaimedLeases: number;
+  /** Spent-budget expired claims dead-lettered at the recovery boundary. */
+  readonly reclaimedExhausted: number;
 }
 
 export interface DlqReconcileSummary {
@@ -215,10 +220,14 @@ export function createJobsEngine(
     const nowMs = nowMsInput ?? clock.now();
 
     // 1. Recover expired claims first (bounded) so stranded executions
-    //    re-enter the dispatchable pool.
-    const reclaimedLeases = await reclaimExpiredClaims(executor, nowMs, bounds.reclaimBatch);
-    if (reclaimedLeases > 0) {
-      logDebug('jobs.recover.leases_reclaimed', { count: reclaimedLeases });
+    //    re-enter the dispatchable pool — and spent-budget rows dead-letter
+    //    at the recovery boundary WITHOUT re-execution (ADR-0037).
+    const reclaimResult = await reclaimExpiredClaims(executor, nowMs, bounds.reclaimBatch);
+    if (reclaimResult.reclaimed > 0 || reclaimResult.exhaustedToDeadLetter > 0) {
+      logDebug('jobs.recover.leases_reclaimed', {
+        count: reclaimResult.reclaimed,
+        exhaustedToDeadLetter: reclaimResult.exhaustedToDeadLetter,
+      });
     }
 
     // 2. Bounded, deterministic, indexed scans.
@@ -296,7 +305,8 @@ export function createJobsEngine(
       markedQueued,
       sendFailures,
       poisonedUnregistered,
-      reclaimedLeases,
+      reclaimedLeases: reclaimResult.reclaimed,
+      reclaimedExhausted: reclaimResult.exhaustedToDeadLetter,
     };
     logDebug('jobs.dispatch.pass', {
       dueScanned: summary.dueScanned,
@@ -435,6 +445,11 @@ export function createJobsEngine(
         }
         case 'active_elsewhere':
           return { action: 'retry', outcome: 'active_elsewhere' };
+        case 'budget_exhausted':
+          // The claim boundary dead-lettered a spent-budget row BEFORE any
+          // re-execution (ADR-0037). The durable write has landed — ack is
+          // honest now; DLQ reconciliation delivers the safe reference.
+          return { action: 'ack', outcome: 'job_dead_lettered' };
         case 'claimed':
           return executeClaimed(row, payload.payload, claim.generation, messageId, nowMs);
       }

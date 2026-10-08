@@ -297,6 +297,33 @@ describe('atomic claim — generation fencing and boundaries', () => {
     expect((await claimJob(executor, 'job-c8', NOW + 5000)).kind).toBe('claimed');
   });
 
+  it('dead-letters a spent-budget expired claim at the boundary without awarding a generation', async () => {
+    // attempts = 3 = max: the third generation crashed before persisting an
+    // outcome; the expired lease must NOT award a fourth execution.
+    await seedJob({ id: 'job-c14', status: 'claimed', attempts: 3, leaseUntil: NOW - 1000 });
+    const claim = await claimJob(executor, 'job-c14', NOW);
+    expect(claim).toEqual({ kind: 'budget_exhausted' });
+    const row = await findJobById(executor, 'job-c14');
+    expect(row?.status).toBe('dead_letter');
+    expect(row?.attempts).toBe(3);
+    expect(row?.last_error).toBe('job_exhausted');
+    expect(row?.dlq_delivered_at ?? null).toBeNull();
+    // The terminal row is inert: a later delivery observes dead_lettered.
+    expect(await claimJob(executor, 'job-c14', NOW + 1000)).toEqual({ kind: 'dead_lettered' });
+  });
+
+  it('never claims a dispatchable row whose attempt budget is spent', async () => {
+    await seedJob({ id: 'job-c15', status: 'pending', attempts: 3 });
+    const claim = await claimJob(executor, 'job-c15', NOW);
+    expect(claim).toEqual({ kind: 'budget_exhausted' });
+    const row = await findJobById(executor, 'job-c15');
+    expect(row?.status).toBe('dead_letter');
+    expect(row?.attempts).toBe(3);
+    // A budget-intact row is unaffected by the boundary.
+    await seedJob({ id: 'job-c16', status: 'claimed', attempts: 2, leaseUntil: NOW - 1 });
+    expect((await claimJob(executor, 'job-c16', NOW)).kind).toBe('claimed');
+  });
+
   it('treats succeeded/dead_letter/cancelled/reserved rows as non-executable', async () => {
     await seedJob({ id: 'job-c9', status: 'succeeded', attempts: 1 });
     await seedJob({ id: 'job-c10', status: 'dead_letter', attempts: 3 });
@@ -332,13 +359,29 @@ describe('recovery scans (bounded, indexed)', () => {
     await seedJob({ id: 'job-r3', status: 'claimed', attempts: 1, leaseUntil: NOW + 1000 });
     await seedJob({ id: 'job-r4', status: 'pending' });
     const reclaimed = await reclaimExpiredClaims(executor, NOW, 25);
-    expect(reclaimed).toBe(2);
+    expect(reclaimed).toEqual({ reclaimed: 2, exhaustedToDeadLetter: 0 });
     expect((await findJobById(executor, 'job-r1'))?.status).toBe('queued');
     expect((await findJobById(executor, 'job-r2'))?.status).toBe('queued');
     expect((await findJobById(executor, 'job-r3'))?.status).toBe('claimed');
     expect((await findJobById(executor, 'job-r4'))?.status).toBe('pending');
     // Reclaimed rows keep their generation (attempts are execution counts).
     expect((await findJobById(executor, 'job-r1'))?.attempts).toBe(1);
+  });
+
+  it('dead-letters expired claims whose attempt budget is spent (never re-executed)', async () => {
+    await seedJob({ id: 'job-r5', status: 'claimed', attempts: 3, leaseUntil: NOW - 1000 });
+    await seedJob({ id: 'job-r6', status: 'claimed', attempts: 2, leaseUntil: NOW - 1000 });
+    const result = await reclaimExpiredClaims(executor, NOW, 25);
+    expect(result).toEqual({ reclaimed: 1, exhaustedToDeadLetter: 1 });
+    const spent = await findJobById(executor, 'job-r5');
+    expect(spent?.status).toBe('dead_letter');
+    expect(spent?.attempts).toBe(3);
+    expect(spent?.last_error).toBe('job_exhausted');
+    expect(spent?.dlq_delivered_at ?? null).toBeNull();
+    // The budget-intact row still recovers normally.
+    const intact = await findJobById(executor, 'job-r6');
+    expect(intact?.status).toBe('queued');
+    expect(intact?.attempts).toBe(2);
   });
 
   it('scans due pending/retry_wait rows deterministically (run_after, priority DESC, id)', async () => {

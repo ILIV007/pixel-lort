@@ -48,6 +48,7 @@ export async function handleScheduled(
       sendFailures: summary.sendFailures,
       poisonedUnregistered: summary.poisonedUnregistered,
       reclaimedLeases: summary.reclaimedLeases,
+      reclaimedExhausted: summary.reclaimedExhausted,
     });
     if (summary.sendFailures > 0) {
       logger.warn('cron.jobs_dispatch_degraded', { sendFailures: summary.sendFailures });
