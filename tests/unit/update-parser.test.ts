@@ -204,6 +204,36 @@ describe('parseTelegramUpdate — string bounds', () => {
   });
 });
 
+describe('parseTelegramUpdate — chat type extraction (v1.2.5)', () => {
+  it('extracts the exact known chat types', () => {
+    for (const type of ['private', 'group', 'supergroup', 'channel']) {
+      const result = parseTelegramUpdate(messageUpdate({ chat: { id: 555, type } }));
+      expect(result.ok).toBe(true);
+      if (!result.ok || result.update.kind !== 'message') return;
+      expect(result.update.chatType).toBe(type);
+    }
+  });
+
+  it('treats unknown, non-string, and missing chat types as absent (fail closed)', () => {
+    for (const type of ['secret_chat', 'Private', 7, null, undefined]) {
+      const chat: Record<string, unknown> = { id: 555 };
+      if (type !== undefined) chat['type'] = type;
+      const result = parseTelegramUpdate(messageUpdate({ chat }));
+      expect(result.ok).toBe(true);
+      if (!result.ok || result.update.kind !== 'message') return;
+      expect(result.update.chatType).toBeUndefined();
+    }
+  });
+
+  it('keeps chatType absent when the chat object itself is missing', () => {
+    const result = parseTelegramUpdate(messageUpdate({ chat: undefined }));
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.update.kind !== 'message') return;
+    expect(result.update.chatType).toBeUndefined();
+    expect(result.update.chatId).toBeUndefined();
+  });
+});
+
 describe('extractBotCommand', () => {
   it('extracts and lowercases the command word', () => {
     expect(extractBotCommand('/status')).toEqual({ command: 'status' });
