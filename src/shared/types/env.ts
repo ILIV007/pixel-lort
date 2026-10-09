@@ -134,6 +134,14 @@ export interface WorkerEnv {
    */
   readonly JOBS_ENABLED?: string;
   /**
+   * NON-SECRET source-ingestion feature flag ('true' | 'false'; default
+   * 'false'). Gates due-source scheduling and the `sources.fetch_poll`
+   * handler ONLY — never the jobs engine (Phase 4, ADR-0038 §1). Ships
+   * 'false' in the delivered tree (local AND preview); per-source
+   * enablement remains a separate owner control.
+   */
+  readonly SOURCE_INGESTION_ENABLED?: string;
+  /**
    * Queues producer binding for the jobs queue (blueprint §4 binding name).
    * Optional: only present where wrangler.jsonc declares it (preview).
    * Carries bounded job REFERENCES only — never payloads.

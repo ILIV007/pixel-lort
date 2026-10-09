@@ -29,13 +29,32 @@ export const MaintenanceHeartbeatPayloadSchema = z
 export type MaintenanceHeartbeatPayload = z.infer<typeof MaintenanceHeartbeatPayloadSchema>;
 
 /**
+ * `sources.fetch_poll` payload (Phase 4 — ADR-0038 §3/§4): approved source
+ * ID plus the reserved poll window. NO content, NO credentials, NO URLs —
+ * the durable payload carries approved identifiers only (blueprint §7).
+ * `scheduledForMs` is the reserved `next_poll_at` value the scheduler read;
+ * the handler's fenced terminal write derives its guard
+ * (`scheduledForMs + hold`) deterministically from it.
+ */
+export const SourcesPollPayloadSchema = z
+  .object({
+    sourceId: z.string().regex(/^[a-z0-9_]{3,64}$/),
+    scheduledForMs: z.number().int().min(0).safe(),
+  })
+  .strict();
+
+export type SourcesPollPayload = z.infer<typeof SourcesPollPayloadSchema>;
+
+/**
  * Per-type payload schemas. Only REGISTERED (implemented) job types appear
  * here; the engine refuses to create or execute a type without a schema
- * (fail-safe — ADR-0036 §7). Later phases append their schemas together
- * with their handlers.
+ * (fail-safe — ADR-0036 §7). The Phase 4 poll type is created ONLY by the
+ * gated scheduler (ADR-0038 §3) and its HANDLER is registered only while
+ * the ingestion gate is on (ADR-0038 §1).
  */
-export const PAYLOAD_SCHEMAS: ReadonlyMap<string, z.ZodTypeAny> = new Map([
+export const PAYLOAD_SCHEMAS: ReadonlyMap<string, z.ZodTypeAny> = new Map<string, z.ZodTypeAny>([
   ['jobs.maintenance_heartbeat', MaintenanceHeartbeatPayloadSchema],
+  ['sources.fetch_poll', SourcesPollPayloadSchema],
 ]);
 
 /** Create-time input validation (type is bounded syntax, NOT yet registered). */

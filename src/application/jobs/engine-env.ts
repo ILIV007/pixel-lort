@@ -1,6 +1,7 @@
 /**
  * Engine construction from the Worker environment (Phase 3 — ADR-0036 §7;
- * activation gating tightened by ADR-0037).
+ * activation gating tightened by ADR-0037; Phase 4 ingestion gate by
+ * ADR-0038 §1).
  *
  * Fail-closed activation:
  * - `JOBS_ENABLED` absent or 'false' → `disabled` (the exact Telegram-only
@@ -16,6 +17,18 @@
  *   operator runbook completes (provision queues, bind, set the flag).
  *   Tests and offline harnesses that need a producer-less engine construct
  *   `createJobsEngine` directly instead of going through the environment.
+ *
+ * Phase 4 ingestion gate (ADR-0038 §1):
+ * - `SOURCE_INGESTION_ENABLED` is validated whenever PRESENT (invalid
+ *   values → `config_invalid`, never silently ignored).
+ * - The gate controls ONLY ingestion: with the gate OFF the resolved
+ *   engine is byte-identical to Phase 3 v1.3.1 (no poll handler, no
+ *   scheduling).
+ * - Ingestion enabled while the jobs engine is disabled/invalid →
+ *   `ingestion_requires_jobs` (fail closed — ingestion can never run
+ *   half-wired).
+ * - Ingestion enabled with an INVALID registry catalog → `config_invalid`
+ *   (fail safe, ADR-0038 §2).
  */
 import type { Logger } from '../../observability/logger';
 import type { WorkerEnv } from '../../shared/types/env';
@@ -27,19 +40,25 @@ import {
 import { systemClock, type Clock } from '../../shared/time/clock';
 import { cryptoIdGenerator } from '../../shared/ids/id';
 import { parseJobsConfig } from '../../shared/config/phase3';
+import { parseIngestionConfig } from '../../shared/config/phase4';
+import { parseEmbeddedRegistry } from '../../domain/source/source-registry';
 import { createJobHandlerRegistry } from '../../domain/jobs/handler';
 import { createJobsEngine, DEFAULT_ENGINE_BOUNDS, type JobsEngine } from './engine';
 import { createMaintenanceHeartbeatHandler } from './handlers/maintenance-heartbeat';
+import { createSourcePollHandler } from '../ingestion/poll-handler';
+import { createConnectorRegistry } from '../../connectors/registry';
+import { createSafeFetch } from '../../shared/http/safe-http';
 
 export type EngineResolution =
   | { readonly kind: 'disabled' }
   | { readonly kind: 'config_invalid'; readonly issues: readonly string[] }
-  | { readonly kind: 'ready'; readonly engine: JobsEngine };
+  | { readonly kind: 'ready'; readonly engine: JobsEngine; readonly ingestionEnabled: boolean };
 
 /**
- * Resolve the jobs engine for the current environment. Registered handlers
- * are wired HERE (exactly the implemented set — the maintenance heartbeat);
- * later phases extend this factory together with the registry.
+ * Resolve the jobs engine (and, when gated on, the ingestion handler set)
+ * for the current environment. Registered handlers are wired HERE (exactly
+ * the implemented set); later phases extend this factory together with the
+ * registry.
  */
 export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolution {
   const { config, result } = parseJobsConfig(env as Readonly<Record<string, unknown>>);
@@ -51,7 +70,21 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
       issues: result.issues.map((issue) => `${issue.field}:${issue.reason}`),
     };
   }
+  // Phase 4 flag is validated whenever present (ADR-0038 §1).
+  const ingestion = parseIngestionConfig(env as Readonly<Record<string, unknown>>);
+  if (!ingestion.result.ok) {
+    return {
+      kind: 'config_invalid',
+      issues: ingestion.result.issues.map((issue) => `${issue.field}:${issue.reason}`),
+    };
+  }
   if (!config.JOBS_ENABLED) {
+    if (ingestion.config.SOURCE_INGESTION_ENABLED) {
+      return {
+        kind: 'config_invalid',
+        issues: ['ingestion_requires_jobs'],
+      };
+    }
     return { kind: 'disabled' };
   }
   if (env.DB === undefined) {
@@ -70,15 +103,41 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
   if (missingBindings.length > 0) {
     return { kind: 'config_invalid', issues: missingBindings };
   }
+  const ingestionEnabled = ingestion.config.SOURCE_INGESTION_ENABLED;
+
+  // Ingestion enabled → the registry catalog must validate (fail safe,
+  // ADR-0038 §2); a broken catalog never half-runs.
+  if (ingestionEnabled) {
+    const registry = parseEmbeddedRegistry();
+    if (!registry.ok) {
+      return {
+        kind: 'config_invalid',
+        issues: ['SOURCE_INGESTION:registry_invalid'],
+      };
+    }
+  }
+
   const clock: Clock = systemClock;
   const executor = createDbExecutor(env.DB, { logger, clock });
-  const handlers = createJobHandlerRegistry([
-    createMaintenanceHeartbeatHandler({ executor, nowMs: () => clock.now() }) as never,
-  ]);
+  const handlers = [createMaintenanceHeartbeatHandler({ executor, nowMs: () => clock.now() }) as never];
+  if (ingestionEnabled) {
+    handlers.push(
+      createSourcePollHandler({
+        executor,
+        connectors: createConnectorRegistry(),
+        safeFetch: createSafeFetch(globalThis.fetch.bind(globalThis)),
+        idGenerator: cryptoIdGenerator,
+        secrets: (name: string) => (env as Record<string, unknown>)[name] as string | undefined,
+        nowMs: () => clock.now(),
+        random: Math.random,
+        logger,
+      }) as never,
+    );
+  }
   const engine = createJobsEngine(
     {
       executor,
-      handlers,
+      handlers: createJobHandlerRegistry(handlers),
       idGenerator: cryptoIdGenerator,
       clock,
       random: Math.random,
@@ -88,5 +147,5 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
     },
     DEFAULT_ENGINE_BOUNDS,
   );
-  return { kind: 'ready', engine };
+  return { kind: 'ready', engine, ingestionEnabled };
 }

@@ -18,7 +18,7 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.3.1",
+    "APP_VERSION": "1.4.0",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
@@ -38,6 +38,12 @@
     // a partial or ack-all path). Ships "false": no queue resources are
     // provisioned by the Phase 3 implementation pass (operator runbook only).
     "JOBS_ENABLED": "false",
+    // Phase 4 source-ingestion gate (non-secret; ADR-0038). Gates due-source
+    // scheduling and poll handlers ONLY — never the jobs engine. Ships
+    // "false" in the delivered tree (local AND preview): no source is
+    // activated by this pass; the operator runbook documents the reviewed
+    // activation procedure (gate + explicit per-source enablement).
+    "SOURCE_INGESTION_ENABLED": "false",
   },
 
   // ---------------------------------------------------------------------------
@@ -114,7 +120,7 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.3.1",
+        "APP_VERSION": "1.4.0",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
@@ -127,6 +133,10 @@
         // queue provisioning and migration 0003. Local defaults stay disabled;
         // production resources remain unprovisioned.
         "JOBS_ENABLED": "true",
+        // Phase 4 ingestion gate ships DISABLED on preview too (ADR-0038):
+        // activation is a post-review operator procedure (runbook Phase 4).
+        // The reviewed Phase 3 engine behavior is preserved unchanged.
+        "SOURCE_INGESTION_ENABLED": "false",
       },
       "d1_databases": [
         {

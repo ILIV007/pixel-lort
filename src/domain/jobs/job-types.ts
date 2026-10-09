@@ -57,12 +57,12 @@ export function isJobStatus(value: string): value is JobStatus {
 }
 
 /**
- * Registered job types (Phase 3). ONLY implemented handlers are registered
- * (ADR-0036 §7): exactly one harmless maintenance job proves the engine
- * end-to-end. Later phases APPEND their types here together with their
- * handler implementations — never before.
+ * Registered job types. ONLY implemented handlers are registered
+ * (ADR-0036 §7, ADR-0038 §1): the Phase 3 maintenance heartbeat plus the
+ * Phase 4 source poll (registered ONLY while the ingestion gate is on —
+ * an unregistered type can never be created or executed, ADR-0036 §7).
  */
-export const JOB_TYPES = ['jobs.maintenance_heartbeat'] as const;
+export const JOB_TYPES = ['jobs.maintenance_heartbeat', 'sources.fetch_poll'] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];
 
@@ -84,6 +84,9 @@ export const JOB_ERROR_CODES = [
   'job_handler_permanent_error',
   'job_handler_timeout',
   'job_internal_error',
+  // Phase 4 source ingestion (ADR-0038 §4) — stable, safe constants.
+  'ingestion_source_missing',
+  'ingestion_connector_unavailable',
 ] as const;
 
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];

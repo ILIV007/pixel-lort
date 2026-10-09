@@ -30,6 +30,14 @@
  *   an enabled engine must never half-run behind a ready banner. A DISABLED
  *   engine is the ordinary Telegram-only ready state.
  *
+ * Phase 4 readiness extension (fail-closed, ADR-0038 §1):
+ * - Any present-but-invalid SOURCE_INGESTION_ENABLED value => not_ready.
+ * - Ingestion enabled while the jobs engine is disabled/invalid =>
+ *   not_ready (`ingestion_requires_jobs`) — ingestion never half-runs.
+ * - Ingestion enabled with an invalid registry catalog => not_ready.
+ * - Ingestion DISABLED is the ordinary Phase 3 ready state (default in the
+ *   delivered tree, local AND preview).
+ *
  * Bodies are intentionally tiny and carry no configuration inventory;
  * reasons are logged as stable codes only.
  */
@@ -105,6 +113,9 @@ export async function handleHealthReady(
   // present-but-invalid flag or an ENABLED engine missing the DB/JOBS/DLQ
   // bindings is `config_invalid` and must fail readiness (503), never run
   // half-configured. A disabled engine is the ordinary ready state.
+  // Phase 4 (fail-closed, ADR-0038 §1): the ingestion gate is validated in
+  // the SAME resolution — an invalid flag, ingestion-without-jobs, or an
+  // invalid registry catalog each fail readiness; ingestion OFF is ordinary.
   const jobs = resolveJobsEngine(env, ctx.logger);
   if (jobs.kind === 'config_invalid') {
     reasons.push('jobs_config_invalid');
