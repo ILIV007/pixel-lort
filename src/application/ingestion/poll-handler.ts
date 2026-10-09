@@ -117,7 +117,11 @@ export function createSourcePollHandler(
       let config: Record<string, unknown> = {};
       try {
         const parsedConfig: unknown = JSON.parse(source.config_json);
-        if (parsedConfig !== null && typeof parsedConfig === 'object' && !Array.isArray(parsedConfig)) {
+        if (
+          parsedConfig !== null &&
+          typeof parsedConfig === 'object' &&
+          !Array.isArray(parsedConfig)
+        ) {
           config = parsedConfig as Record<string, unknown>;
         }
       } catch {
@@ -304,8 +308,7 @@ async function commitTerminalState(
     // 304: validators and cursor pass through UNCHANGED.
     cursor: fetched.cursor,
     etag: fetched.status === 'not_modified' ? source.etag : fetched.etag,
-    lastModified:
-      fetched.status === 'not_modified' ? source.last_modified : fetched.lastModified,
+    lastModified: fetched.status === 'not_modified' ? source.last_modified : fetched.lastModified,
     nextPollAtMs,
     success: fetched.status === 'changed' || fetched.status === 'not_modified',
     lastChangedAtMs: fetched.status === 'changed' ? nowMs : null,

@@ -2,13 +2,23 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
 import { applyMigrations } from '../helpers/migrations';
 import { createDbExecutor, type DbExecutor } from '../../src/adapters/db/db-executor';
-import { createJobsEngine, DEFAULT_ENGINE_BOUNDS, type JobsEngine } from '../../src/application/jobs/engine';
+import {
+  createJobsEngine,
+  DEFAULT_ENGINE_BOUNDS,
+  type JobsEngine,
+} from '../../src/application/jobs/engine';
 import { createJobHandlerRegistry } from '../../src/domain/jobs/handler';
 import { createMaintenanceHeartbeatHandler } from '../../src/application/jobs/handlers/maintenance-heartbeat';
-import { createSourcePollHandler, type SourcePollHandlerOptions } from '../../src/application/ingestion/poll-handler';
+import {
+  createSourcePollHandler,
+  type SourcePollHandlerOptions,
+} from '../../src/application/ingestion/poll-handler';
 import { scheduleDueSources } from '../../src/application/ingestion/scheduler';
 import { createConnectorRegistry } from '../../src/connectors/registry';
-import type { JobsQueueProducerPort, DlqProducerPort } from '../../src/adapters/queue/jobs-producer';
+import type {
+  JobsQueueProducerPort,
+  DlqProducerPort,
+} from '../../src/adapters/queue/jobs-producer';
 import type { QueueEnvelope } from '../../src/domain/jobs/envelope';
 import { fixedClock, type MutableClock } from '../../src/shared/time/clock';
 import { createFetchMock, connectorEffects } from '../helpers/fetch-mock';
@@ -88,7 +98,9 @@ function createHarness(options?: { random?: () => number }): Harness {
         createMaintenanceHeartbeatHandler({ executor, nowMs: () => clock.now() }) as never,
         createSourcePollHandler(handlerOptions) as never,
       ]),
-      idGenerator: { newId: () => `job-${sentEnvelopes.length}-${Math.random().toString(36).slice(2, 8)}` },
+      idGenerator: {
+        newId: () => `job-${sentEnvelopes.length}-${Math.random().toString(36).slice(2, 8)}`,
+      },
       clock,
       random: options?.random ?? (() => 0.5),
       jobsProducer,
@@ -130,7 +142,11 @@ describe('full ingestion pipeline', () => {
   it('runs due → durable job → queue body → handler → normalized items + fenced state', async () => {
     const h = createHarness();
     h.mock.setResponses([
-      { status: 200, headers: { 'content-type': 'application/rss+xml', etag: '"etag-1"' }, bodyText: VALID_FEED },
+      {
+        status: 200,
+        headers: { 'content-type': 'application/rss+xml', etag: '"etag-1"' },
+        bodyText: VALID_FEED,
+      },
     ]);
 
     // 1. First pass on an EMPTY sources table: the scheduler seeds the
@@ -186,7 +202,14 @@ describe('full ingestion pipeline', () => {
 
     // 4. Durable normalized items with dedup-clean identities.
     expect(await itemCount(h.executor, 'playstation_blog')).toBe(2);
-    const first = await h.executor.first<{ external_id: string; canonical_url: string | null; title: string; body_excerpt: string | null; published_at: number | null; content_hash: string }>({
+    const first = await h.executor.first<{
+      external_id: string;
+      canonical_url: string | null;
+      title: string;
+      body_excerpt: string | null;
+      published_at: number | null;
+      content_hash: string;
+    }>({
       sql: 'SELECT external_id, canonical_url, title, body_excerpt, published_at, content_hash FROM source_items WHERE external_id = ?',
       params: ['rss:ps-news-1'],
     });
@@ -198,7 +221,12 @@ describe('full ingestion pipeline', () => {
 
     // 5. Terminal state: schedule advanced past the hold, budget recorded.
     const state = await h.executor.first<{
-      next_poll_at: number; last_success_at: number | null; consecutive_failures: number; last_error: string | null; requests_today: number; budget_date: string;
+      next_poll_at: number;
+      last_success_at: number | null;
+      consecutive_failures: number;
+      last_error: string | null;
+      requests_today: number;
+      budget_date: string;
     }>({
       sql: 'SELECT next_poll_at, last_success_at, consecutive_failures, last_error, requests_today, budget_date FROM source_state WHERE source_id = ?',
       params: ['playstation_blog'],
@@ -222,7 +250,11 @@ describe('full ingestion pipeline', () => {
     const h = createHarness();
     await seedAndEnable(h.executor, 'playstation_blog');
     h.mock.setResponses([
-      { status: 200, headers: { 'content-type': 'application/rss+xml', etag: '"etag-1"' }, bodyText: VALID_FEED },
+      {
+        status: 200,
+        headers: { 'content-type': 'application/rss+xml', etag: '"etag-1"' },
+        bodyText: VALID_FEED,
+      },
       { status: 304 },
       { status: 304 },
     ]);
@@ -279,8 +311,11 @@ describe('full ingestion pipeline', () => {
     ]);
 
     await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     await h.engine.dispatchDueJobs();
     await h.engine.consumeMessage('msg-1', h.sentEnvelopes[0]);
@@ -288,8 +323,11 @@ describe('full ingestion pipeline', () => {
 
     h.clock.advance(6 * 60 * 1000);
     await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     await h.engine.dispatchDueJobs();
     await h.engine.consumeMessage('msg-2', h.sentEnvelopes[1]);
@@ -373,8 +411,11 @@ describe('full ingestion pipeline', () => {
     // After the hold expires the source self-heals back into the scan.
     h.clock.advance(121_000);
     const scheduled = await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     if (scheduled.kind !== 'scheduled') throw new Error('expected scheduled');
     expect(scheduled.jobsCreated).toBe(1);
@@ -390,8 +431,11 @@ describe('full ingestion pipeline', () => {
     h.mock.setResponses([{ failReason: 'network_error' }]);
 
     await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     await h.engine.dispatchDueJobs();
     const action = await h.engine.consumeMessage('msg-fail', h.sentEnvelopes[0]);
@@ -400,7 +444,10 @@ describe('full ingestion pipeline', () => {
     expect(action).toMatchObject({ action: 'ack', outcome: 'job_completed' });
 
     const state = await h.executor.first<{
-      consecutive_failures: number; last_error: string | null; next_poll_at: number; last_success_at: number | null;
+      consecutive_failures: number;
+      last_error: string | null;
+      next_poll_at: number;
+      last_success_at: number | null;
     }>({
       sql: 'SELECT consecutive_failures, last_error, next_poll_at, last_success_at FROM source_state WHERE source_id = ?',
       params: ['playstation_blog'],
@@ -428,8 +475,11 @@ describe('full ingestion pipeline', () => {
     h.mock.setResponses([{ status: 429, headers: { 'retry-after': '7200' } }]); // 2 hours
 
     await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     await h.engine.dispatchDueJobs();
     const action = await h.engine.consumeMessage('msg-429', h.sentEnvelopes[0]);
@@ -450,19 +500,28 @@ describe('full ingestion pipeline', () => {
     // Owner-supplied runtime watchlist (the registry ships an empty one).
     await h.executor.run({
       sql: 'UPDATE sources SET config_json = ? WHERE id = ?',
-      params: [JSON.stringify({ repositories: ['owner/repo-a'], includePrereleases: false }), 'github_release_watchlist'],
+      params: [
+        JSON.stringify({ repositories: ['owner/repo-a'], includePrereleases: false }),
+        'github_release_watchlist',
+      ],
     });
     h.mock.setResponses([{ status: 401 }]);
 
     await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     await h.engine.dispatchDueJobs();
     const action = await h.engine.consumeMessage('msg-401', h.sentEnvelopes[0]);
     expect(action.action).toBe('ack');
 
-    const state = await h.executor.first<{ circuit_open_until: number | null; last_error: string | null }>({
+    const state = await h.executor.first<{
+      circuit_open_until: number | null;
+      last_error: string | null;
+    }>({
       sql: 'SELECT circuit_open_until, last_error FROM source_state WHERE source_id = ?',
       params: ['github_release_watchlist'],
     });
@@ -472,8 +531,11 @@ describe('full ingestion pipeline', () => {
     // While the circuit is open, the scan selects NOTHING (no hot loop).
     h.clock.advance(60_000);
     const scheduled = await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     if (scheduled.kind !== 'scheduled') throw new Error('expected scheduled');
     expect(scheduled.jobsCreated).toBe(0);
@@ -488,8 +550,11 @@ describe('full ingestion pipeline', () => {
     });
 
     await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     await h.engine.dispatchDueJobs();
     const action = await h.engine.consumeMessage('msg-budget', h.sentEnvelopes[0]);
@@ -497,7 +562,11 @@ describe('full ingestion pipeline', () => {
 
     // NO network call happened.
     expect(h.mock.calls).toHaveLength(0);
-    const state = await h.executor.first<{ last_error: string | null; consecutive_failures: number; next_poll_at: number }>({
+    const state = await h.executor.first<{
+      last_error: string | null;
+      consecutive_failures: number;
+      next_poll_at: number;
+    }>({
       sql: 'SELECT last_error, consecutive_failures, next_poll_at FROM source_state WHERE source_id = ?',
       params: ['playstation_blog'],
     });
@@ -512,8 +581,11 @@ describe('full ingestion pipeline', () => {
     await seedAndEnable(h.executor, 'steam_news_watchlist'); // registry ships NO app watchlist
 
     const scheduled = await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     if (scheduled.kind !== 'scheduled') throw new Error('expected scheduled');
     expect(scheduled.jobsCreated).toBe(0);
@@ -534,11 +606,17 @@ describe('full ingestion pipeline', () => {
     if (!registry.ok) throw new Error('registry invalid');
     await seedSourcesFromRegistry(h.executor, registry.registry, NOW);
     // Hostile direct enablement of an unimplemented connector.
-    await h.executor.run({ sql: 'UPDATE sources SET enabled = 1 WHERE id = ?', params: ['bluesky_watchlist'] });
+    await h.executor.run({
+      sql: 'UPDATE sources SET enabled = 1 WHERE id = ?',
+      params: ['bluesky_watchlist'],
+    });
 
     const scheduled = await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     if (scheduled.kind !== 'scheduled') throw new Error('expected scheduled');
     expect(scheduled.jobsCreated).toBe(0);
@@ -560,14 +638,21 @@ describe('full ingestion pipeline', () => {
 
     // TWO overlapping scheduling passes on the SAME state.
     const pass1 = await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     const pass2 = await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
-    if (pass1.kind !== 'scheduled' || pass2.kind !== 'scheduled') throw new Error('expected scheduled');
+    if (pass1.kind !== 'scheduled' || pass2.kind !== 'scheduled')
+      throw new Error('expected scheduled');
     expect(pass1.jobsCreated).toBe(1);
     expect(pass2.jobsCreated).toBe(0); // SAME window key → idempotent absorb
 
@@ -580,8 +665,11 @@ describe('full ingestion pipeline', () => {
     // A LATER legitimate poll advances the window → a FRESH key.
     h.clock.advance(6 * 60 * 1000);
     const pass3 = await scheduleDueSources({
-      executor: h.executor, engine: h.engine, connectors: createConnectorRegistry(),
-      secrets: () => undefined, nowMs: h.clock.now(),
+      executor: h.executor,
+      engine: h.engine,
+      connectors: createConnectorRegistry(),
+      secrets: () => undefined,
+      nowMs: h.clock.now(),
     });
     if (pass3.kind !== 'scheduled') throw new Error('expected scheduled');
     expect(pass3.jobsCreated).toBe(1);
@@ -592,17 +680,23 @@ describe('gate-off preserves Phase 3 behavior', () => {
   it('a delivered poll envelope with NO registered handler is poisoned, not executed', async () => {
     const h = createHarness();
     // Simulate the gate-off deployment: only the Phase 3 handler set.
-    const engine = createJobsEngine({
-      executor: h.executor,
-      handlers: createJobHandlerRegistry([
-        createMaintenanceHeartbeatHandler({ executor: h.executor, nowMs: () => h.clock.now() }) as never,
-      ]),
-      idGenerator: { newId: () => `job-${Math.random().toString(36).slice(2, 8)}` },
-      clock: h.clock,
-      random: () => 0.5,
-      jobsProducer: { send: async () => {} },
-      dlqProducer: { send: async () => {} },
-    }, DEFAULT_ENGINE_BOUNDS);
+    const engine = createJobsEngine(
+      {
+        executor: h.executor,
+        handlers: createJobHandlerRegistry([
+          createMaintenanceHeartbeatHandler({
+            executor: h.executor,
+            nowMs: () => h.clock.now(),
+          }) as never,
+        ]),
+        idGenerator: { newId: () => `job-${Math.random().toString(36).slice(2, 8)}` },
+        clock: h.clock,
+        random: () => 0.5,
+        jobsProducer: { send: async () => {} },
+        dlqProducer: { send: async () => {} },
+      },
+      DEFAULT_ENGINE_BOUNDS,
+    );
 
     const action = await engine.consumeMessage('msg-stray', {
       version: 1,

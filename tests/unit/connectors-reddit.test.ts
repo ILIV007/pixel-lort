@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createRedditOauthConnector, RedditRuntimeConfigSchema } from '../../src/connectors/reddit-oauth';
+import {
+  createRedditOauthConnector,
+  RedditRuntimeConfigSchema,
+} from '../../src/connectors/reddit-oauth';
 import { createFetchMock, connectorEffects } from '../helpers/fetch-mock';
 
 /**
@@ -54,12 +57,18 @@ describe('reddit connector — preflight', () => {
       ok: false,
       reason: 'watchlist_empty',
     });
-    expect(connector.preflight(CONFIG, (name: string) => (SECRETS as Record<string, string>)[name])).toEqual({ ok: true });
+    expect(
+      connector.preflight(CONFIG, (name: string) => (SECRETS as Record<string, string>)[name]),
+    ).toEqual({ ok: true });
   });
 
   it('rejects invalid subreddit identifiers (no template injection)', () => {
-    expect(RedditRuntimeConfigSchema.safeParse({ subreddits: ['ok/sub'], limit: 25 }).success).toBe(false);
-    expect(RedditRuntimeConfigSchema.safeParse({ subreddits: ['..'], limit: 25 }).success).toBe(false);
+    expect(RedditRuntimeConfigSchema.safeParse({ subreddits: ['ok/sub'], limit: 25 }).success).toBe(
+      false,
+    );
+    expect(RedditRuntimeConfigSchema.safeParse({ subreddits: ['..'], limit: 25 }).success).toBe(
+      false,
+    );
   });
 
   it('plans 1 token + N listing requests', () => {
@@ -93,7 +102,9 @@ describe('reddit connector — fetch contract', () => {
 
     // Listing call: GET on oauth.reddit.com with the Bearer token.
     expect(mock.calls[1]?.method).toBe('GET');
-    expect(mock.calls[1]?.url).toBe('https://oauth.reddit.com/r/CrackWatch/new?limit=25&raw_json=1');
+    expect(mock.calls[1]?.url).toBe(
+      'https://oauth.reddit.com/r/CrackWatch/new?limit=25&raw_json=1',
+    );
     expect(mock.calls[1]?.headers['authorization']).toBe('Bearer test-access-token');
 
     expect(result.items).toHaveLength(2);

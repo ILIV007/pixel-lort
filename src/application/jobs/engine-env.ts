@@ -119,7 +119,9 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
 
   const clock: Clock = systemClock;
   const executor = createDbExecutor(env.DB, { logger, clock });
-  const handlers = [createMaintenanceHeartbeatHandler({ executor, nowMs: () => clock.now() }) as never];
+  const handlers = [
+    createMaintenanceHeartbeatHandler({ executor, nowMs: () => clock.now() }) as never,
+  ];
   if (ingestionEnabled) {
     handlers.push(
       createSourcePollHandler({

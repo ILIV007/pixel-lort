@@ -111,7 +111,10 @@ export function createYoutubePlaylistsConnector(): SourceConnector {
       let requestCount = 0;
       let malformed = 0;
 
-      for (const playlistId of parsedConfig.data.playlists.slice(0, RUNTIME_CONFIG_BOUNDS.maxYoutubePlaylists)) {
+      for (const playlistId of parsedConfig.data.playlists.slice(
+        0,
+        RUNTIME_CONFIG_BOUNDS.maxYoutubePlaylists,
+      )) {
         const url =
           `${PLAYLIST_ITEMS_ENDPOINT}?part=snippet,contentDetails` +
           `&playlistId=${encodeURIComponent(playlistId)}&maxResults=${MAX_PAGE_ITEMS}`;
@@ -162,7 +165,10 @@ export function createYoutubePlaylistsConnector(): SourceConnector {
 
       if (videoIds.length > 0) {
         // ONE bounded videos-details call (up to MAX_PAGE_ITEMS ids).
-        const ids = videoIds.slice(0, MAX_PAGE_ITEMS).map((id) => encodeURIComponent(id)).join(',');
+        const ids = videoIds
+          .slice(0, MAX_PAGE_ITEMS)
+          .map((id) => encodeURIComponent(id))
+          .join(',');
         const detailsUrl = `${VIDEOS_ENDPOINT}?part=snippet,contentDetails&id=${ids}&maxResults=${MAX_PAGE_ITEMS}`;
         const detailsResponse = await effects.safeFetch({
           url: detailsUrl,

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createYoutubePlaylistsConnector, YoutubeRuntimeConfigSchema } from '../../src/connectors/youtube-playlists';
+import {
+  createYoutubePlaylistsConnector,
+  YoutubeRuntimeConfigSchema,
+} from '../../src/connectors/youtube-playlists';
 import { createFetchMock, connectorEffects } from '../helpers/fetch-mock';
 
 /**
@@ -28,24 +31,35 @@ const PLAYLIST_RESPONSE = JSON.stringify({
 });
 
 const VIDEOS_RESPONSE = JSON.stringify({
-  items: [{ id: 'vid1', snippet: { publishedAt: '2025-10-06T09:59:59Z', channelTitle: 'Game Channel' } }],
+  items: [
+    { id: 'vid1', snippet: { publishedAt: '2025-10-06T09:59:59Z', channelTitle: 'Game Channel' } },
+  ],
 });
 
 describe('youtube connector — policy pins', () => {
   it('rejects runtime config that enables the search endpoint or downloads', () => {
     expect(
-      YoutubeRuntimeConfigSchema.safeParse({ useSearchEndpoint: true, downloadVideo: false, playlists: ['PLx1234567890'] })
-        .success,
+      YoutubeRuntimeConfigSchema.safeParse({
+        useSearchEndpoint: true,
+        downloadVideo: false,
+        playlists: ['PLx1234567890'],
+      }).success,
     ).toBe(false);
     expect(
-      YoutubeRuntimeConfigSchema.safeParse({ useSearchEndpoint: false, downloadVideo: true, playlists: ['PLx1234567890'] })
-        .success,
+      YoutubeRuntimeConfigSchema.safeParse({
+        useSearchEndpoint: false,
+        downloadVideo: true,
+        playlists: ['PLx1234567890'],
+      }).success,
     ).toBe(false);
   });
 
   it('blocks an empty watchlist and missing credentials separately', () => {
     const connector = createYoutubePlaylistsConnector();
-    const empty = connector.preflight({ useSearchEndpoint: false, downloadVideo: false, playlists: [] }, () => 'k');
+    const empty = connector.preflight(
+      { useSearchEndpoint: false, downloadVideo: false, playlists: [] },
+      () => 'k',
+    );
     expect(empty).toMatchObject({ ok: false, reason: 'watchlist_empty' });
     const noKey = connector.preflight(CONFIG, () => undefined);
     expect(noKey).toMatchObject({ ok: false, reason: 'credentials_missing' });
@@ -128,7 +142,9 @@ describe('youtube connector — fetch contract', () => {
   });
 
   it('fails safe on malformed JSON', async () => {
-    const mock = createFetchMock([{ status: 200, headers: { 'content-type': 'application/json' }, bodyText: 'nope' }]);
+    const mock = createFetchMock([
+      { status: 200, headers: { 'content-type': 'application/json' }, bodyText: 'nope' },
+    ]);
     const connector = createYoutubePlaylistsConnector();
     const result = await connector.fetch({
       sourceId: SOURCE_ID,

@@ -54,8 +54,7 @@ export async function scanDueSources(
 }
 
 export type PollReservation =
-  | { readonly kind: 'reserved'; readonly holdUntilMs: number }
-  | { readonly kind: 'not_owner' };
+  { readonly kind: 'reserved'; readonly holdUntilMs: number } | { readonly kind: 'not_owner' };
 
 /**
  * Atomically reserve the poll window: advance the scanned due marker

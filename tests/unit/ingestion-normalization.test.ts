@@ -59,7 +59,9 @@ describe('canonicalizeItemUrl', () => {
 
 describe('htmlToPlainText', () => {
   it('strips tags and decodes bounded entities', () => {
-    expect(htmlToPlainText('<p>Hello <b>world</b> &amp; friends</p>')).toBe('Hello world & friends');
+    expect(htmlToPlainText('<p>Hello <b>world</b> &amp; friends</p>')).toBe(
+      'Hello world & friends',
+    );
   });
 
   it('removes script and style content entirely', () => {
@@ -133,13 +135,28 @@ describe('computeContentHash / synthesizedExternalId', () => {
   });
 
   it('differs when semantic content differs', async () => {
-    const a = await computeContentHash({ title: 'T', excerpt: 'E', publishedAtMs: 5, canonicalUrl: 'https://x/a' });
-    const b = await computeContentHash({ title: 'T2', excerpt: 'E', publishedAtMs: 5, canonicalUrl: 'https://x/a' });
+    const a = await computeContentHash({
+      title: 'T',
+      excerpt: 'E',
+      publishedAtMs: 5,
+      canonicalUrl: 'https://x/a',
+    });
+    const b = await computeContentHash({
+      title: 'T2',
+      excerpt: 'E',
+      publishedAtMs: 5,
+      canonicalUrl: 'https://x/a',
+    });
     expect(a).not.toBe(b);
   });
 
   it('synthesizes a bounded deterministic external id', async () => {
-    const hash = await computeContentHash({ title: 'T', excerpt: null, publishedAtMs: null, canonicalUrl: null });
+    const hash = await computeContentHash({
+      title: 'T',
+      excerpt: null,
+      publishedAtMs: null,
+      canonicalUrl: null,
+    });
     const id = synthesizedExternalId('rss', hash);
     expect(id).toMatch(/^rss:c:[0-9a-f]{16}$/);
   });

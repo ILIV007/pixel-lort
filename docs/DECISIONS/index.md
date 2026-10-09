@@ -65,3 +65,5 @@ ADR is written only when a decision is actually made.
 - [ADR-0035 — Admin UI language ordering by Telegram message metadata](adr-0035-admin-ui-language-ordering.md)
 - [ADR-0036 — Durable job/queue engine (lifecycle, fencing, dispatch, retry, DLQ)](adr-0036-job-queue-engine.md)
 - [ADR-0037 — Phase 3 review corrections (wire contract, attempt budget, strict gating)](adr-0037-phase3-review-corrections.md)
+- [ADR-0038 — Source ingestion pipeline (registry, scheduling, poll ownership, deduplication, budgets)](adr-0038-source-ingestion-pipeline.md)
+- [ADR-0039 — Connector family contracts, safe HTTP, safe XML, and normalization](adr-0039-connector-contracts-safe-http.md)

@@ -36,16 +36,17 @@ Failures ──────────► retry_wait/D1 ──────► p
 The Phase Packet fixed the repository source layout; the blueprint module
 boundaries map onto it as follows:
 
-| Repository layout   | Blueprint boundary                                                  | Status                       |
-| ------------------- | ------------------------------------------------------------------- | ---------------------------- |
-| `src/entrypoints`   | `interfaces/*` (webhook, queue, cron)                               | **implemented (skeleton)**   |
-| `src/domain`        | `domain/*` (story, editorial, publication, source, media, identity) | planned                      |
-| `src/application`   | `application/*` (commands, queries, workflows)                      | planned                      |
-| `src/adapters`      | `infrastructure/*` + `connectors/*`                                 | **db boundary (Phase 1A)**   |
-| `src/editorial`     | rendering, Persian normalization, prompt contracts                  | planned                      |
-| `src/admin`         | private Telegram screens, RBAC, sessions                            | planned                      |
-| `src/observability` | logging, redaction, correlation                                     | **implemented (foundation)** |
-| `src/shared`        | cross-cutting primitives (errors, config, ids, clock)               | **implemented (foundation)** |
+| Repository layout   | Blueprint boundary                                                  | Status                                          |
+| ------------------- | ------------------------------------------------------------------- | ----------------------------------------------- |
+| `src/entrypoints`   | `interfaces/*` (webhook, queue, cron)                               | **implemented (skeleton)**                      |
+| `src/domain`        | `domain/*` (story, editorial, publication, source, media, identity) | **source types + registry (Phase 4)**           |
+| `src/application`   | `application/*` (commands, queries, workflows)                      | **jobs engine (Phase 3) + ingestion (Phase 4)** |
+| `src/connectors`    | `connectors/*` (one connector implementation per source family)     | **five families (Phase 4)**                     |
+| `src/adapters`      | `infrastructure/*`                                                  | **db boundary + queue producers**               |
+| `src/editorial`     | rendering, Persian normalization, prompt contracts                  | planned                                         |
+| `src/admin`         | private Telegram screens, RBAC, sessions                            | **auth/commands/HTML (Phase 2A+)**              |
+| `src/observability` | logging, redaction, correlation                                     | **implemented (foundation)**                    |
+| `src/shared`        | cross-cutting primitives (errors, config, ids, clock)               | **implemented (foundation + safe HTTP)**        |
 
 Standing boundary rule (blueprint §3): domain code imports no Cloudflare,
 Telegram, provider SDK, or HTTP client types.
@@ -269,16 +270,34 @@ payload) and never echo rejected values.
   migrations atomically through `tests/helpers/migrations.ts` (statement
   split + `db.batch`, since D1 `exec` cannot run multi-line statements);
   unit tests call handlers directly with typed mocks.
-- No test performs a real network request.
+- No test performs a real network request. Connector contract tests script
+  a SafeFetch fake (`tests/helpers/fetch-mock.ts`); the full ingestion
+  pipeline test drives the REAL engine + poll handler against a scripted
+  source HTTP surface and verifies durable D1 effects.
 
-## 5. Non-goals in Phase 1A
+## 5. Source ingestion pipeline (Phase 4 — ADR-0038/0039)
+
+Cron (gate-gated) performs ONE bounded indexed due-source scan and creates
+durable `sources.fetch_poll` jobs (deterministic window idempotency keys,
+atomic reservation holds) — it NEVER fetches inline. The ACCEPTED Phase 3
+engine dispatches/consumes unchanged; the poll handler registers ONLY while
+`SOURCE_INGESTION_ENABLED` is 'true'. One handler execution = ONE bounded
+poll attempt: pre-flight (implemented + configured + credentials) → atomic
+budget reservation (budgets table, Asia/Tehran day) → safe HTTP via the
+connector (allowlisted hosts, bounded reading, manual redirects) →
+normalization → ONE atomic guarded D1 batch (item inserts `OR IGNORE` +
+fenced terminal state). Provider-side retry pacing lives in
+`source_state` (adaptive backoff ±10% jitter, Retry-After floor, 401/403
+circuit); the job-retry path stays Phase-3 (infrastructure only).
+
+## 6. Non-goals in Phase 1A
 
 Source connectors, story/evidence engine, AI adapters, renderer, media
 pipeline, publisher, Telegram admin panel, D1 repositories/business queries,
 deployments, Cloudflare resource creation, webhook registration, remote
 migrations — all planned, none implemented.
 
-## 6. Non-goals in Phase 2A
+## 7. Non-goals in Phase 2A
 
 No Telegram credentials exist and none are configured in Cloudflare; the
 ingress flag ships `false` everywhere. No webhook registration, no live

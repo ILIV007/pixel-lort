@@ -75,7 +75,10 @@ describe('guardFetchUrl — literal layer', () => {
       '224.0.0.1', // multicast
       '0.0.0.0',
     ]) {
-      expect(guardFetchUrl(`https://${host}/`)).toMatchObject({ ok: false, reason: 'ip_literal_forbidden' });
+      expect(guardFetchUrl(`https://${host}/`)).toMatchObject({
+        ok: false,
+        reason: 'ip_literal_forbidden',
+      });
     }
   });
 

@@ -35,7 +35,13 @@ describe('seedSourcesFromRegistry', () => {
     expect(summary.total).toBe(14);
     expect(summary.written).toBe(14);
 
-    const sources = await executor.query<{ id: string; connector: string; enabled: number; interval_seconds: number; config_json: string }>({
+    const sources = await executor.query<{
+      id: string;
+      connector: string;
+      enabled: number;
+      interval_seconds: number;
+      config_json: string;
+    }>({
       sql: 'SELECT id, connector, enabled, interval_seconds, config_json FROM sources ORDER BY id',
     });
     expect(sources.rows).toHaveLength(14);
@@ -80,7 +86,11 @@ describe('seedSourcesFromRegistry', () => {
     const second = await seedSourcesFromRegistry(executor, registry.registry, NOW + 1000);
     expect(second.total).toBe(14);
 
-    const playstation = await executor.first<{ enabled: number; priority: number; interval_seconds: number }>({
+    const playstation = await executor.first<{
+      enabled: number;
+      priority: number;
+      interval_seconds: number;
+    }>({
       sql: 'SELECT enabled, priority, interval_seconds FROM sources WHERE id = ?',
       params: ['playstation_blog'],
     });

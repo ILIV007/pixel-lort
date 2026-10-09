@@ -44,7 +44,12 @@ export interface ScheduleDueSourcesDeps {
 }
 
 export type ScheduleOutcome =
-  | { readonly kind: 'scheduled'; readonly jobsCreated: number; readonly blockedSkipped: number; readonly seeded: boolean }
+  | {
+      readonly kind: 'scheduled';
+      readonly jobsCreated: number;
+      readonly blockedSkipped: number;
+      readonly seeded: boolean;
+    }
   | { readonly kind: 'registry_invalid' }
   | { readonly kind: 'failed'; readonly errorCode: 'internal_error' };
 
@@ -52,9 +57,7 @@ export type ScheduleOutcome =
  * One bounded scheduling pass. Never throws for domain conditions — the
  * cron entrypoint wraps storage failures with a stable code.
  */
-export async function scheduleDueSources(
-  deps: ScheduleDueSourcesDeps,
-): Promise<ScheduleOutcome> {
+export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<ScheduleOutcome> {
   const { executor, engine, connectors, secrets, nowMs, logger } = deps;
 
   // Registry validation (fail safe — an invalid catalog disables the pass).

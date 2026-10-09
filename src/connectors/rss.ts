@@ -52,7 +52,8 @@ function parseCursor(cursor: string | null): FeedCursor {
         const entry = value as Record<string, unknown>;
         out[key] = {
           etag: typeof entry.etag === 'string' ? entry.etag.slice(0, 256) : null,
-          lastModified: typeof entry.lastModified === 'string' ? entry.lastModified.slice(0, 128) : null,
+          lastModified:
+            typeof entry.lastModified === 'string' ? entry.lastModified.slice(0, 128) : null,
         };
       }
     }
@@ -86,7 +87,9 @@ export function createRssConnector(): SourceConnector {
     plannedRequestCount(config: Record<string, unknown>): number {
       return Math.max(1, feedUrls(config).length);
     },
-    preflight(config: Record<string, unknown>): { ok: true } | { ok: false; reason: 'watchlist_empty' } {
+    preflight(
+      config: Record<string, unknown>,
+    ): { ok: true } | { ok: false; reason: 'watchlist_empty' } {
       return feedUrls(config).length > 0 ? { ok: true } : { ok: false, reason: 'watchlist_empty' };
     },
     allowedHosts(config: Record<string, unknown>): readonly string[] {
@@ -124,7 +127,8 @@ export function createRssConnector(): SourceConnector {
       for (const feedUrl of urls) {
         const entry = cursor[feedUrl] ?? { etag: null, lastModified: null };
         const headers: Record<string, string> = {
-          accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
+          accept:
+            'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
           'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellort)',
         };
         // Conditional GET: BOTH validators when available (blueprint §8).

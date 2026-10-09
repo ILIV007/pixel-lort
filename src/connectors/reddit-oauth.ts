@@ -24,7 +24,10 @@ import { z } from 'zod';
 
 export const RedditRuntimeConfigSchema = z
   .object({
-    subreddits: z.array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_]{1,20}$/)).min(1).max(10),
+    subreddits: z
+      .array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_]{1,20}$/))
+      .min(1)
+      .max(10),
     limit: z.number().int().min(1).max(50),
     stripDownloadLinks: z.boolean().optional(),
   })
@@ -165,10 +168,7 @@ export function createRedditOauthConnector(): SourceConnector {
         RUNTIME_CONFIG_BOUNDS.maxRedditSubreddits,
       )) {
         // Template materialization: validated identifier ONLY.
-        const listingUrl = LISTING_TEMPLATE.replace(
-          '{subreddit}',
-          encodeURIComponent(subreddit),
-        );
+        const listingUrl = LISTING_TEMPLATE.replace('{subreddit}', encodeURIComponent(subreddit));
         const url = `${listingUrl}?limit=${parsedConfig.data.limit}&raw_json=1`;
         const response = await effects.safeFetch({
           url,

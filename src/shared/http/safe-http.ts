@@ -123,8 +123,11 @@ export function createSafeFetch(fetchFn: typeof fetch): SafeFetchExecutor {
       // Method/body: POST carries a bounded body on the FIRST hop only;
       // redirect hops always degrade to GET (never re-POST elsewhere).
       const isPost = hop === 0 && input.method === 'POST';
-      const body: string | undefined = isPost ? input.body ?? '' : undefined;
-      if (isPost && (body === undefined || body.length === 0 || body.length > MAX_REQUEST_BODY_BYTES)) {
+      const body: string | undefined = isPost ? (input.body ?? '') : undefined;
+      if (
+        isPost &&
+        (body === undefined || body.length === 0 || body.length > MAX_REQUEST_BODY_BYTES)
+      ) {
         return { ok: false, reason: 'network_error', requestCount };
       }
 
@@ -247,9 +250,7 @@ export function createSafeFetch(fetchFn: typeof fetch): SafeFetchExecutor {
   };
 }
 
-export type SafeFetchExecutor = (
-  input: SafeFetchInput,
-) => Promise<SafeFetchResult>;
+export type SafeFetchExecutor = (input: SafeFetchInput) => Promise<SafeFetchResult>;
 
 /**
  * Read a response body up to `maxBytes` with an ABSOLUTE deadline

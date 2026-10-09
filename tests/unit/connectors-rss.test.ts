@@ -45,7 +45,9 @@ describe('rss connector — preflight and planning', () => {
 
   it('supports bounded endpointTemplates lists', () => {
     const connector = rssConnector();
-    const config = { endpointTemplates: ['https://a.example/feed.xml', 'https://b.example/feed.xml'] };
+    const config = {
+      endpointTemplates: ['https://a.example/feed.xml', 'https://b.example/feed.xml'],
+    };
     expect(connector.preflight(config, () => undefined)).toEqual({ ok: true });
     expect(connector.plannedRequestCount(config)).toBe(2);
   });
@@ -53,7 +55,9 @@ describe('rss connector — preflight and planning', () => {
 
 describe('rss connector — fetch contract', () => {
   it('sends BOTH conditional validators when the cursor holds them', async () => {
-    const mock = createFetchMock([{ status: 200, headers: { 'content-type': 'application/rss+xml' }, bodyText: VALID_FEED }]);
+    const mock = createFetchMock([
+      { status: 200, headers: { 'content-type': 'application/rss+xml' }, bodyText: VALID_FEED },
+    ]);
     const connector = rssConnector();
     const result = await connector.fetch({
       sourceId: SOURCE_ID,
@@ -61,7 +65,9 @@ describe('rss connector — fetch contract', () => {
       state: {
         etag: '"etag-1"',
         lastModified: 'Mon, 06 Oct 2025 09:00:00 GMT',
-        cursor: JSON.stringify({ [ENDPOINT]: { etag: '"etag-1"', lastModified: 'Mon, 06 Oct 2025 09:00:00 GMT' } }),
+        cursor: JSON.stringify({
+          [ENDPOINT]: { etag: '"etag-1"', lastModified: 'Mon, 06 Oct 2025 09:00:00 GMT' },
+        }),
       },
       effects: connectorEffects(mock.fetchFn),
     });
@@ -74,7 +80,11 @@ describe('rss connector — fetch contract', () => {
     const mock = createFetchMock([
       {
         status: 200,
-        headers: { 'content-type': 'application/rss+xml', etag: '"e2"', 'last-modified': 'Tue, 07 Oct 2025 09:00:00 GMT' },
+        headers: {
+          'content-type': 'application/rss+xml',
+          etag: '"e2"',
+          'last-modified': 'Tue, 07 Oct 2025 09:00:00 GMT',
+        },
         bodyText: VALID_FEED,
       },
     ]);
@@ -105,7 +115,9 @@ describe('rss connector — fetch contract', () => {
   });
 
   it('normalizes changed feed items through the shared module', async () => {
-    const mock = createFetchMock([{ status: 200, headers: { 'content-type': 'text/xml' }, bodyText: VALID_FEED }]);
+    const mock = createFetchMock([
+      { status: 200, headers: { 'content-type': 'text/xml' }, bodyText: VALID_FEED },
+    ]);
     const connector = rssConnector();
     const result = await connector.fetch({
       sourceId: SOURCE_ID,
@@ -121,9 +133,14 @@ describe('rss connector — fetch contract', () => {
   });
 
   it('caps items per feed at the bounded limit (keeps newest)', async () => {
-    const items = Array.from({ length: 150 }, (_, i) => `<item><title>t${i}</title><guid>g${i}</guid></item>`).join('');
+    const items = Array.from(
+      { length: 150 },
+      (_, i) => `<item><title>t${i}</title><guid>g${i}</guid></item>`,
+    ).join('');
     const feed = `<rss><channel>${items}</channel></rss>`;
-    const mock = createFetchMock([{ status: 200, headers: { 'content-type': 'application/xml' }, bodyText: feed }]);
+    const mock = createFetchMock([
+      { status: 200, headers: { 'content-type': 'application/xml' }, bodyText: feed },
+    ]);
     const connector = rssConnector();
     const result = await connector.fetch({
       sourceId: SOURCE_ID,
@@ -137,7 +154,13 @@ describe('rss connector — fetch contract', () => {
   });
 
   it('fails safe on malformed XML with a stable reason', async () => {
-    const mock = createFetchMock([{ status: 200, headers: { 'content-type': 'application/xml' }, bodyText: '<rss><channel><item>' }]);
+    const mock = createFetchMock([
+      {
+        status: 200,
+        headers: { 'content-type': 'application/xml' },
+        bodyText: '<rss><channel><item>',
+      },
+    ]);
     const connector = rssConnector();
     const result = await connector.fetch({
       sourceId: SOURCE_ID,
@@ -150,7 +173,9 @@ describe('rss connector — fetch contract', () => {
   });
 
   it('rejects unexpected content types', async () => {
-    const mock = createFetchMock([{ status: 200, headers: { 'content-type': 'text/html' }, bodyText: '<html></html>' }]);
+    const mock = createFetchMock([
+      { status: 200, headers: { 'content-type': 'text/html' }, bodyText: '<html></html>' },
+    ]);
     const connector = rssConnector();
     const result = await connector.fetch({
       sourceId: SOURCE_ID,
@@ -189,7 +214,9 @@ describe('rss connector — fetch contract', () => {
   });
 
   it('keeps other feeds’ items when one feed of a template list fails', async () => {
-    const config = { endpointTemplates: ['https://a.example/feed.xml', 'https://b.example/feed.xml'] };
+    const config = {
+      endpointTemplates: ['https://a.example/feed.xml', 'https://b.example/feed.xml'],
+    };
     const mock = createFetchMock([
       { status: 200, headers: { 'content-type': 'application/xml' }, bodyText: VALID_FEED },
       { failReason: 'timeout' },
@@ -207,7 +234,9 @@ describe('rss connector — fetch contract', () => {
   });
 
   it('never sends credentials for RSS (no secret interaction)', async () => {
-    const mock = createFetchMock([{ status: 200, headers: { 'content-type': 'application/xml' }, bodyText: VALID_FEED }]);
+    const mock = createFetchMock([
+      { status: 200, headers: { 'content-type': 'application/xml' }, bodyText: VALID_FEED },
+    ]);
     const connector = rssConnector();
     await connector.fetch({
       sourceId: SOURCE_ID,

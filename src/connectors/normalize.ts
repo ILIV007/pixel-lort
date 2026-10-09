@@ -77,9 +77,14 @@ export function canonicalizeItemUrl(rawUrl: string): CanonicalUrlResult {
       kept.push([name, value]);
     }
   }
-  kept.sort((a, b) => (a[0] === b[0] ? (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0) : a[0] < b[0] ? -1 : 1));
+  kept.sort((a, b) =>
+    a[0] === b[0] ? (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0) : a[0] < b[0] ? -1 : 1,
+  );
 
-  const search = kept.length === 0 ? '' : `?${kept.map(([n, v]) => `${encodeURIComponent(n)}=${encodeURIComponent(v)}`).join('&')}`;
+  const search =
+    kept.length === 0
+      ? ''
+      : `?${kept.map(([n, v]) => `${encodeURIComponent(n)}=${encodeURIComponent(v)}`).join('&')}`;
   // Preserve the path exactly (case and trailing slash semantics).
   const canonical = `https://${parsed.hostname.toLowerCase()}${parsed.pathname}${search}`;
   return { ok: true, canonical };
@@ -129,11 +134,15 @@ function decodeBoundedEntities(input: string): string {
   return input.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, body: string) => {
     if (body.startsWith('#x') || body.startsWith('#X')) {
       const code = Number.parseInt(body.slice(2), 16);
-      return Number.isInteger(code) && code >= 32 && code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
+      return Number.isInteger(code) && code >= 32 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : ' ';
     }
     if (body.startsWith('#')) {
       const code = Number.parseInt(body.slice(1), 10);
-      return Number.isInteger(code) && code >= 32 && code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
+      return Number.isInteger(code) && code >= 32 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : ' ';
     }
     const mapped = NAMED_ENTITIES[body.toLowerCase()];
     return mapped ?? match; // unknown named entity stays literal
@@ -186,10 +195,7 @@ export async function computeContentHash(parts: {
 }
 
 /** Deterministic synthesized external id for feeds without stable ids. */
-export function synthesizedExternalId(
-  connector: string,
-  contentHash: string,
-): string {
+export function synthesizedExternalId(connector: string, contentHash: string): string {
   return `${connector}:c:${contentHash.slice(0, 16)}`;
 }
 
@@ -280,7 +286,8 @@ export async function normalizeRawItem(input: {
     bodyText = stripped.text;
     strippedCount = stripped.count;
   }
-  const excerpt = bodyText === '' ? null : truncateBounded(bodyText, INGESTION_LIMITS.excerptMaxChars);
+  const excerpt =
+    bodyText === '' ? null : truncateBounded(bodyText, INGESTION_LIMITS.excerptMaxChars);
 
   const titleSource = raw.title === null ? '' : htmlToPlainText(raw.title);
   if (titleSource === '') {

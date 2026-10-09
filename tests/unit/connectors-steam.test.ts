@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createSteamNewsConnector, SteamRuntimeConfigSchema } from '../../src/connectors/steam-news';
+import {
+  createSteamNewsConnector,
+  SteamRuntimeConfigSchema,
+} from '../../src/connectors/steam-news';
 import { createFetchMock, connectorEffects } from '../helpers/fetch-mock';
 
 /**
@@ -36,11 +39,15 @@ const STEAM_RESPONSE = JSON.stringify({
 describe('steam-news connector — preflight', () => {
   it('blocks an empty watchlist with a stable reason', () => {
     const connector = createSteamNewsConnector();
-    expect(connector.preflight({ appsPerBatch: 10, maxItemsPerApp: 3, apps: [] }, () => undefined)).toMatchObject({
+    expect(
+      connector.preflight({ appsPerBatch: 10, maxItemsPerApp: 3, apps: [] }, () => undefined),
+    ).toMatchObject({
       ok: false,
       reason: 'watchlist_empty',
     });
-    expect(connector.plannedRequestCount({ appsPerBatch: 10, maxItemsPerApp: 3, apps: [] })).toBe(0);
+    expect(connector.plannedRequestCount({ appsPerBatch: 10, maxItemsPerApp: 3, apps: [] })).toBe(
+      0,
+    );
   });
 
   it('accepts a configured watchlist and plans per-app requests', () => {
@@ -52,7 +59,8 @@ describe('steam-news connector — preflight', () => {
   it('rejects invalid runtime config shapes', () => {
     expect(SteamRuntimeConfigSchema.safeParse({ appsPerBatch: 'x' }).success).toBe(false);
     expect(
-      SteamRuntimeConfigSchema.safeParse({ appsPerBatch: 5, maxItemsPerApp: 3, apps: [-1] }).success,
+      SteamRuntimeConfigSchema.safeParse({ appsPerBatch: 5, maxItemsPerApp: 3, apps: [-1] })
+        .success,
     ).toBe(false);
   });
 });
@@ -61,7 +69,11 @@ describe('steam-news connector — fetch contract', () => {
   it('requests the documented v2 endpoint per app and normalizes items', async () => {
     const mock = createFetchMock([
       { status: 200, headers: { 'content-type': 'application/json' }, bodyText: STEAM_RESPONSE },
-      { status: 200, headers: { 'content-type': 'application/json' }, bodyText: JSON.stringify({ appnews: { appid: 440, newsitems: [] } }) },
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        bodyText: JSON.stringify({ appnews: { appid: 440, newsitems: [] } }),
+      },
     ]);
     const connector = createSteamNewsConnector();
     const result = await connector.fetch({
@@ -72,7 +84,9 @@ describe('steam-news connector — fetch contract', () => {
     });
     expect(result.status).toBe('changed');
     expect(result.requestCount).toBe(2);
-    expect(mock.calls[0]?.url).toContain('api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=570&count=3');
+    expect(mock.calls[0]?.url).toContain(
+      'api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=570&count=3',
+    );
     expect(result.items).toHaveLength(2);
     expect(result.items[0]?.externalId).toBe('steam-news:12345');
     expect(result.items[0]?.excerpt).toBe('Balance update');
@@ -97,7 +111,9 @@ describe('steam-news connector — fetch contract', () => {
   });
 
   it('fails safe on malformed JSON', async () => {
-    const mock = createFetchMock([{ status: 200, headers: { 'content-type': 'application/json' }, bodyText: '{not json' }]);
+    const mock = createFetchMock([
+      { status: 200, headers: { 'content-type': 'application/json' }, bodyText: '{not json' },
+    ]);
     const connector = createSteamNewsConnector();
     const result = await connector.fetch({
       sourceId: SOURCE_ID,
@@ -111,7 +127,11 @@ describe('steam-news connector — fetch contract', () => {
 
   it('treats a missing newsitems array conservatively', async () => {
     const mock = createFetchMock([
-      { status: 200, headers: { 'content-type': 'application/json' }, bodyText: '{"unexpected":true}' },
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        bodyText: '{"unexpected":true}',
+      },
       { status: 200, headers: { 'content-type': 'application/json' }, bodyText: '{"appnews":{}}' },
     ]);
     const connector = createSteamNewsConnector();

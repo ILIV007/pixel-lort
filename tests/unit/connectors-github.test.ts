@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createGithubReleasesConnector, GithubRuntimeConfigSchema } from '../../src/connectors/github-releases';
+import {
+  createGithubReleasesConnector,
+  GithubRuntimeConfigSchema,
+} from '../../src/connectors/github-releases';
 import { createFetchMock, connectorEffects } from '../helpers/fetch-mock';
 
 /**
@@ -49,7 +52,9 @@ const RELEASES_RESPONSE = JSON.stringify([
 describe('github connector — preflight', () => {
   it('blocks an empty watchlist (registry ships none — nothing invented)', () => {
     const connector = createGithubReleasesConnector();
-    expect(connector.preflight({ repositories: [], includePrereleases: false }, () => undefined)).toMatchObject({
+    expect(
+      connector.preflight({ repositories: [], includePrereleases: false }, () => undefined),
+    ).toMatchObject({
       ok: false,
       reason: 'watchlist_empty',
     });
@@ -59,10 +64,16 @@ describe('github connector — preflight', () => {
 
   it('rejects malformed repository identifiers (no URL injection)', () => {
     expect(
-      GithubRuntimeConfigSchema.safeParse({ repositories: ['owner/sub/deep'], includePrereleases: false }).success,
+      GithubRuntimeConfigSchema.safeParse({
+        repositories: ['owner/sub/deep'],
+        includePrereleases: false,
+      }).success,
     ).toBe(false);
     expect(
-      GithubRuntimeConfigSchema.safeParse({ repositories: ['../../etc'], includePrereleases: false }).success,
+      GithubRuntimeConfigSchema.safeParse({
+        repositories: ['../../etc'],
+        includePrereleases: false,
+      }).success,
     ).toBe(false);
   });
 });
@@ -70,7 +81,11 @@ describe('github connector — preflight', () => {
 describe('github connector — fetch contract', () => {
   it('requests releases per repo, applies prerelease policy, normalizes', async () => {
     const mock = createFetchMock([
-      { status: 200, headers: { 'content-type': 'application/json', etag: '"rel-etag-a"' }, bodyText: RELEASES_RESPONSE },
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json', etag: '"rel-etag-a"' },
+        bodyText: RELEASES_RESPONSE,
+      },
       { status: 200, headers: { 'content-type': 'application/json' }, bodyText: '[]' },
     ]);
     const connector = createGithubReleasesConnector();
@@ -82,12 +97,16 @@ describe('github connector — fetch contract', () => {
     });
     expect(result.status).toBe('changed');
     expect(result.requestCount).toBe(2);
-    expect(mock.calls[0]?.url).toBe('https://api.github.com/repos/owner/repo-a/releases?per_page=25&page=1');
+    expect(mock.calls[0]?.url).toBe(
+      'https://api.github.com/repos/owner/repo-a/releases?per_page=25&page=1',
+    );
 
     // Draft AND prerelease filtered under includePrereleases:false.
     expect(result.items).toHaveLength(1);
     expect(result.items[0]?.externalId).toBe('github-releases:1001');
-    expect(result.items[0]?.canonicalUrl).toBe('https://github.com/owner/repo-a/releases/tag/v1.2.0');
+    expect(result.items[0]?.canonicalUrl).toBe(
+      'https://github.com/owner/repo-a/releases/tag/v1.2.0',
+    );
     expect(result.items[0]?.author).toBe('maintainer1');
     // Download-shaped link stripped from the body text.
     expect(result.items[0]?.excerpt).not.toContain('.zip');
@@ -167,7 +186,10 @@ describe('github connector — fetch contract', () => {
 
   it('maps 401/403 to credentials_rejected and 429 to rate_limited', async () => {
     const connector = createGithubReleasesConnector();
-    const mock401 = createFetchMock([{ status: 401 }, { status: 200, headers: { 'content-type': 'application/json' }, bodyText: '[]' }]);
+    const mock401 = createFetchMock([
+      { status: 401 },
+      { status: 200, headers: { 'content-type': 'application/json' }, bodyText: '[]' },
+    ]);
     const rejected = await connector.fetch({
       sourceId: SOURCE_ID,
       config: CONFIG,
@@ -189,7 +211,9 @@ describe('github connector — fetch contract', () => {
   });
 
   it('fails safe on malformed JSON', async () => {
-    const mock = createFetchMock([{ status: 200, headers: { 'content-type': 'application/json' }, bodyText: '["unterminated' }]);
+    const mock = createFetchMock([
+      { status: 200, headers: { 'content-type': 'application/json' }, bodyText: '["unterminated' },
+    ]);
     const connector = createGithubReleasesConnector();
     const result = await connector.fetch({
       sourceId: SOURCE_ID,

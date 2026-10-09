@@ -84,7 +84,9 @@ const PREDEFINED_ENTITIES: Readonly<Record<string, string>> = {
 };
 
 /** Decode XML character data: predefined entities + numeric refs only. */
-export function decodeXmlEntities(input: string): { ok: true; text: string } | { ok: false; reason: XmlParseFailureReason } {
+export function decodeXmlEntities(
+  input: string,
+): { ok: true; text: string } | { ok: false; reason: XmlParseFailureReason } {
   if (!input.includes('&')) {
     return { ok: true, text: input };
   }

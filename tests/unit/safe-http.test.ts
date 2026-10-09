@@ -64,7 +64,10 @@ describe('redirect handling (manual, validated, bounded)', () => {
       const headers = new Headers(init?.headers);
       captured.push(headers.get('authorization') ?? 'ABSENT');
       if (calls === 1) {
-        return new Response(null, { status: 301, headers: { location: 'https://cdn.example.com/mirror.xml' } });
+        return new Response(null, {
+          status: 301,
+          headers: { location: 'https://cdn.example.com/mirror.xml' },
+        });
       }
       return okResponse('<rss/>');
     });
@@ -82,7 +85,10 @@ describe('redirect handling (manual, validated, bounded)', () => {
       const headers = new Headers(init?.headers);
       captured.push(headers.get('authorization') ?? 'ABSENT');
       if (calls === 1) {
-        return new Response(null, { status: 307, headers: { location: 'https://feed.example.com/b.xml' } });
+        return new Response(null, {
+          status: 307,
+          headers: { location: 'https://feed.example.com/b.xml' },
+        });
       }
       return okResponse('<rss/>');
     });
@@ -91,16 +97,18 @@ describe('redirect handling (manual, validated, bounded)', () => {
   });
 
   it('rejects a redirect target outside the allowlist', async () => {
-    const safeFetch = createSafeFetch(async () =>
-      new Response(null, { status: 302, headers: { location: 'https://evil.tld/steal' } }),
+    const safeFetch = createSafeFetch(
+      async () =>
+        new Response(null, { status: 302, headers: { location: 'https://evil.tld/steal' } }),
     );
     const result = await safeFetch(BASE_INPUT);
     expect(result).toMatchObject({ ok: false, reason: 'host_not_allowed', requestCount: 1 });
   });
 
   it('rejects a redirect that downgrades the scheme', async () => {
-    const safeFetch = createSafeFetch(async () =>
-      new Response(null, { status: 302, headers: { location: 'http://feed.example.com/x' } }),
+    const safeFetch = createSafeFetch(
+      async () =>
+        new Response(null, { status: 302, headers: { location: 'http://feed.example.com/x' } }),
     );
     const result = await safeFetch(BASE_INPUT);
     expect(result).toMatchObject({ ok: false, reason: 'scheme_not_https' });
@@ -142,16 +150,16 @@ describe('request bounds', () => {
 
   it('rejects oversized streamed bodies regardless of any declared length', async () => {
     const oversized = 'a'.repeat(2048);
-    const safeFetch = createSafeFetch(async () =>
-      new Response(oversized, { status: 200, headers: { 'content-length': '10' } }), // dishonest
+    const safeFetch = createSafeFetch(
+      async () => new Response(oversized, { status: 200, headers: { 'content-length': '10' } }), // dishonest
     );
     const result = await safeFetch(BASE_INPUT);
     expect(result).toMatchObject({ ok: false, reason: 'body_too_large' });
   });
 
   it('rejects invalid Content-Length declarations', async () => {
-    const safeFetch = createSafeFetch(async () =>
-      new Response('x', { status: 200, headers: { 'content-length': '-5' } }),
+    const safeFetch = createSafeFetch(
+      async () => new Response('x', { status: 200, headers: { 'content-length': '-5' } }),
     );
     const result = await safeFetch(BASE_INPUT);
     expect(result).toMatchObject({ ok: false, reason: 'invalid_content_length' });
@@ -218,7 +226,10 @@ describe('request bounds', () => {
   it('supports bounded POST bodies for token endpoints', async () => {
     const captured: Array<{ method: string; body: string | null }> = [];
     const safeFetch = createSafeFetch(async (_url, init) => {
-      captured.push({ method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? init.body : null });
+      captured.push({
+        method: init?.method ?? 'GET',
+        body: typeof init?.body === 'string' ? init.body : null,
+      });
       return okResponse('{"ok":true}');
     });
     const result = await safeFetch({
@@ -249,7 +260,10 @@ describe('request bounds', () => {
       calls += 1;
       captured.push(init?.method ?? 'GET');
       if (calls === 1) {
-        return new Response(null, { status: 302, headers: { location: 'https://cdn.example.com/after' } });
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://cdn.example.com/after' },
+        });
       }
       return okResponse('done');
     });

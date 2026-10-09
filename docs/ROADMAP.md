@@ -2,11 +2,17 @@
 
 Phase order follows blueprint §26 ("Roadmap implementation order"). Phases
 **0**, **1A**, **1B**, **2A**, and **2B** are marked complete; **Phase 3** is
-implemented OFFLINE (code + tests + docs on
-`phase/03-job-queue-engine`, application version 1.3.1 after the v1.3.1
-review-correction release) with live queue
-activation gated on the operator runbook; everything else is pending and
-intentionally not started.
+implemented and REVIEWED (code + tests + docs, application version 1.3.1 at
+the v1.3.1 review-correction release) and its engine was subsequently
+ACTIVATED on the provisioned Preview environment by the owner-authorized
+operational commit `57d6bd1` ("enable reviewed Phase 3 engine on provisioned
+Preview" — JOBS_ENABLED=true with both queue producers and the consumer,
+after migration 0003 was applied remotely; see the published Phase 3
+handoff and `docs/RUNBOOK_PHASE3_QUEUE_SETUP.md`). Local development
+defaults and production remain disabled/separate. **Phase 4** is implemented
+on `phase/04-source-ingestion` (application version 1.4.0, schema stays 3,
+ADR-0038/0039) with the new ingestion gate shipped disabled everywhere;
+everything else is pending and intentionally not started.
 
 ## Phase 0 — product/config freeze + repository foundation ✅
 
@@ -267,11 +273,73 @@ DESC, id ASC LIMIT 25`); overlapping crons produce duplicate REFERENCES
       unit contract/config suites; full baseline remains green (see the
       Phase 3 handoff for recorded numbers).
 
-## Phase 4 — source registry and initial connectors ⬜
+## Phase 4 — source registry and initial connectors ◑ (implemented on `phase/04-source-ingestion`; ingestion gate ships disabled, post-review activation only)
 
-- [ ] Source registry validation (`pixel_source_registry_v1.json` schema).
-- [ ] Connector contract + fixtures; RSS/Steam/YouTube/Reddit/GitHub first.
-- [ ] Conditional GET, budgets, adaptive intervals, SSRF guards, caps.
+Implemented per ADR-0038/0039 (application version **1.4.0**, schema **3** —
+no migration 0004 required). No push, no deploy, no remote migration, no
+source activation by this pass.
+
+- [x] Source registry validation: the blueprint
+      `pixel_source_registry_v1.json` is imported VERBATIM and Zod-validated
+      at runtime (fail-safe — any invalid record disables the whole pass);
+      implemented / configured / enabled / blocked are tracked as separate
+      explicit statuses; Bluesky and IGDB remain recognized catalog entries
+      without runnable handlers.
+- [x] Idempotent seeding of `sources` + `source_state` (typed DB adapter):
+      new rows insert fully with `enabled = 0`; repeated imports refresh
+      ONLY registry-descriptor facts and NEVER owner-managed `enabled`/
+      `priority` or existing runtime state.
+- [x] Connector contract + five families with offline fixtures and
+      documented real request contracts (ADR-0039 §1): RSS/Atom (generic,
+      covers all seven registry RSS entries incl. bounded template lists,
+      conditional GET with both validators), Steam News (GetNewsForApp v2,
+      keyless, configured app watchlist, per-app limits), YouTube
+      (playlistItems + videos details ONLY — search endpoint and video
+      downloads schema-forbidden; API key via `X-Goog-Api-Key` HEADER),
+      Reddit (approved OAuth API — client_credentials token POST + Bearer
+      listings; NO unauthenticated scraping), GitHub releases (configured
+      repositories, prerelease policy, bounded pagination, conditional GET,
+      optional Bearer token).
+- [x] Safe HTTP shared layer (ADR-0039 §2): HTTPS only; 10 s deadline
+      covering HEADERS AND BODY; 2 MiB streamed byte cap (dishonest
+      Content-Length never trusted); ≤ 2 manually validated redirects with
+      per-hop re-validation and cross-origin credential stripping; positive
+      host allowlists (the real SSRF boundary) + literal-layer rejection of
+      IP literals incl. decimal/octal/hex encodings; honest Workers DNS
+      limitation documented (no pretend DNS safety).
+- [x] Safe XML (ADR-0039 §3): hand-rolled bounded scanner — DOCTYPE/ENTITY
+      rejected outright, only predefined + numeric entities decoded, hard
+      depth/element/text/attribute bounds, CDATA literal; zero new runtime
+      dependencies (Zod remains the only runtime dependency).
+- [x] Normalization (ADR-0039 §5): deterministic conservative canonical
+      URLs (reviewed tracking denylist only — distinct items never
+      collapse), HTML-as-data plain-text excerpts, deterministic content
+      hashes, bounded raw provenance, validated timestamps, synthesized
+      external ids for id-less feeds, stripDownloadLinks policy honored.
+- [x] Scheduling + poll ownership (ADR-0038 §3/§4): bounded indexed due
+      scan (EXPLAIN-verified index seeks); deterministic window idempotency
+      keys; atomic reservation hold (crash-self-healing); blocked sources
+      skipped with stable health reasons (no job, no network, no hot loop);
+      one poll attempt per job with retry ownership split by failure class.
+- [x] D1 safety (ADR-0038 §5/§6): atomic guarded commit (items
+      `INSERT OR IGNORE` + fenced terminal state write — stale workers
+      never overwrite newer polls); honest inserted/duplicate classification
+      including two-row conflicts; atomic budget reservation BEFORE network
+      (shared across overlapping polls, Asia/Tehran budget day, Retry-After
+      as a TRUE lower bound).
+- [x] Ingestion activation gate `SOURCE_INGESTION_ENABLED` (non-secret,
+      default 'false', ships 'false' in local AND preview): gates due-source
+      scheduling + poll-handler registration ONLY, never the jobs engine;
+      ingestion-without-jobs and invalid-registry states fail closed
+      (readiness 503).
+- [x] Acceptance suites on real workerd D1: full pipeline (due → durable
+      job → producer body → consumer → mocked HTTP → normalized items +
+      fenced state), duplicate/304/replay dedup, stale-owner fencing,
+      crash windows, budget races + Tehran day rollover, Retry-After floor,
+      auth circuit, blocked-source isolation, gate matrix, query-plan
+      proof; connector contract suites for all five families; SSRF/XML/
+      normalization/security suites. Measured final-tree totals in the
+      Phase 4 handoff.
 
 ## Phase 5 — story/claim/evidence engine ⬜
 

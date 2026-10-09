@@ -81,8 +81,12 @@ describe('due-source scan query plan (bounded, indexed)', () => {
     // BOTH relations must be reached through an index (the enabled filter
     // via idx_sources_due_config or the due seek via idx_source_state_due;
     // the join side always rides a unique index) — never a SCAN.
-    expect(details).toMatch(/search s using index idx_sources_due_config|search s using index sqlite_autoindex_sources_1/);
-    expect(details).toMatch(/search st using (index idx_source_state_due|index sqlite_autoindex_source_state_1)/);
+    expect(details).toMatch(
+      /search s using index idx_sources_due_config|search s using index sqlite_autoindex_sources_1/,
+    );
+    expect(details).toMatch(
+      /search st using (index idx_source_state_due|index sqlite_autoindex_source_state_1)/,
+    );
     expect(details).not.toMatch(/scan sources\b/);
     expect(details).not.toMatch(/scan source_state\b/);
   });

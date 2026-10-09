@@ -79,7 +79,16 @@ const RSS_FIELDS = new Set([
 ]);
 
 /** Atom leaf fields captured by local name. */
-const ATOM_FIELDS = new Set(['id', 'link', 'title', 'published', 'updated', 'summary', 'content', 'name']);
+const ATOM_FIELDS = new Set([
+  'id',
+  'link',
+  'title',
+  'published',
+  'updated',
+  'summary',
+  'content',
+  'name',
+]);
 
 /**
  * Parse an RSS 2.0 or Atom document into bounded feed items.

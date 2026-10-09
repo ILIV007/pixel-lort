@@ -189,7 +189,7 @@ Item identity and deduplication policy:
   NOT advanced).
 - Honest classification AFTER the commit (bounded reads): our row's PK
   present → `inserted`; else an existing row with our `(source_id,
-  external_id)` → `duplicate_external`; else an existing row with our
+external_id)` → `duplicate_external`; else an existing row with our
   `(source_id, canonical_url)` → `duplicate_url` (canonical identity wins;
   first-seen row retained — a changed item under the same canonical URL is
   an UPDATE of the same article, and story adjudication later compares

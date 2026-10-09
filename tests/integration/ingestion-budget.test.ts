@@ -40,7 +40,9 @@ describe('reserveIngestionBudget', () => {
       nowMs: DAY1,
     });
     expect(result).toMatchObject({ kind: 'reserved', bucketDate: '2025-10-06', requests: 1 });
-    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(1);
+    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(
+      1,
+    );
   });
 
   it('accumulates across reservations until the cap, then exhausts', async () => {
@@ -49,9 +51,27 @@ describe('reserveIngestionBudget', () => {
       sql: 'UPDATE sources SET daily_request_budget = 3 WHERE id = ?',
       params: ['playstation_blog'],
     });
-    expect((await reserveIngestionBudget(executor, { sourceId: 'playstation_blog', count: 2, nowMs: DAY1 })).kind).toBe('reserved');
-    expect((await reserveIngestionBudget(executor, { sourceId: 'playstation_blog', count: 1, nowMs: DAY1 })).kind).toBe('reserved');
-    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(3);
+    expect(
+      (
+        await reserveIngestionBudget(executor, {
+          sourceId: 'playstation_blog',
+          count: 2,
+          nowMs: DAY1,
+        })
+      ).kind,
+    ).toBe('reserved');
+    expect(
+      (
+        await reserveIngestionBudget(executor, {
+          sourceId: 'playstation_blog',
+          count: 1,
+          nowMs: DAY1,
+        })
+      ).kind,
+    ).toBe('reserved');
+    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(
+      3,
+    );
     // Exactly at cap: any further reservation is refused.
     const exhausted = await reserveIngestionBudget(executor, {
       sourceId: 'playstation_blog',
@@ -59,7 +79,9 @@ describe('reserveIngestionBudget', () => {
       nowMs: DAY1,
     });
     expect(exhausted).toMatchObject({ kind: 'exhausted', bucketDate: '2025-10-06' });
-    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(3);
+    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(
+      3,
+    );
   });
 
   it('rolls over implicitly at the Tehran day boundary (no reset write)', async () => {
@@ -68,13 +90,23 @@ describe('reserveIngestionBudget', () => {
       params: ['playstation_blog'],
     });
     await reserveIngestionBudget(executor, { sourceId: 'playstation_blog', count: 3, nowMs: DAY1 });
-    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(3);
+    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(
+      3,
+    );
     // Next Tehran day: a NEW bucket (fresh counter, old row untouched).
     expect(tehranBudgetDay(DAY2)).toBe('2025-10-07');
-    const next = await reserveIngestionBudget(executor, { sourceId: 'playstation_blog', count: 1, nowMs: DAY2 });
+    const next = await reserveIngestionBudget(executor, {
+      sourceId: 'playstation_blog',
+      count: 1,
+      nowMs: DAY2,
+    });
     expect(next).toMatchObject({ kind: 'reserved', bucketDate: '2025-10-07' });
-    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(3);
-    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY2 })).toBe(1);
+    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(
+      3,
+    );
+    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY2 })).toBe(
+      1,
+    );
   });
 
   it('isolates budgets per source', async () => {
@@ -83,14 +115,27 @@ describe('reserveIngestionBudget', () => {
       params: ['playstation_blog'],
     });
     expect(
-      (await reserveIngestionBudget(executor, { sourceId: 'playstation_blog', count: 1, nowMs: DAY1 })).kind,
+      (
+        await reserveIngestionBudget(executor, {
+          sourceId: 'playstation_blog',
+          count: 1,
+          nowMs: DAY1,
+        })
+      ).kind,
     ).toBe('reserved');
     // Another source with its own cap is unaffected.
     expect(
-      (await reserveIngestionBudget(executor, { sourceId: 'xbox_wire', count: 1, nowMs: DAY1 })).kind,
+      (await reserveIngestionBudget(executor, { sourceId: 'xbox_wire', count: 1, nowMs: DAY1 }))
+        .kind,
     ).toBe('reserved');
     expect(
-      (await reserveIngestionBudget(executor, { sourceId: 'playstation_blog', count: 1, nowMs: DAY1 })).kind,
+      (
+        await reserveIngestionBudget(executor, {
+          sourceId: 'playstation_blog',
+          count: 1,
+          nowMs: DAY1,
+        })
+      ).kind,
     ).toBe('exhausted');
   });
 
@@ -118,7 +163,9 @@ describe('reserveIngestionBudget', () => {
     const exhausted = results.filter((r) => r.kind === 'exhausted').length;
     expect(reserved).toBe(5); // EXACTLY the cap — never over
     expect(exhausted).toBe(3);
-    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(5);
+    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(
+      5,
+    );
   });
 });
 
@@ -131,11 +178,19 @@ describe('reconcileIngestionBudget', () => {
       nowMs: DAY1,
     });
     expect(recorded).toBe(2);
-    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(3);
+    expect(await readIngestionBudget(executor, { sourceId: 'playstation_blog', nowMs: DAY1 })).toBe(
+      3,
+    );
   });
 
   it('is a no-op for zero extras or unknown rows', async () => {
-    expect(await reconcileIngestionBudget(executor, { sourceId: 'xbox_wire', extraCount: 0, nowMs: DAY1 })).toBe(0);
+    expect(
+      await reconcileIngestionBudget(executor, {
+        sourceId: 'xbox_wire',
+        extraCount: 0,
+        nowMs: DAY1,
+      }),
+    ).toBe(0);
     expect(await readIngestionBudget(executor, { sourceId: 'xbox_wire', nowMs: DAY1 })).toBe(0);
   });
 });

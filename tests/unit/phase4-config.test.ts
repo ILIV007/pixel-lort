@@ -16,8 +16,12 @@ describe('SOURCE_INGESTION_ENABLED flag', () => {
   });
 
   it('accepts explicit true/false', () => {
-    expect(parseIngestionConfig({ SOURCE_INGESTION_ENABLED: 'true' }).config.SOURCE_INGESTION_ENABLED).toBe(true);
-    expect(parseIngestionConfig({ SOURCE_INGESTION_ENABLED: 'false' }).config.SOURCE_INGESTION_ENABLED).toBe(false);
+    expect(
+      parseIngestionConfig({ SOURCE_INGESTION_ENABLED: 'true' }).config.SOURCE_INGESTION_ENABLED,
+    ).toBe(true);
+    expect(
+      parseIngestionConfig({ SOURCE_INGESTION_ENABLED: 'false' }).config.SOURCE_INGESTION_ENABLED,
+    ).toBe(false);
   });
 
   it('fails any present-but-invalid value (never silently ignored)', () => {

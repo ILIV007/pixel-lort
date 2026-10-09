@@ -50,7 +50,9 @@ export function createGithubReleasesConnector(): SourceConnector {
       const parsed = GithubRuntimeConfigSchema.safeParse(config);
       return parsed.success ? parsed.data.repositories.length : 0;
     },
-    preflight(config: Record<string, unknown>): { ok: true } | { ok: false; reason: 'watchlist_empty' } {
+    preflight(
+      config: Record<string, unknown>,
+    ): { ok: true } | { ok: false; reason: 'watchlist_empty' } {
       const parsed = GithubRuntimeConfigSchema.safeParse(config);
       if (!parsed.success || parsed.data.repositories.length === 0) {
         return { ok: false, reason: 'watchlist_empty' };
@@ -103,9 +105,15 @@ export function createGithubReleasesConnector(): SourceConnector {
       let failureReason: ConnectorFetchOutput['failureReason'] = null;
       let anyFailed = false;
 
-      for (const repo of parsedConfig.data.repositories.slice(0, RUNTIME_CONFIG_BOUNDS.maxGithubRepositories)) {
+      for (const repo of parsedConfig.data.repositories.slice(
+        0,
+        RUNTIME_CONFIG_BOUNDS.maxGithubRepositories,
+      )) {
         // Path segments encoded SEPARATELY (owner/repo keeps its slash).
-        const repoPath = repo.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+        const repoPath = repo
+          .split('/')
+          .map((segment) => encodeURIComponent(segment))
+          .join('/');
         const url = RELEASES_TEMPLATE.replace('{repo}', repoPath) + '?per_page=25&page=1';
         const conditionalHeaders: Record<string, string> = { ...headers };
         const knownEtag = etags[repo];
@@ -128,7 +136,10 @@ export function createGithubReleasesConnector(): SourceConnector {
         }
         if (response.status === 429) {
           anyRateLimited = true;
-          retryAfterSeconds = parseRetryAfterSeconds(response.headers.get('retry-after'), effects.nowMs());
+          retryAfterSeconds = parseRetryAfterSeconds(
+            response.headers.get('retry-after'),
+            effects.nowMs(),
+          );
           continue;
         }
         if (response.status === 401 || response.status === 403) {
@@ -178,7 +189,11 @@ export function createGithubReleasesConnector(): SourceConnector {
             continue;
           }
           const releaseId =
-            typeof release.id === 'number' ? String(release.id) : typeof release.tag_name === 'string' ? release.tag_name : null;
+            typeof release.id === 'number'
+              ? String(release.id)
+              : typeof release.tag_name === 'string'
+                ? release.tag_name
+                : null;
           const normalized = await normalizeRawItem({
             connector: 'github-releases',
             sourceId,
@@ -186,7 +201,12 @@ export function createGithubReleasesConnector(): SourceConnector {
             raw: {
               id: releaseId,
               link: typeof release.html_url === 'string' ? release.html_url : null,
-              title: typeof release.name === 'string' && release.name !== '' ? release.name : typeof release.tag_name === 'string' ? release.tag_name : null,
+              title:
+                typeof release.name === 'string' && release.name !== ''
+                  ? release.name
+                  : typeof release.tag_name === 'string'
+                    ? release.tag_name
+                    : null,
               bodyText: typeof release.body === 'string' ? release.body : null,
               author: typeof release.author?.login === 'string' ? release.author.login : null,
               publishedRaw:

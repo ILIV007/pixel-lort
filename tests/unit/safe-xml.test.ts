@@ -183,7 +183,9 @@ describe('parseFeedDocument — Atom', () => {
 
 describe('parseFeedDocument — bounds', () => {
   it('caps items per feed at the bounded limit (keeps newest, no error)', () => {
-    const items = Array.from({ length: 130 }, (_, i) => `<item><title>t${i}</title></item>`).join('');
+    const items = Array.from({ length: 130 }, (_, i) => `<item><title>t${i}</title></item>`).join(
+      '',
+    );
     const feed = `<rss><channel>${items}</channel></rss>`;
     const parsed = parseFeedDocument(feed);
     expect(parsed.ok).toBe(true);

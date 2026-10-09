@@ -1,4 +1,4 @@
-import type { SafeFetchExecutor, SafeFetchResult } from "../../src/shared/http/safe-http";
+import type { SafeFetchExecutor, SafeFetchResult } from '../../src/shared/http/safe-http';
 
 /**
  * TEST INFRASTRUCTURE — scripted SafeFetch fake for connector contract
@@ -70,7 +70,10 @@ export function createFetchMock(initial: readonly QueuedResponse[] = []): FetchM
 }
 
 /** Wrap a SafeFetchExecutor into the connector effects bundle. */
-export function connectorEffects(fetchFn: SafeFetchExecutor, secrets: Record<string, string> = {}): {
+export function connectorEffects(
+  fetchFn: SafeFetchExecutor,
+  secrets: Record<string, string> = {},
+): {
   safeFetch: SafeFetchExecutor;
   nowMs: () => number;
   random: () => number;

@@ -57,7 +57,9 @@ export function createSteamNewsConnector(): SourceConnector {
       // watchlist is empty — nothing is ever fetched for a blocked source).
       return Math.min(parsed.data.apps.length, parsed.data.appsPerBatch);
     },
-    preflight(config: Record<string, unknown>): { ok: true } | { ok: false; reason: 'watchlist_empty' } {
+    preflight(
+      config: Record<string, unknown>,
+    ): { ok: true } | { ok: false; reason: 'watchlist_empty' } {
       const parsed = SteamRuntimeConfigSchema.safeParse(config);
       if (!parsed.success || parsed.data.apps.length === 0) {
         return { ok: false, reason: 'watchlist_empty' };

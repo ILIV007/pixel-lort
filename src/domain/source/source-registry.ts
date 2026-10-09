@@ -45,7 +45,10 @@ const YoutubeConfigSchema = z
 
 const RedditConfigSchema = z
   .object({
-    subreddits: z.array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_]{1,20}$/)).min(1).max(10),
+    subreddits: z
+      .array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_]{1,20}$/))
+      .min(1)
+      .max(10),
     limit: z.number().int().min(1).max(50),
     stripDownloadLinks: z.boolean().optional(),
   })
@@ -88,9 +91,7 @@ const ThresholdSchema = z.number().int().min(0).max(100).nullable();
 
 const RegistrySourceSchema = z
   .object({
-    id: z
-      .string()
-      .regex(/^[a-z0-9_]{3,64}$/),
+    id: z.string().regex(/^[a-z0-9_]{3,64}$/),
     name: z.string().min(1).max(128),
     connector: z.enum(CATALOG_CONNECTORS as unknown as [string, ...string[]]),
     lane: z.enum(['official', 'editorial', 'radar', 'community', 'media', 'metadata']),
