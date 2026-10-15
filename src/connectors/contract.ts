@@ -44,7 +44,12 @@ export interface ConnectorFetchOutput {
   readonly cursor: string | null;
   readonly etag: string | null;
   readonly lastModified: string | null;
-  /** Parsed Retry-After for 429s (true lower bound, ADR-0038 §4). */
+  /**
+   * Parsed Retry-After for 429s (true lower bound, ADR-0038 §4). For a
+   * multi-feed/multi-repository fetch this is the STRONGEST observed
+   * lower bound across all rate-limited responses (R05) — see
+   * `strongestRetryAfterLowerBound`.
+   */
   readonly retryAfterSeconds: number | null;
   /** ACTUAL requests spent (hops included) — reconciled into the budget. */
   readonly requestCount: number;
@@ -99,6 +104,35 @@ export function parseRetryAfterSeconds(headerValue: string | null, nowMs: number
     return 0;
   }
   return Math.min(deltaSeconds, 86_400);
+}
+
+/**
+ * Aggregate one more parsed Retry-After observation into the STRONGEST
+ * applicable lower bound across a fetch's feeds/repositories (R05).
+ *
+ * Retry-After is a LOWER bound: "do not retry before N seconds". An
+ * aggregate over several rate-limited responses must therefore never
+ * promise an earlier retry than ANY single observed bound — the maximum
+ * wins. Specifically:
+ * - a later SHORTER bound must not erase an earlier LONGER one;
+ * - a later MISSING or INVALID header (parsed → null) carries NO
+ *   information and must never erase an earlier valid bound;
+ * - ZERO is a real observed bound ("retrying now is allowed", from
+ *   delta-seconds "0" or an already-past HTTP-date) — it is distinct
+ *   from null (unknown) and is preserved when it is the only
+ *   observation, but never erases a stronger bound.
+ */
+export function strongestRetryAfterLowerBound(
+  current: number | null,
+  incoming: number | null,
+): number | null {
+  if (incoming === null) {
+    return current;
+  }
+  if (current === null) {
+    return incoming;
+  }
+  return Math.max(current, incoming);
 }
 
 /** Approved response content types per connector family. */

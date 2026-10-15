@@ -7,6 +7,9 @@
  * - automatic redirect following DISABLED — each Location hop is resolved
  *   against the current URL and re-validated (scheme/host/port/userinfo/
  *   allowlist) before the next request, at most `maxRedirects` hops;
+ * - EXACT 3xx status classes (R01): only 301/302/303/307/308 are followed;
+ *   304 is a terminal response (empty body, validators via headers); other
+ *   3xx (300/305/306) terminate with `redirect_status_not_followable`;
  * - authentication-shaped headers (Authorization, Cookie, API-key headers)
  *   are stripped on any ORIGIN CHANGE (host mismatch) — never forwarded
  *   across an unapproved origin;
@@ -48,6 +51,7 @@ export type SafeHttpFailureReason =
   | 'host_invalid'
   | 'redirect_limit'
   | 'redirect_location_invalid'
+  | 'redirect_status_not_followable'
   | 'timeout'
   | 'network_error'
   | 'body_too_large'
@@ -81,6 +85,23 @@ export interface SafeFetchInput {
 
 /** Hard bound for POST bodies (token endpoints need tiny form bodies). */
 export const MAX_REQUEST_BODY_BYTES = 4_096;
+
+/**
+ * EXACT redirect statuses that are followed (R01 fix). The old behavior
+ * treated EVERY 300–399 as a redirect, which made a bodyless 304 Not
+ * Modified resolve to `redirect_location_invalid` (no Location header) —
+ * conditional-GET could never reach the connectors' 304 paths through the
+ * production port.
+ *
+ * - 301/302/303/307/308: followed (Location re-validated per hop below).
+ * - 304: TERMINAL response with an empty body (RFC 9110 §15.4.5) — returned
+ *   to the caller so validators (ETag/Last-Modified) ride the headers.
+ * - 300/305/306: NEVER followed — 300 offers no single followable target,
+ *   305 (Use Proxy) is a proxy-injection hazard, 306 is reserved/unused.
+ *   These terminate with `redirect_status_not_followable` (no next hop is
+ *   attempted, no body is read).
+ */
+const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 
 export interface SafeFetchResultOk {
   readonly ok: true;
@@ -167,8 +188,29 @@ export function createSafeFetch(fetchFn: typeof fetch): SafeFetchExecutor {
         return { ok: false, reason: 'network_error', requestCount };
       }
 
-      // 3xx: validate the next hop manually (never auto-followed).
-      if (response.status >= 300 && response.status < 400) {
+      // 304 Not Modified: TERMINAL success-shaped response (R01 fix). The
+      // body is empty by definition; cancel it defensively and hand the
+      // status + headers (validators) to the caller untouched.
+      if (response.status === 304) {
+        clearTimeout(timer);
+        try {
+          await response.body?.cancel();
+        } catch {
+          // Cancel failures never mask the 304 decision.
+        }
+        return {
+          ok: true,
+          status: 304,
+          headers: response.headers,
+          bodyText: '',
+          requestCount,
+          finalUrl: guarded.url.toString(),
+        };
+      }
+
+      // Canonical redirects only: validate the next hop manually (never
+      // auto-followed by the platform — redirect: 'manual' is preserved).
+      if (REDIRECT_STATUSES.has(response.status)) {
         const location = response.headers.get('location');
         if (location === null) {
           clearTimeout(timer);
@@ -193,6 +235,19 @@ export function createSafeFetch(fetchFn: typeof fetch): SafeFetchExecutor {
         }
         currentUrl = next.toString();
         continue;
+      }
+
+      // Any OTHER 3xx (300, 305, 306, …): explicitly NOT followable (R01).
+      // Terminal failure BEFORE any further network I/O; the body is never
+      // read. Callers see a stable reason — never a silent 2xx conversion.
+      if (response.status >= 300 && response.status < 400) {
+        clearTimeout(timer);
+        try {
+          await response.body?.cancel();
+        } catch {
+          // Cancel failures never mask the classification.
+        }
+        return { ok: false, reason: 'redirect_status_not_followable', requestCount };
       }
 
       // Final response: bound the body WITH the shared deadline.
@@ -282,6 +337,8 @@ export function safeHttpReasonToHealthReason(reason: SafeHttpFailureReason): str
       return 'http_timeout';
     case 'redirect_limit':
       return 'http_redirect_limit';
+    case 'redirect_status_not_followable':
+      return 'http_status_error';
     case 'body_too_large':
       return 'response_too_large';
     case 'invalid_utf8':

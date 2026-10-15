@@ -1,10 +1,12 @@
 /**
- * YouTube playlists connector (Phase 4 — ADR-0039 §1): official
- * playlistItems + videos-details contract ONLY. The search endpoint and
- * any video download are FORBIDDEN by the registry
- * (`useSearchEndpoint:false`, `downloadVideo:false` — enforced here and
- * pinned by tests). API key travels in the `X-Goog-Api-Key` HEADER —
- * never a query string (ADR-0039 §2).
+ * YouTube playlists connector (Phase 4 — ADR-0039 §1; R03 strict
+ * descriptor contract): official playlistItems + videos-details contract
+ * ONLY. The search endpoint and any video download are FORBIDDEN by the
+ * registry (`useSearchEndpoint:false`, `downloadVideo:false` — enforced
+ * here and pinned by tests). API key travels in the `X-Goog-Api-Key`
+ * HEADER — never a query string (ADR-0039 §2). Config descriptor fields
+ * (`endpoint`/`detailsEndpoint`) are explicitly validated against the
+ * pinned official endpoints (R03) — never silently ignored.
  *
  * Watchlist = owner-supplied `config.playlists` (registry ships none —
  * no playlist IDs are invented). One playlistItems page per playlist per
@@ -24,16 +26,30 @@ import {
 import type { SafeFetchResult, SafeFetchResultOk } from '../shared/http/safe-http';
 import { z } from 'zod';
 
+const PLAYLIST_ITEMS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/playlistItems';
+const VIDEOS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/videos';
+
+/**
+ * YouTube runtime config (R03 coherent strict configuration contract):
+ * STRICT — unknown keys rejected. The forbidden-search/forbidden-download
+ * policies stay pinned (`useSearchEndpoint:false`, `downloadVideo:false` —
+ * z.literal, so enabling either fails preflight). The registry-owned
+ * descriptor facts `endpoint`/`detailsEndpoint`, when present, must be
+ * EXACTLY the official playlistItems/videos endpoints — arbitrary
+ * endpoints fail preflight, they are never silently ignored. The owner
+ * watchlist (`playlists`) stays owner-domain; no playlist IDs are invented.
+ * The API key travels ONLY in the `X-Goog-Api-Key` header (never the query
+ * string — ADR-0039 §2, pinned by tests).
+ */
 export const YoutubeRuntimeConfigSchema = z
   .object({
     useSearchEndpoint: z.literal(false),
     downloadVideo: z.literal(false),
     playlists: z.array(z.string().regex(/^[A-Za-z0-9_-]{12,64}$/)).max(25),
+    endpoint: z.literal(PLAYLIST_ITEMS_ENDPOINT).optional(),
+    detailsEndpoint: z.literal(VIDEOS_ENDPOINT).optional(),
   })
   .strict();
-
-const PLAYLIST_ITEMS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/playlistItems';
-const VIDEOS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/videos';
 
 interface PlaylistItemsResponse {
   items?: Array<{
@@ -127,7 +143,11 @@ export function createYoutubePlaylistsConnector(): SourceConnector {
           allowedHosts: ['www.googleapis.com'],
         });
         requestCount += response.requestCount;
-        const guard = checkJsonStatus(response, effects.nowMs());
+        // The guard receives the AGGREGATE request count so far (R06):
+        // every failure return path must report ALL issued HTTP attempts
+        // — earlier successful playlist calls and redirect hops included —
+        // never just the current response's own count.
+        const guard = checkJsonStatus(response, effects.nowMs(), requestCount);
         if (guard.type === 'fail') {
           return guard.output;
         }
@@ -252,9 +272,20 @@ type GuardedJson =
   | { readonly type: 'ok'; readonly response: SafeFetchResultOk }
   | { readonly type: 'fail'; readonly output: ConnectorFetchOutput };
 
-function checkJsonStatus(response: SafeFetchResult, nowMs: number): GuardedJson {
+/**
+ * Guard one playlistItems response. `aggregateRequestCount` is the
+ * fetch-wide total of issued HTTP attempts INCLUDING this response
+ * (R06): every failure path below reports that aggregate so earlier
+ * successful calls and redirect hops are never lost from the reported
+ * count — no clamping, no substitution with planned counts.
+ */
+function checkJsonStatus(
+  response: SafeFetchResult,
+  nowMs: number,
+  aggregateRequestCount: number,
+): GuardedJson {
   if (!response.ok) {
-    return { type: 'fail', output: failed('http_status_error', response.requestCount) };
+    return { type: 'fail', output: failed('http_status_error', aggregateRequestCount) };
   }
   if (response.status === 429) {
     return {
@@ -266,20 +297,20 @@ function checkJsonStatus(response: SafeFetchResult, nowMs: number): GuardedJson 
         etag: null,
         lastModified: null,
         retryAfterSeconds: parseRetryAfterSeconds(response.headers.get('retry-after'), nowMs),
-        requestCount: response.requestCount,
+        requestCount: aggregateRequestCount,
         malformedCount: 0,
         failureReason: null,
       },
     };
   }
   if (response.status === 403 || response.status === 401) {
-    return { type: 'fail', output: failed('credentials_rejected', response.requestCount) };
+    return { type: 'fail', output: failed('credentials_rejected', aggregateRequestCount) };
   }
   if (response.status < 200 || response.status >= 300) {
-    return { type: 'fail', output: failed('http_status_error', response.requestCount) };
+    return { type: 'fail', output: failed('http_status_error', aggregateRequestCount) };
   }
   if (!isJsonContentType(response.headers.get('content-type'))) {
-    return { type: 'fail', output: failed('unexpected_content_type', response.requestCount) };
+    return { type: 'fail', output: failed('unexpected_content_type', aggregateRequestCount) };
   }
   return { type: 'ok', response };
 }

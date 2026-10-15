@@ -8,9 +8,15 @@
  * - atomic guarded commit: item inserts + fenced state write in ONE batch;
  * - honest post-commit classification (inserted / duplicate_external /
  *   duplicate_url) via bounded reads — never guessed;
- * - INSERT OR IGNORE per item: neither UNIQUE constraint can abort the
- *   batch, replay is a no-op, and a CHECK/NOT NULL violation still fails
- *   the WHOLE batch (no partial success, ADR-0038 §5).
+ * - TWO TARGETED conflict clauses per item (R02 fix, verified on real
+ *   workerd D1): `ON CONFLICT(source_id, external_id) DO NOTHING` and
+ *   `ON CONFLICT(source_id, canonical_url) DO NOTHING` absorb exactly the
+ *   two intended business-key duplicates and nothing else. Any unrelated
+ *   integrity failure — a primary-key collision on `id`, a NOT NULL or a
+ *   CHECK violation — RAISES inside the atomic batch and fails the WHOLE
+ *   batch (items AND state rolled back; cursor/state unchanged). The old
+ *   broad `INSERT OR IGNORE` (which silently swallowed those violations)
+ *   is gone.
  */
 import type { DbExecutor, DbStatement } from './db-executor';
 
@@ -151,9 +157,11 @@ export interface PollCommitResult {
 
 /**
  * Commit one poll's items + terminal state as ONE atomic batch
- * (ADR-0038 §5):
- * - items: INSERT OR IGNORE (both UNIQUE constraints absorbed; replay
- *   idempotent; a CHECK/NOT NULL violation fails the WHOLE batch);
+ * (ADR-0038 §5, R02 semantics):
+ * - items: TWO targeted `ON CONFLICT … DO NOTHING` clauses — exactly the
+ *   two business UNIQUE keys are absorbed (replay idempotent); a primary-
+ *   key collision, NOT NULL or CHECK violation throws and aborts the WHOLE
+ *   batch, leaving cursor/state unchanged (real workerd D1 semantics);
  * - state: fenced on `next_poll_at = holdUntilMs` — a stale worker (a
  *   newer poll has since reserved) writes 0 rows, visible in meta, and
  *   NEVER overwrites newer state;
@@ -175,10 +183,17 @@ export async function commitPollResults(
 
   for (const item of input.items) {
     statements.push({
-      sql: `INSERT OR IGNORE INTO source_items
+      // TWO targeted conflict clauses (R02, verified on real workerd D1):
+      // each absorbs ONLY its own business-key duplicate. Unlike the old
+      // broad `INSERT OR IGNORE`, an unrelated primary-key collision or a
+      // NOT NULL / CHECK violation raises here and aborts the whole batch
+      // (D1 batches are implicit transactions: cursor/state stay put).
+      sql: `INSERT INTO source_items
               (id, source_id, external_id, canonical_url, title, body_excerpt, author,
                published_at, fetched_at, content_hash, raw_json, processing_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')`,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
+            ON CONFLICT (source_id, external_id) DO NOTHING
+            ON CONFLICT (source_id, canonical_url) DO NOTHING`,
       params: [
         item.id,
         item.sourceId,
@@ -261,9 +276,10 @@ export async function commitPollResults(
     if (byUrl !== null) {
       duplicateUrl += 1;
     }
-    // Neither row found: impossible through INSERT OR IGNORE + fresh UUID
-    // PKs (only the two UNIQUE constraints can suppress); the attempt is
-    // still counted as suppressed-by-external for conservative honesty.
+    // Neither row found: unreachable through the two targeted conflict
+    // clauses + fresh UUID PKs (only the two business UNIQUE keys can
+    // suppress a row without raising); the attempt is still counted as
+    // suppressed-by-external for conservative honesty.
     else if (item.canonicalUrl !== null) {
       duplicateExternal += 1;
     }

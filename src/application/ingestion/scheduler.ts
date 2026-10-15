@@ -16,8 +16,15 @@
  *      scheduler wins; a crash between job creation and reservation
  *      self-heals (the job's claim fencing + a later scan converge).
  *
- * Seeding: on the first pass with an EMPTY sources table the validated
- * registry is seeded (idempotent, enabled = 0 everywhere).
+ * Seeding/reconciliation (R08): every pass runs a BOUNDED completeness
+ * probe (two indexed `IN` queries against the ≤32 registry ids) and
+ * repairs any missing `sources` row OR missing `source_state` row — a
+ * row count alone is not completeness, and a legacy partial catalog (an
+ * interrupted old-style seed) must converge on a later pass. The repair
+ * itself is ONE atomic D1 batch (seedSourcesFromRegistry): a failed
+ * reconciliation rolls back wholly and never leaves partial changes.
+ * New rows stay disabled (enabled = 0); owner settings are preserved by
+ * the R07 field-ownership merge.
  */
 import type { DbExecutor } from '../../adapters/db/db-executor';
 import type { JobsEngine } from '../jobs/engine';
@@ -67,16 +74,31 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
     return { kind: 'registry_invalid' };
   }
 
-  // First-pass seeding: only when the sources table is EMPTY (one cheap
-  // indexed probe); repeated passes never re-run the seed loop.
+  // Catalog completeness probe (R08): which registry sources are missing
+  // a `sources` row or a `source_state` row — even when the table is NOT
+  // empty? Two bounded, indexed probes against the registry ids (the
+  // registry schema caps the catalog at 32 ⇒ ≤ 32 bound params per
+  // query, within the D1 limit). A row count alone is not completeness.
   let seeded = false;
-  const anySource = await executor.first<{ id: string }>({
-    sql: 'SELECT id FROM sources LIMIT 1',
+  const ids = registry.registry.sources.map((source) => source.id);
+  const inList = ids.map(() => '?').join(', ');
+  const sourceRows = await executor.query<{ id: string }>({
+    sql: `SELECT id FROM sources WHERE id IN (${inList})`,
+    params: ids,
   });
-  if (anySource === null) {
+  const stateRows = await executor.query<{ source_id: string }>({
+    sql: `SELECT source_id FROM source_state WHERE source_id IN (${inList})`,
+    params: ids,
+  });
+  const haveSource = new Set(sourceRows.rows.map((row) => row.id));
+  const haveState = new Set(stateRows.rows.map((row) => row.source_id));
+  const incomplete = ids.some((id) => !haveSource.has(id) || !haveState.has(id));
+  if (incomplete) {
+    // ONE atomic repair batch (R07 field-ownership merge inside; R08:
+    // all-or-nothing — a failure rolls back the whole reconciliation).
     await seedSourcesFromRegistry(executor, registry.registry, nowMs);
     seeded = true;
-    logger?.debug('ingestion.schedule.seeded', { count: registry.registry.sources.length });
+    logger?.debug('ingestion.schedule.catalog_reconciled', { count: ids.length });
   }
 
   const due = await scanDueSources(executor, nowMs);

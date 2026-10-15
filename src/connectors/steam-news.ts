@@ -1,9 +1,12 @@
 /**
- * Steam News connector (Phase 4 — ADR-0039 §1): ISteamNews/GetNewsForApp
- * v2 (keyless, documented), bounded configured app watchlist, per-app item
- * limits. The app watchlist is OWNER-supplied runtime configuration
- * (`config.apps`); the registry ships only the batch/limit policy — no app
- * IDs are ever invented here.
+ * Steam News connector (Phase 4 — ADR-0039 §1; R03 strict descriptor
+ * contract): ISteamNews/GetNewsForApp v2 (keyless, documented), bounded
+ * configured app watchlist, per-app item limits. The app watchlist is
+ * OWNER-supplied runtime configuration (`config.apps`); the registry
+ * ships only the batch/limit policy — no app IDs are ever invented here.
+ * The official endpoint is PINNED: a config `endpoint` descriptor, when
+ * present, must equal it exactly (R03) — official host restrictions are
+ * preserved and arbitrary endpoints are rejected, never ignored.
  */
 import { INGESTION_LIMITS } from '../domain/source/source-registry';
 import { normalizeRawItem, type NormalizedItemOut } from './normalize';
@@ -17,15 +20,26 @@ import {
 } from './contract';
 import { z } from 'zod';
 
+const STEAM_ENDPOINT = 'https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/';
+
+/**
+ * Steam runtime config (R03 coherent strict configuration contract):
+ * STRICT — unknown keys are rejected. Every documented field is explicitly
+ * validated, including the registry-owned descriptor fact `endpoint`:
+ * when present it must be EXACTLY the official ISteamNews endpoint — an
+ * arbitrary or attacker-chosen endpoint is a configuration error and fails
+ * preflight; it is never silently ignored (the connector only ever talks
+ * to the pinned official host below). The owner watchlist (`apps`) stays
+ * owner-domain; the registry ships no app IDs (none are invented here).
+ */
 export const SteamRuntimeConfigSchema = z
   .object({
     appsPerBatch: z.number().int().min(1).max(25),
     maxItemsPerApp: z.number().int().min(1).max(10),
     apps: z.array(z.number().int().min(1).max(2_147_483_647)).max(50),
+    endpoint: z.literal(STEAM_ENDPOINT).optional(),
   })
   .strict();
-
-const STEAM_ENDPOINT = 'https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/';
 
 interface SteamNewsItem {
   gid: string;

@@ -20,6 +20,7 @@ import {
   endpointHost,
   isXmlContentType,
   parseRetryAfterSeconds,
+  strongestRetryAfterLowerBound,
   type ConnectorFetchInput,
   type ConnectorFetchOutput,
   type SourceConnector,
@@ -120,6 +121,9 @@ export function createRssConnector(): SourceConnector {
       let anyChanged = false;
       let anyRateLimited = false;
       let anyFailed = false;
+      // STRONGEST Retry-After lower bound across ALL rate-limited feeds
+      // (R05): a later shorter, missing, or invalid header never erases an
+      // earlier valid bound — see strongestRetryAfterLowerBound.
       let retryAfterSeconds: number | null = null;
       let failureReason: ConnectorFetchOutput['failureReason'] = null;
       const nextCursor: FeedCursor = { ...cursor };
@@ -158,9 +162,9 @@ export function createRssConnector(): SourceConnector {
         }
         if (response.status === 429) {
           anyRateLimited = true;
-          retryAfterSeconds = parseRetryAfterSeconds(
-            response.headers.get('retry-after'),
-            effects.nowMs(),
+          retryAfterSeconds = strongestRetryAfterLowerBound(
+            retryAfterSeconds,
+            parseRetryAfterSeconds(response.headers.get('retry-after'), effects.nowMs()),
           );
           continue;
         }

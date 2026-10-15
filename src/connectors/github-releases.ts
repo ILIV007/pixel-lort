@@ -14,6 +14,7 @@ import {
   endpointHost,
   isJsonContentType,
   parseRetryAfterSeconds,
+  strongestRetryAfterLowerBound,
   type ConnectorFetchInput,
   type ConnectorFetchOutput,
   type SourceConnector,
@@ -101,6 +102,10 @@ export function createGithubReleasesConnector(): SourceConnector {
       let malformed = 0;
       let anyChanged = false;
       let anyRateLimited = false;
+      // STRONGEST Retry-After lower bound across ALL rate-limited
+      // repositories (R05): a later shorter, missing, or invalid header
+      // never erases an earlier valid bound — see
+      // strongestRetryAfterLowerBound.
       let retryAfterSeconds: number | null = null;
       let failureReason: ConnectorFetchOutput['failureReason'] = null;
       let anyFailed = false;
@@ -136,9 +141,9 @@ export function createGithubReleasesConnector(): SourceConnector {
         }
         if (response.status === 429) {
           anyRateLimited = true;
-          retryAfterSeconds = parseRetryAfterSeconds(
-            response.headers.get('retry-after'),
-            effects.nowMs(),
+          retryAfterSeconds = strongestRetryAfterLowerBound(
+            retryAfterSeconds,
+            parseRetryAfterSeconds(response.headers.get('retry-after'), effects.nowMs()),
           );
           continue;
         }
