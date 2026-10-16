@@ -10,6 +10,17 @@
  * failure is a `failed` poll for that feed — but OTHER feeds' durable
  * items still commit; the cursor keeps their state, the broken feed's
  * entry is left untouched, ADR-0038 §5).
+ *
+ * R10 (Round 1.8): a budget-authority denial (`budget_denied` /
+ * `budget_source_missing` from the ingestion transport) ABORTS the whole
+ * multi-feed sequence immediately — no further feed requests — and the
+ * window is deferred WHOLE: no items, the PRIOR per-feed cursor (never
+ * the partially advanced one), typed `budgetDenied` propagation.
+ *
+ * R10.1 (Round 1.8.1): a denial also preserves the prior source-level
+ * validators (B2) and the strongest Retry-After bound observed earlier in
+ * the same sequence (B3); an authority throw keeps the poll's observed
+ * attempt total (B4).
  */
 import { INGESTION_LIMITS } from '../domain/source/source-registry';
 import type { SafeHttpFailureReason } from '../shared/http/safe-http';
@@ -17,7 +28,10 @@ import { safeHttpReasonToHealthReason } from '../shared/http/safe-http';
 import { parseFeedDocument } from './xml/feed-reader';
 import { normalizeRawItem, type NormalizedItemOut } from './normalize';
 import {
+  budgetDenialKindOf,
+  budgetDeniedOutput,
   endpointHost,
+  fetchWithObservedAttempts,
   isXmlContentType,
   parseRetryAfterSeconds,
   strongestRetryAfterLowerBound,
@@ -142,15 +156,36 @@ export function createRssConnector(): SourceConnector {
         if (entry.lastModified !== null) {
           headers['if-modified-since'] = entry.lastModified;
         }
-        const response = await effects.safeFetch({
-          url: feedUrl,
-          headers,
-          byteCap: INGESTION_LIMITS.maxFeedBytes,
-          timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
-          maxRedirects: INGESTION_LIMITS.maxRedirects,
-          allowedHosts: [endpointHost(feedUrl) ?? ''],
-        });
+        // R10.1 (B4): an authority throw mid-sequence keeps the poll's
+        // observed attempt total: prior completed feeds (requestCount) +
+        // the failing sequence's own count, aggregated EXACTLY once.
+        const response = await fetchWithObservedAttempts(requestCount, () =>
+          effects.safeFetch({
+            url: feedUrl,
+            headers,
+            byteCap: INGESTION_LIMITS.maxFeedBytes,
+            timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
+            maxRedirects: INGESTION_LIMITS.maxRedirects,
+            allowedHosts: [endpointHost(feedUrl) ?? ''],
+          }),
+        );
         requestCount += response.requestCount;
+        // R10: a budget-authority denial aborts the WHOLE sequence (no
+        // further feeds, no partial cursor advancement, no items).
+        // R10.1 (B2/B3): the PRIOR source validators and the strongest
+        // Retry-After bound already observed in THIS sequence survive the
+        // denial (zero stays a valid bound).
+        const denial = response.ok ? null : budgetDenialKindOf(response.reason);
+        if (denial !== null) {
+          return budgetDeniedOutput({
+            requestCount,
+            cursor: state.cursor,
+            etag: state.etag,
+            lastModified: state.lastModified,
+            retryAfterSeconds,
+            denialKind: denial,
+          });
+        }
         if (!response.ok) {
           anyFailed = true;
           failureReason = mapFailureReason(response.reason);

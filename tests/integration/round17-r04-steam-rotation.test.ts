@@ -17,7 +17,12 @@ import {
 import { createJobHandlerRegistry } from '../../src/domain/jobs/handler';
 import { scheduleDueSources } from '../../src/application/ingestion/scheduler';
 import { createConnectorRegistry } from '../../src/connectors/registry';
-import { createFetchMock, type QueuedResponse, connectorEffects } from '../helpers/fetch-mock';
+import {
+  createFetchMock,
+  createRawFetchMock,
+  type QueuedResponse,
+  connectorEffects,
+} from '../helpers/fetch-mock';
 import type {
   JobsQueueProducerPort,
   DlqProducerPort,
@@ -84,7 +89,11 @@ const okJson = (body: string): QueuedResponse => ({
 
 interface EngineHarness {
   readonly clock: MutableClock;
-  readonly mock: ReturnType<typeof createFetchMock>;
+  // Round 1.8 (R10) fixture adaptation — SETUP ONLY: the handler builds its
+  // own budgeted ingestion transport from the RAW transport, so this
+  // handler-level harness records raw calls via `createRawFetchMock()`
+  // (same queued response shape). No assertion, label, or test body changed.
+  readonly mock: ReturnType<typeof createRawFetchMock>;
   readonly engine: JobsEngine;
   readonly executor: DbExecutor;
   /** Delivered queue envelopes in order (for direct consumeMessage use). */
@@ -104,18 +113,17 @@ interface EngineHarness {
 function createEngineHarness(startMs: number): EngineHarness {
   const clock = fixedClock(startMs);
   const executor = createDbExecutor(env.DB, { clock });
-  const mock = createFetchMock();
-  const effects = connectorEffects(mock.fetchFn, {});
+  const mock = createRawFetchMock();
 
   const fixedItemId = { value: null as string | null };
   const handlerOptions: SourcePollHandlerOptions = {
     executor,
     connectors: createConnectorRegistry(),
-    safeFetch: effects.safeFetch,
+    fetchFn: mock.fetchFn,
     idGenerator: {
       newId: () => fixedItemId.value ?? `item-${Math.random().toString(36).slice(2, 10)}`,
     },
-    secrets: (name: string) => effects.secrets(name),
+    secrets: () => undefined, // identical semantics: the old bundle carried no secrets
     nowMs: () => clock.now(),
     random: () => 0.5,
   };
@@ -314,11 +322,10 @@ describe('R04 persistence proof — real workerd D1 through the REAL poll handle
     });
     const dueMarker = stateAfterAbort!.next_poll_at - INGESTION_POLL_HOLD_MS;
     h.mock.setResponses([okJson(newsBody(730, 'gid-e')), okJson(newsBody(570, 'gid-f'))]);
-    const effects = connectorEffects(h.mock.fetchFn, {});
     const recoveryHandler = createSourcePollHandler({
       executor: h.executor,
       connectors: createConnectorRegistry(),
-      safeFetch: effects.safeFetch,
+      fetchFn: h.mock.fetchFn,
       idGenerator: { newId: () => `recovery-${Math.random().toString(36).slice(2, 8)}` },
       secrets: () => undefined,
       nowMs: () => h.clock.now(),

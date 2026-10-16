@@ -12,11 +12,22 @@
  * no playlist IDs are invented). One playlistItems page per playlist per
  * poll (newest-first), then ONE videos-details call for the collected
  * ids. Bounded: ≤ RUNTIME_CONFIG_BOUNDS.maxYoutubePlaylists playlists.
+ *
+ * R10 (Round 1.8): a budget-authority denial from the ingestion transport
+ * (playlist page OR details call) aborts the whole sequence with the typed
+ * `budgetDenied` propagation — no items are derived from a denied window.
+ *
+ * R10.1 (Round 1.8.1): a denial also preserves the prior source-level
+ * validators (B2); an authority throw keeps the poll's observed attempt
+ * total (B4).
  */
 import { INGESTION_LIMITS } from '../domain/source/source-registry';
 import { RUNTIME_CONFIG_BOUNDS } from './contract';
 import { normalizeRawItem, type NormalizedItemOut } from './normalize';
 import {
+  budgetDenialKindOf,
+  budgetDeniedOutput,
+  fetchWithObservedAttempts,
   isJsonContentType,
   parseRetryAfterSeconds,
   type ConnectorFetchInput,
@@ -134,15 +145,34 @@ export function createYoutubePlaylistsConnector(): SourceConnector {
         const url =
           `${PLAYLIST_ITEMS_ENDPOINT}?part=snippet,contentDetails` +
           `&playlistId=${encodeURIComponent(playlistId)}&maxResults=${MAX_PAGE_ITEMS}`;
-        const response = await effects.safeFetch({
-          url,
-          headers,
-          byteCap: 1_048_576,
-          timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
-          maxRedirects: INGESTION_LIMITS.maxRedirects,
-          allowedHosts: ['www.googleapis.com'],
-        });
+        // R10.1 (B4): an authority throw mid-sequence keeps the poll's
+        // observed attempt total (prior playlists + failing sequence).
+        const response = await fetchWithObservedAttempts(requestCount, () =>
+          effects.safeFetch({
+            url,
+            headers,
+            byteCap: 1_048_576,
+            timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
+            maxRedirects: INGESTION_LIMITS.maxRedirects,
+            allowedHosts: ['www.googleapis.com'],
+          }),
+        );
         requestCount += response.requestCount;
+        // R10: a budget-authority denial aborts the WHOLE sequence — no
+        // further playlists, no details call, no items, prior cursor.
+        // R10.1 (B2): prior validators pass through (no earlier in-sequence
+        // bound exists — a 429 fails the poll immediately via the guard).
+        const denial = response.ok ? null : budgetDenialKindOf(response.reason);
+        if (denial !== null) {
+          return budgetDeniedOutput({
+            requestCount,
+            cursor: input.state.cursor,
+            etag: input.state.etag,
+            lastModified: input.state.lastModified,
+            retryAfterSeconds: null,
+            denialKind: denial,
+          });
+        }
         // The guard receives the AGGREGATE request count so far (R06):
         // every failure return path must report ALL issued HTTP attempts
         // — earlier successful playlist calls and redirect hops included —
@@ -190,15 +220,36 @@ export function createYoutubePlaylistsConnector(): SourceConnector {
           .map((id) => encodeURIComponent(id))
           .join(',');
         const detailsUrl = `${VIDEOS_ENDPOINT}?part=snippet,contentDetails&id=${ids}&maxResults=${MAX_PAGE_ITEMS}`;
-        const detailsResponse = await effects.safeFetch({
-          url: detailsUrl,
-          headers,
-          byteCap: 1_048_576,
-          timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
-          maxRedirects: INGESTION_LIMITS.maxRedirects,
-          allowedHosts: ['www.googleapis.com'],
-        });
+        // R10.1 (B4): an authority throw on the details call keeps the
+        // poll's observed attempt total (playlist calls + failing sequence).
+        const detailsResponse = await fetchWithObservedAttempts(requestCount, () =>
+          effects.safeFetch({
+            url: detailsUrl,
+            headers,
+            byteCap: 1_048_576,
+            timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
+            maxRedirects: INGESTION_LIMITS.maxRedirects,
+            allowedHosts: ['www.googleapis.com'],
+          }),
+        );
         requestCount += detailsResponse.requestCount;
+        // R10: a budget-authority denial on the details call is NOT silent
+        // enrichment degradation — it ends the sequence by authority (no
+        // items may be derived from a denied window). R10.1 (B2): prior
+        // validators pass through unchanged.
+        const detailsDenial = detailsResponse.ok
+          ? null
+          : budgetDenialKindOf(detailsResponse.reason);
+        if (detailsDenial !== null) {
+          return budgetDeniedOutput({
+            requestCount,
+            cursor: input.state.cursor,
+            etag: input.state.etag,
+            lastModified: input.state.lastModified,
+            retryAfterSeconds: null,
+            denialKind: detailsDenial,
+          });
+        }
         // Details are enrichment: a failed details call does not discard
         // the playlistItems data (degraded but honest provenance).
         if (detailsResponse.ok && detailsResponse.status >= 200 && detailsResponse.status < 300) {

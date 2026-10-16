@@ -55,7 +55,6 @@ import { createJobsEngine, DEFAULT_ENGINE_BOUNDS, type JobsEngine } from './engi
 import { createMaintenanceHeartbeatHandler } from './handlers/maintenance-heartbeat';
 import { createSourcePollHandler } from '../ingestion/poll-handler';
 import { createConnectorRegistry } from '../../connectors/registry';
-import { createSafeFetch } from '../../shared/http/safe-http';
 
 export type EngineResolution =
   | { readonly kind: 'disabled' }
@@ -135,7 +134,12 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
       createSourcePollHandler({
         executor,
         connectors: createConnectorRegistry(),
-        safeFetch: createSafeFetch(globalThis.fetch.bind(globalThis)),
+        // R10 (Round 1.8): the RAW platform fetch only. The handler builds
+        // the MANDATORY per-hop budget-authorizing ingestion transport from
+        // it for every execution — this wiring can never reach an unlimited
+        // transport, and no SafeFetchExecutor can be injected past the
+        // budget authority.
+        fetchFn: globalThis.fetch.bind(globalThis),
         idGenerator: cryptoIdGenerator,
         secrets: (name: string) => (env as Record<string, unknown>)[name] as string | undefined,
         nowMs: () => clock.now(),

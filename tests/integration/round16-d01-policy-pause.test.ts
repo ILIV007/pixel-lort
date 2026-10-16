@@ -21,7 +21,12 @@ import {
   type SourcePollHandlerOptions,
 } from '../../src/application/ingestion/poll-handler';
 import { createConnectorRegistry } from '../../src/connectors/registry';
-import { createFetchMock, connectorEffects } from '../helpers/fetch-mock';
+// Round 1.8 (R10) fixture adaptation — SETUP ONLY: the handler builds its
+// own budgeted ingestion transport from the RAW transport, so this handler-
+// level harness feeds it `createRawFetchMock()` (same queued response
+// shape) instead of the SafeFetchExecutor fake. No assertion, label, or
+// test body changed.
+import { createRawFetchMock } from '../helpers/fetch-mock';
 import { seedSourcesFromRegistry } from '../../src/adapters/db/source-registry-store';
 import { parseEmbeddedRegistry } from '../../src/domain/source/source-registry';
 import type {
@@ -178,27 +183,28 @@ interface PolicyHarness {
   readonly clock: MutableClock;
   readonly sentEnvelopes: QueueEnvelope[];
   readonly dlqSent: DlqReference[];
-  readonly mock: ReturnType<typeof createFetchMock>;
+  readonly mock: ReturnType<typeof createRawFetchMock>;
 }
 
 /**
- * REAL engine + REAL poll/heartbeat handlers with a scripted SafeFetch fake
- * and an EXPLICIT per-invocation gate snapshot — the exact wiring
- * `resolveJobsEngine` performs, with SafeFetchExecutor faked (no live
- * providers). Omitting `gates` reproduces the direct-construction harnesses
- * used by every accepted Phase 3/4 suite (every gate ON, no pause).
+ * REAL engine + REAL poll/heartbeat handlers with a scripted RAW transport
+ * (the handler builds the mandatory budgeted ingestion transport from it,
+ * Round 1.8 R10) and an EXPLICIT per-invocation gate snapshot — the exact
+ * wiring `resolveJobsEngine` performs, with the raw transport scripted (no
+ * live providers). Omitting `gates` reproduces the direct-construction
+ * harnesses used by every accepted Phase 3/4 suite (every gate ON, no
+ * pause).
  */
 function createPolicyHarness(gates?: JobsPolicyGates): PolicyHarness {
   const clock = fixedClock(NOW);
   const executor = createDbExecutor(env.DB, { clock });
-  const mock = createFetchMock();
-  const effects = connectorEffects(mock.fetchFn, {});
+  const mock = createRawFetchMock();
   const handlerOptions: SourcePollHandlerOptions = {
     executor,
     connectors: createConnectorRegistry(),
-    safeFetch: effects.safeFetch,
+    fetchFn: mock.fetchFn,
     idGenerator: { newId: () => `item-${Math.random().toString(36).slice(2, 10)}` },
-    secrets: (name: string) => effects.secrets(name),
+    secrets: () => undefined, // identical semantics: the old bundle carried no secrets
     nowMs: () => clock.now(),
     random: () => 0.5,
   };

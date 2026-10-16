@@ -9,10 +9,9 @@ import { createYoutubePlaylistsConnector } from '../../src/connectors/youtube-pl
 import { createRssConnector } from '../../src/connectors/rss';
 import { createFetchMock, connectorEffects } from '../helpers/fetch-mock';
 import { resolveJobsEngine } from '../../src/application/jobs/engine-env';
-import { scheduleDueSources } from '../../src/application/ingestion/scheduler';
 import { createConnectorRegistry } from '../../src/connectors/registry';
+import { scheduleDueSources } from '../../src/application/ingestion/scheduler';
 import { createSourcePollHandler } from '../../src/application/ingestion/poll-handler';
-import { createSafeFetch } from '../../src/shared/http/safe-http';
 import { readIngestionBudget } from '../../src/adapters/db/ingestion-budget-store';
 import type { WorkerEnv } from '../../src/shared/types/env';
 const NOW = 1770000000000;
@@ -204,7 +203,11 @@ it('R10: redirects must not consume requests beyond a one-request daily budget',
     params: [NOW + 120000],
   });
   let calls = 0;
-  const safe = createSafeFetch((async () => {
+  // Round 1.8 (R10) fixture adaptation — SETUP ONLY: the raw scripted fetch
+  // is now passed directly to the handler (`fetchFn`), which builds the
+  // mandatory budgeted ingestion transport itself. The script, invocation
+  // and both assertion lines below are unchanged.
+  const fetchFn = (async () => {
     calls++;
     return calls === 1
       ? new Response(null, {
@@ -215,11 +218,11 @@ it('R10: redirects must not consume requests beyond a one-request daily budget',
           status: 200,
           headers: { 'content-type': 'application/xml' },
         });
-  }) as typeof fetch);
+  }) as typeof fetch;
   const handler = createSourcePollHandler({
     executor: db,
     connectors: createConnectorRegistry(),
-    safeFetch: safe,
+    fetchFn,
     idGenerator: { newId: () => crypto.randomUUID() },
     secrets: () => undefined,
     nowMs: () => NOW,

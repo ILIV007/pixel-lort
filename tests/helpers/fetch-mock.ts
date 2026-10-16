@@ -87,3 +87,60 @@ export function connectorEffects(
     secrets: (name: string) => secrets[name],
   };
 }
+
+/**
+ * Round 1.8 (R10): scripted RAW `typeof fetch` transport for HANDLER-level
+ * suites. Since Round 1.8 the poll handler builds its own budgeted
+ * ingestion transport from the raw transport (the budget authority is
+ * mandatory at that wiring point), so handler harnesses feed it a raw
+ * scripted fetch instead of a SafeFetchExecutor fake. Same queued-response
+ * shape as `createFetchMock` (status/headers/bodyText/failReason):
+ * - `failReason` simulates a transport failure by THROWING (the real
+ *   SafeFetch classifies it as `network_error`);
+ * - bodyless terminal statuses (304) are constructed with a null body;
+ * - every raw call is recorded (url, method, headers) exactly as the REAL
+ *   transport issued it.
+ * NO live network (AGENTS.md §4). Connector CONTRACT tests keep using the
+ * SafeFetchExecutor fake above; raw-port and handler suites use THIS.
+ */
+export interface RawFetchMock {
+  readonly fetchFn: typeof fetch;
+  readonly calls: readonly RecordedCall[];
+  /** Change the scripted response queue between steps. */
+  setResponses(responses: readonly QueuedResponse[]): void;
+}
+
+export function createRawFetchMock(initial: readonly QueuedResponse[] = []): RawFetchMock {
+  const calls: RecordedCall[] = [];
+  let responses = [...initial];
+  const fetchFn = (async (url: string | URL | RequestInfo, init?: RequestInit) => {
+    const response = responses.shift();
+    const headers =
+      init?.headers instanceof Headers
+        ? Object.fromEntries(init.headers.entries())
+        : Array.isArray(init?.headers)
+          ? Object.fromEntries(init?.headers ?? [])
+          : { ...(init?.headers as Record<string, string> | undefined) };
+    calls.push({ url: String(url), method: init?.method ?? 'GET', headers });
+    if (response === undefined || response.failReason !== undefined) {
+      // Simulated raw transport failure — the real transport classifies
+      // this as `network_error` (and the unit stays charged: a thrown
+      // attempt consumes its unit, R10).
+      throw new TypeError('simulated raw transport failure');
+    }
+    const status = response.status ?? 200;
+    const bodyless = status === 204 || status === 304;
+    const body = bodyless ? null : (response.bodyText ?? '');
+    return new Response(body, {
+      status,
+      headers: response.headers ?? {},
+    });
+  }) as typeof fetch;
+  return {
+    fetchFn,
+    calls,
+    setResponses(next: readonly QueuedResponse[]) {
+      responses = [...next];
+    },
+  };
+}

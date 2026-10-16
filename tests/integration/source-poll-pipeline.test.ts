@@ -21,7 +21,12 @@ import type {
 } from '../../src/adapters/queue/jobs-producer';
 import type { QueueEnvelope } from '../../src/domain/jobs/envelope';
 import { fixedClock, type MutableClock } from '../../src/shared/time/clock';
-import { createFetchMock, connectorEffects } from '../helpers/fetch-mock';
+// Round 1.8 (R10) fixture adaptation — SETUP ONLY: the handler builds its
+// own budgeted ingestion transport from the RAW transport, so this
+// handler-level harness feeds it `createRawFetchMock()` (same queued
+// response shape) instead of the SafeFetchExecutor fake. No assertion,
+// label, or test body changed.
+import { createRawFetchMock } from '../helpers/fetch-mock';
 import { parseEmbeddedRegistry } from '../../src/domain/source/source-registry';
 import { seedSourcesFromRegistry } from '../../src/adapters/db/source-registry-store';
 import { reserveSourcePoll } from '../../src/adapters/db/source-ingest-store';
@@ -58,7 +63,7 @@ interface Harness {
   readonly executor: DbExecutor;
   readonly engine: JobsEngine;
   readonly clock: MutableClock;
-  readonly mock: ReturnType<typeof createFetchMock>;
+  readonly mock: ReturnType<typeof createRawFetchMock>;
   readonly sentEnvelopes: QueueEnvelope[];
   readonly handlerOptions: SourcePollHandlerOptions;
 }
@@ -66,17 +71,16 @@ interface Harness {
 function createHarness(options?: { random?: () => number }): Harness {
   const clock = fixedClock(NOW);
   const executor = createDbExecutor(env.DB, { clock });
-  const mock = createFetchMock();
-  const effects = connectorEffects(mock.fetchFn, {});
+  const mock = createRawFetchMock();
 
   const handlerOptions: SourcePollHandlerOptions = {
     executor,
     connectors: createConnectorRegistry(),
-    safeFetch: effects.safeFetch,
+    fetchFn: mock.fetchFn,
     idGenerator: {
       newId: () => `item-${Math.random().toString(36).slice(2, 10)}`,
     },
-    secrets: (name: string) => effects.secrets(name),
+    secrets: () => undefined, // identical semantics: the old bundle carried no secrets
     nowMs: () => clock.now(),
     random: options?.random ?? (() => 0.5),
   };

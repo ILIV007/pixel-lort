@@ -6,12 +6,25 @@
  * poll) and conditional GET via If-None-Match. Optional
  * `Authorization: Bearer` ONLY when GITHUB_TOKEN is configured (header,
  * never a query string).
+ *
+ * R10 (Round 1.8): a budget-authority denial from the ingestion transport
+ * aborts the whole multi-repository sequence immediately with the typed
+ * `budgetDenied` propagation and the PRIOR per-repo etag cursor — no
+ * items and no partial validator progress from a denied window.
+ *
+ * R10.1 (Round 1.8.1): a denial also preserves the prior source-level
+ * validators (B2) and the strongest Retry-After bound observed earlier in
+ * the same sequence (B3); an authority throw keeps the poll's observed
+ * attempt total (B4).
  */
 import { INGESTION_LIMITS } from '../domain/source/source-registry';
 import { RUNTIME_CONFIG_BOUNDS } from './contract';
 import { normalizeRawItem, type NormalizedItemOut } from './normalize';
 import {
+  budgetDenialKindOf,
+  budgetDeniedOutput,
   endpointHost,
+  fetchWithObservedAttempts,
   isJsonContentType,
   parseRetryAfterSeconds,
   strongestRetryAfterLowerBound,
@@ -125,15 +138,37 @@ export function createGithubReleasesConnector(): SourceConnector {
         if (knownEtag !== undefined) {
           conditionalHeaders['if-none-match'] = knownEtag;
         }
-        const response = await effects.safeFetch({
-          url,
-          headers: conditionalHeaders,
-          byteCap: 1_048_576,
-          timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
-          maxRedirects: INGESTION_LIMITS.maxRedirects,
-          allowedHosts: ['api.github.com'],
-        });
+        // R10.1 (B4): an authority throw mid-sequence keeps the poll's
+        // observed attempt total: prior completed repos (requestCount) +
+        // the failing sequence's own count, aggregated EXACTLY once.
+        const response = await fetchWithObservedAttempts(requestCount, () =>
+          effects.safeFetch({
+            url,
+            headers: conditionalHeaders,
+            byteCap: 1_048_576,
+            timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
+            maxRedirects: INGESTION_LIMITS.maxRedirects,
+            allowedHosts: ['api.github.com'],
+          }),
+        );
         requestCount += response.requestCount;
+        // R10: a budget-authority denial aborts the WHOLE sequence (no
+        // further repos, no partial etag progress, no items — the prior
+        // cursor is preserved so the window refetches whole later).
+        // R10.1 (B2/B3): the PRIOR source validators and the strongest
+        // Retry-After bound already observed in THIS sequence survive the
+        // denial (zero stays a valid bound).
+        const denial = response.ok ? null : budgetDenialKindOf(response.reason);
+        if (denial !== null) {
+          return budgetDeniedOutput({
+            requestCount,
+            cursor: state.cursor,
+            etag: state.etag,
+            lastModified: state.lastModified,
+            retryAfterSeconds,
+            denialKind: denial,
+          });
+        }
         if (!response.ok) {
           anyFailed = true;
           failureReason = 'http_status_error';

@@ -9,11 +9,23 @@
  * listing URL is materialized ONLY through the template's `{subreddit}`
  * slot — never arbitrary string interpolation). Signal-only policy and
  * stripDownloadLinks are honored in normalization.
+ *
+ * R10 (Round 1.8): a budget-authority denial from the ingestion transport
+ * (token request OR any listing request) aborts the whole sequence with
+ * the typed `budgetDenied` propagation and the PRIOR saved cursor — no
+ * items are derived from a denied window.
+ *
+ * R10.1 (Round 1.8.1): a denial also preserves the prior source-level
+ * validators (B2); an authority throw keeps the poll's observed attempt
+ * total (B4).
  */
 import { INGESTION_LIMITS } from '../domain/source/source-registry';
 import { RUNTIME_CONFIG_BOUNDS } from './contract';
 import { normalizeRawItem, type NormalizedItemOut } from './normalize';
 import {
+  budgetDenialKindOf,
+  budgetDeniedOutput,
+  fetchWithObservedAttempts,
   isJsonContentType,
   parseRetryAfterSeconds,
   type ConnectorFetchInput,
@@ -104,23 +116,42 @@ export function createRedditOauthConnector(): SourceConnector {
       }
 
       // 1. App-only OAuth token (client_credentials, Basic auth header).
-      const tokenResponse = await effects.safeFetch({
-        url: TOKEN_ENDPOINT,
-        method: 'POST',
-        body: 'grant_type=client_credentials',
-        headers: {
-          accept: 'application/json',
-          'content-type': 'application/x-www-form-urlencoded',
-          // Basic auth composed here at call time — never stored/logged.
-          authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
-          'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellort)',
-        },
-        byteCap: 65_536,
-        timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
-        maxRedirects: INGESTION_LIMITS.maxRedirects,
-        allowedHosts: ['www.reddit.com'],
-      });
+      // R10.1 (B4): an authority throw keeps the poll's observed attempt
+      // total (failing sequence count; no prior sequence exists yet).
+      const tokenResponse = await fetchWithObservedAttempts(0, () =>
+        effects.safeFetch({
+          url: TOKEN_ENDPOINT,
+          method: 'POST',
+          body: 'grant_type=client_credentials',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/x-www-form-urlencoded',
+            // Basic auth composed here at call time — never stored/logged.
+            authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+            'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellort)',
+          },
+          byteCap: 65_536,
+          timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
+          maxRedirects: INGESTION_LIMITS.maxRedirects,
+          allowedHosts: ['www.reddit.com'],
+        }),
+      );
       let requestCount = tokenResponse.requestCount;
+      // R10: a budget-authority denial on the token request aborts the
+      // sequence BEFORE any listing (no further network, prior cursor).
+      // R10.1 (B2): prior validators pass through (no earlier in-sequence
+      // bound exists — a token 429 returns rate_limited immediately).
+      const tokenDenial = tokenResponse.ok ? null : budgetDenialKindOf(tokenResponse.reason);
+      if (tokenDenial !== null) {
+        return budgetDeniedOutput({
+          requestCount,
+          cursor: input.state.cursor,
+          etag: input.state.etag,
+          lastModified: input.state.lastModified,
+          retryAfterSeconds: null,
+          denialKind: tokenDenial,
+        });
+      }
       if (!tokenResponse.ok) {
         return failed('http_status_error', requestCount);
       }
@@ -170,19 +201,38 @@ export function createRedditOauthConnector(): SourceConnector {
         // Template materialization: validated identifier ONLY.
         const listingUrl = LISTING_TEMPLATE.replace('{subreddit}', encodeURIComponent(subreddit));
         const url = `${listingUrl}?limit=${parsedConfig.data.limit}&raw_json=1`;
-        const response = await effects.safeFetch({
-          url,
-          headers: {
-            accept: 'application/json',
-            authorization: `Bearer ${accessToken}`,
-            'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellort)',
-          },
-          byteCap: 1_048_576,
-          timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
-          maxRedirects: INGESTION_LIMITS.maxRedirects,
-          allowedHosts: ['oauth.reddit.com'],
-        });
+        // R10.1 (B4): an authority throw mid-sequence keeps the poll's
+        // observed attempt total (token call + prior listings + failing
+        // sequence, aggregated exactly once).
+        const response = await fetchWithObservedAttempts(requestCount, () =>
+          effects.safeFetch({
+            url,
+            headers: {
+              accept: 'application/json',
+              authorization: `Bearer ${accessToken}`,
+              'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellort)',
+            },
+            byteCap: 1_048_576,
+            timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
+            maxRedirects: INGESTION_LIMITS.maxRedirects,
+            allowedHosts: ['oauth.reddit.com'],
+          }),
+        );
         requestCount += response.requestCount;
+        // R10: a budget-authority denial aborts the whole sequence — no
+        // further subreddits, no items, the PRIOR saved cursor. R10.1 (B2):
+        // prior validators pass through unchanged.
+        const denial = response.ok ? null : budgetDenialKindOf(response.reason);
+        if (denial !== null) {
+          return budgetDeniedOutput({
+            requestCount,
+            cursor: input.state.cursor,
+            etag: input.state.etag,
+            lastModified: input.state.lastModified,
+            retryAfterSeconds: null,
+            denialKind: denial,
+          });
+        }
         if (!response.ok) {
           return failed('http_status_error', requestCount);
         }

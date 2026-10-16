@@ -1,11 +1,31 @@
 /**
- * `sources.fetch_poll` handler (Phase 4 — ADR-0038 §4/§5).
+ * `sources.fetch_poll` handler (Phase 4 — ADR-0038 §4/§5; per-hop budget
+ * authority reshaped by Round 1.8 R10).
  *
  * Executes ONE bounded poll attempt for one source:
- *   load source+state → defense-in-depth pre-flight → ATOMIC budget
- *   reservation → connector fetch (safe HTTP) → normalize (inside the
- *   connector) → ATOMIC guarded commit (items + fenced state) →
- *   budget reconciliation of observed extra requests.
+ *   load source+state → defense-in-depth pre-flight → connector fetch
+ *   (safe HTTP through the MANDATORY source-bound budgeted transport) →
+ *   normalize (inside the connector) → ATOMIC guarded commit (items +
+ *   fenced state).
+ *
+ * R10 budget authority: there is NO planned reservation and NO post-fetch
+ * reconciliation. The handler builds the ingestion transport PER EXECUTION
+ * via `createIngestionSafeFetch`, binding an authorizer that atomically
+ * consumes EXACTLY ONE source/day unit (Tehran bucket resolved at EACH
+ * authorization) before EVERY raw fetch attempt — hop 0, every redirect
+ * hop, every later connector request. A denial (`budget_denied`) defers
+ * the WHOLE window: no items, prior cursor/validators preserved EXACTLY
+ * (R10.1/B2 — the commit pins the loaded source row's cursor, etag and
+ * last-modified), the strongest provider Retry-After bound observed in the
+ * denied sequence is carried through (R10.1/B3), and scheduling satisfies
+ * BOTH the budget-defer minimum AND every observed provider lower bound.
+ * A mid-sequence missing source surfaces the
+ * same permanent `ingestion_source_missing` job outcome the old job-start
+ * path used. A D1 failure at authorization fails closed BEFORE network and
+ * takes the distinct infrastructure job-retry path (no terminal state
+ * write; durable charges stand; durable cursor unchanged; the typed
+ * `SafeFetchAuthorityError` carries the poll's OBSERVED raw-attempt total
+ * (R10.1/B4), exposed on the stable warning — separate from charges).
  *
  * Retry ownership (ADR-0038 §4): provider-side conditions (timeout, 5xx,
  * 429, malformed, auth) are owned by the SOURCE schedule — the handler
@@ -28,13 +48,12 @@ import {
   type PollTerminalState,
 } from '../../adapters/db/source-ingest-store';
 import {
-  reserveIngestionBudget,
-  reconcileIngestionBudget,
+  authorizeIngestionUnit,
   readIngestionBudget,
 } from '../../adapters/db/ingestion-budget-store';
 import type { ConnectorRegistry } from '../../connectors/registry';
 import type { ConnectorFetchOutput } from '../../connectors/contract';
-import type { SafeFetchExecutor } from '../../shared/http/safe-http';
+import { createIngestionSafeFetch, SafeFetchAuthorityError } from '../../shared/http/safe-http';
 import { tehranBudgetDay } from '../../shared/time/tehran-day';
 import {
   INGESTION_BACKOFF_CAP_MS,
@@ -50,12 +69,34 @@ import type { Logger } from '../../observability/logger';
 export interface SourcePollHandlerOptions {
   readonly executor: DbExecutor;
   readonly connectors: ConnectorRegistry;
-  readonly safeFetch: SafeFetchExecutor;
+  /**
+   * R10: the RAW transport (`typeof fetch`) over which the handler builds
+   * the MANDATORY per-hop budget-authorizing ingestion transport for every
+   * execution. Production wiring passes the platform fetch (engine-env); a
+   * pre-built SafeFetchExecutor is deliberately NOT accepted here — the
+   * ingestion path can never be wired around the budget authority.
+   */
+  readonly fetchFn: typeof fetch;
   readonly idGenerator: IdGenerator;
   readonly secrets: (name: string) => string | undefined;
   readonly nowMs: () => number;
   readonly random: () => number;
   readonly logger?: Logger;
+}
+
+/**
+ * R10 infrastructure marker thrown by the transport authorizer when the
+ * budget-store read/write itself fails (D1 outage). It NEVER escapes the
+ * ingestion transport boundary: safe-http wraps ANY authorizer throw into
+ * the typed `SafeFetchAuthorityError` (carrying the observed attempt count,
+ * no raw payloads), which the handler catches below. Classification is
+ * infrastructure end to end — never quota exhaustion.
+ */
+class IngestionBudgetAuthorityError extends Error {
+  constructor() {
+    super('ingestion budget authority unavailable');
+    this.name = 'IngestionBudgetAuthorityError';
+  }
 }
 
 interface SourceWithState {
@@ -92,7 +133,9 @@ export function createSourcePollHandler(
       }
       const { sourceId, scheduledForMs } = parsed.data;
       const holdUntilMs = scheduledForMs + INGESTION_POLL_HOLD_MS;
-      const nowMs = options.nowMs();
+      // R10: `nowMs` is resolved at EACH authorization (options.nowMs()
+      // inside the transport authorizer) and again at the terminal commit —
+      // never once at job start.
 
       const source = await options.executor.first<SourceWithState>({
         sql: SOURCE_SELECT_SQL,
@@ -143,32 +186,33 @@ export function createSourcePollHandler(
         return { kind: 'success' };
       }
 
-      // ATOMIC budget reservation BEFORE any network call (ADR-0038 §6).
-      const planned = Math.max(1, connector.plannedRequestCount(config));
-      const budget = await reserveIngestionBudget(options.executor, {
-        sourceId,
-        count: planned,
-        nowMs,
+      // R10: build the source-bound budgeted ingestion transport for THIS
+      // execution. The authorizer resolves `nowMs` at EACH authorization
+      // (Tehran bucket per hop), consumes EXACTLY ONE unit atomically, and
+      // maps a D1 storage failure onto the typed infrastructure error (the
+      // transport fails closed with zero raw requests; the error reaches
+      // the typed catch below — it is never quota exhaustion).
+      const ingestionFetch = createIngestionSafeFetch({
+        fetchFn: options.fetchFn,
+        authorizeUnit: async () => {
+          try {
+            const grant = await authorizeIngestionUnit(options.executor, {
+              sourceId,
+              nowMs: options.nowMs(),
+            });
+            if (grant.kind === 'authorized') {
+              return { kind: 'granted' };
+            }
+            return grant.kind === 'denied' ? { kind: 'budget_denied' } : { kind: 'source_missing' };
+          } catch {
+            // Storage failure inside the authority: infrastructure, not
+            // quota. The transport has issued no raw request for this hop.
+            throw new IngestionBudgetAuthorityError();
+          }
+        },
       });
-      if (budget.kind === 'source_missing') {
-        return { kind: 'permanent', reasonCode: 'ingestion_source_missing' };
-      }
-      if (budget.kind === 'exhausted') {
-        await commitTerminalState(options, source, holdUntilMs, {
-          status: 'failed',
-          items: [],
-          cursor: source.cursor,
-          etag: source.etag,
-          lastModified: source.last_modified,
-          retryAfterSeconds: null,
-          requestCount: 0,
-          malformedCount: 0,
-          failureReason: 'budget_exhausted',
-        });
-        return { kind: 'success' };
-      }
 
-      // ONE bounded connector fetch sequence.
+      // ONE bounded connector fetch sequence through the budgeted transport.
       let fetched: ConnectorFetchOutput;
       try {
         fetched = await connector.fetch({
@@ -176,13 +220,27 @@ export function createSourcePollHandler(
           config,
           state: { etag: source.etag, lastModified: source.last_modified, cursor: source.cursor },
           effects: {
-            safeFetch: options.safeFetch,
+            safeFetch: ingestionFetch,
             nowMs: options.nowMs,
             random: options.random,
             secrets: options.secrets,
           },
         });
       } catch (error) {
+        if (error instanceof SafeFetchAuthorityError) {
+          // Distinct stable infrastructure path (R10; R10.1/B4): NO
+          // terminal state write (durable cursor unchanged), job-retry
+          // ownership, and the poll's safe OBSERVED raw-attempt total
+          // (prior completed sequences + the failing one, aggregated once
+          // by the connectors) is exposed on the stable warning — a
+          // SEPARATE metric from durable charged units, never derived from
+          // them. No error text/URL/headers/body is ever logged.
+          options.logger?.warn('ingestion.poll.budget_authority_unavailable', {
+            errorCode: 'job_handler_retryable_error',
+            observedRequests: error.requestCount,
+          });
+          return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+        }
         options.logger?.warn('ingestion.poll.connector_threw', {
           errorCode: 'connector_unavailable',
         });
@@ -201,13 +259,18 @@ export function createSourcePollHandler(
         return { kind: 'success' };
       }
 
-      // Reconcile OBSERVED extra requests (redirect hops, extra API calls).
-      const extra = Math.max(0, fetched.requestCount - planned);
-      if (extra > 0) {
-        await reconcileIngestionBudget(options.executor, { sourceId, extraCount: extra, nowMs });
+      // R10: a mid-sequence missing source (the row vanished between the
+      // existence check and a later authorization) surfaces the SAME
+      // permanent outcome the old job-start path used — no terminal state
+      // write against a possibly-vanished source.
+      if (fetched.budgetDenied === true && fetched.budgetDenialKind === 'source_missing') {
+        return { kind: 'permanent', reasonCode: 'ingestion_source_missing' };
       }
 
-      // Atomic guarded commit: items + fenced terminal state.
+      // Atomic guarded commit: items + fenced terminal state. Budget-
+      // denied exits arrive here with the connector's typed output (no
+      // items, prior cursor/validators, failureReason 'budget_exhausted')
+      // and take the existing INGESTION_BUDGET_RETRY_MS pacing branch.
       const result = await commitTerminalState(options, source, holdUntilMs, fetched);
 
       options.logger?.debug('ingestion.poll.completed', {
@@ -278,7 +341,17 @@ async function commitTerminalState(
 
   let nextPollAtMs: number;
   let circuitOpenUntilMs: number | null = null;
-  if (fetched.retryAfterSeconds !== null) {
+  if (fetched.budgetDenied === true) {
+    // R10.1 (B3): a denied window must never be scheduled EARLIER than
+    // either its budget-defer minimum OR the strongest provider Retry-After
+    // lower bound already observed in the denied sequence (R05 invariant at
+    // the new boundary; ZERO is a valid bound and is never treated as
+    // unknown). The ladder does not apply (a denial is not a provider
+    // failure); ordinary (non-denied) outcomes keep the exact prior policy.
+    const providerBoundMs =
+      fetched.retryAfterSeconds !== null ? fetched.retryAfterSeconds * 1000 : 0;
+    nextPollAtMs = nowMs + Math.max(INGESTION_BUDGET_RETRY_MS, providerBoundMs);
+  } else if (fetched.retryAfterSeconds !== null) {
     // Retry-After is a TRUE lower bound (ADR-0038 §4): never earlier than
     // the provider's bound, even when the generic ladder is smaller.
     const retryAfterMs = fetched.retryAfterSeconds * 1000;
@@ -306,9 +379,19 @@ async function commitTerminalState(
 
   const state: PollTerminalState = {
     // 304: validators and cursor pass through UNCHANGED.
-    cursor: fetched.cursor,
-    etag: fetched.status === 'not_modified' ? source.etag : fetched.etag,
-    lastModified: fetched.status === 'not_modified' ? source.last_modified : fetched.lastModified,
+    // R10.1 (B2): a budget-denied window pins the LOADED source row's
+    // cursor/etag/last-modified EXACTLY — a denial by authority must never
+    // null or partially advance the persisted state (coherent across the
+    // contract helper and this real commit path).
+    cursor: fetched.budgetDenied === true ? source.cursor : fetched.cursor,
+    etag:
+      fetched.budgetDenied === true || fetched.status === 'not_modified'
+        ? source.etag
+        : fetched.etag,
+    lastModified:
+      fetched.budgetDenied === true || fetched.status === 'not_modified'
+        ? source.last_modified
+        : fetched.lastModified,
     nextPollAtMs,
     success: fetched.status === 'changed' || fetched.status === 'not_modified',
     lastChangedAtMs: fetched.status === 'changed' ? nowMs : null,

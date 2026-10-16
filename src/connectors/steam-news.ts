@@ -23,11 +23,18 @@
  * visited within ceil(N/B) SUCCESSFUL polls; a permanently failing
  * selected window delays rotation under the conservative retry policy
  * rather than silently skipping data.
+ *
+ * R10 (Round 1.8): a budget-authority denial from the ingestion transport
+ * aborts the batch immediately (no further app requests) and returns the
+ * SAME retry cursor as any failure — a denied window cannot rotate ahead.
  */
 import { INGESTION_LIMITS } from '../domain/source/source-registry';
 import { normalizeRawItem, type NormalizedItemOut } from './normalize';
 import {
+  budgetDenialKindOf,
+  budgetDeniedOutput,
   endpointHost,
+  fetchWithObservedAttempts,
   isJsonContentType,
   parseRetryAfterSeconds,
   type ConnectorFetchInput,
@@ -138,15 +145,37 @@ export function createSteamNewsConnector(): SourceConnector {
 
       for (const appId of batch) {
         const url = `${STEAM_ENDPOINT}?appid=${appId}&count=${maxItemsPerApp}&maxlength=800&format=json`;
-        const response = await effects.safeFetch({
-          url,
-          headers: { accept: 'application/json' },
-          byteCap: 1_048_576,
-          timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
-          maxRedirects: INGESTION_LIMITS.maxRedirects,
-          allowedHosts: ['api.steampowered.com'],
-        });
+        // R10.1 (B4): an authority throw mid-batch keeps the poll's
+        // observed attempt total (prior apps + failing sequence, once).
+        const response = await fetchWithObservedAttempts(requestCount, () =>
+          effects.safeFetch({
+            url,
+            headers: { accept: 'application/json' },
+            byteCap: 1_048_576,
+            timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
+            maxRedirects: INGESTION_LIMITS.maxRedirects,
+            allowedHosts: ['api.steampowered.com'],
+          }),
+        );
         requestCount += response.requestCount;
+        // R10: a budget-authority denial aborts the batch — the cursor is
+        // preserved EXACTLY as persisted (nothing invented, nothing wiped,
+        // R04 invariant: a null prior cursor stays null), so the SAME
+        // window is retried after the budget becomes available. A denied
+        // window can never rotate ahead. R10.1 (B2): the prior source
+        // validators pass through unchanged (no bound was observed earlier
+        // in this sequence — Steam returns rate_limited immediately on 429).
+        const denial = response.ok ? null : budgetDenialKindOf(response.reason);
+        if (denial !== null) {
+          return budgetDeniedOutput({
+            requestCount,
+            cursor: state.cursor,
+            etag: state.etag,
+            lastModified: state.lastModified,
+            retryAfterSeconds: null,
+            denialKind: denial,
+          });
+        }
         if (!response.ok) {
           return failed('http_status_error', requestCount, retryCursor);
         }

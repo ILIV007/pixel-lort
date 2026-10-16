@@ -10,7 +10,8 @@
  */
 import type { SourceHealthReason } from '../domain/source/types';
 import type { NormalizedItemOut } from './normalize';
-import type { SafeFetchExecutor } from '../shared/http/safe-http';
+import type { SafeFetchExecutor, SafeHttpFailureReason } from '../shared/http/safe-http';
+import { SafeFetchAuthorityError, type SafeFetchResult } from '../shared/http/safe-http';
 
 /** Secret-resolution port (values never logged — AGENTS.md §3). */
 export type SecretReader = (name: string) => string | undefined;
@@ -56,6 +57,28 @@ export interface ConnectorFetchOutput {
   readonly malformedCount: number;
   /** Stable health reason when status === 'failed'. */
   readonly failureReason: SourceHealthReason | null;
+  /**
+   * R10 (Round 1.8): the ingestion transport's budget authority refused a
+   * unit mid-sequence (`budget_denied` or `budget_source_missing`). The
+   * sequence ended by AUTHORITY, not by provider failure: NO items may be
+   * derived from it, the PRIOR cursor/validators are proposed unchanged
+   * (R10.1/B2: saved etag/lastModified survive the denial EXACTLY), and
+   * `failureReason` is 'budget_exhausted' (never HTTP 429, never an
+   * auth failure, never infrastructure). `retryAfterSeconds` carries the
+   * strongest provider bound observed earlier in the SAME sequence
+   * (R10.1/B3). Connectors set this on EVERY exit path triggered by a
+   * denial and abort the whole sequence (no further network). Absent or
+   * undefined for every other outcome.
+   */
+  readonly budgetDenied?: true;
+  /**
+   * R10: which authority refusal ended the sequence (set iff `budgetDenied`).
+   * 'budget_exhausted' — the source/day cap (or a quota of 0) refused the
+   * unit. 'source_missing' — the source row vanished between the handler's
+   * existence check and a later hop; the handler surfaces the same permanent
+   * `ingestion_source_missing` job outcome the old job-start path used.
+   */
+  readonly budgetDenialKind?: 'budget_exhausted' | 'source_missing';
 }
 
 /** The Phase 4 connector port. */
@@ -82,6 +105,85 @@ export const RUNTIME_CONFIG_BOUNDS = {
   maxGithubRepositories: 25,
   maxRedditSubreddits: 10,
 } as const;
+
+/**
+ * R10: classify a transport failure reason as a budget-authority denial.
+ * Returns the denial kind for `budget_denied` / `budget_source_missing` and
+ * null for every other reason. Connectors MUST check this BEFORE the
+ * generic !ok handling: a denial aborts the whole sequence with the typed
+ * `budgetDenied` propagation instead of degrading into a provider-facing
+ * health reason.
+ */
+export function budgetDenialKindOf(
+  reason: SafeHttpFailureReason,
+): 'budget_exhausted' | 'source_missing' | null {
+  if (reason === 'budget_denied') {
+    return 'budget_exhausted';
+  }
+  if (reason === 'budget_source_missing') {
+    return 'source_missing';
+  }
+  return null;
+}
+
+/**
+ * R10: the typed connector output for a budget-denied (incomplete-by-
+ * authority) sequence. `requestCount` is the cumulative OBSERVED raw
+ * attempt count (hops included) up to the denial; `cursor`, `etag` and
+ * `lastModified` are the PRIOR persisted state (never a partially advanced
+ * or nulled one — R10.1/B2: a denied window must not destroy saved
+ * validators, tested with NON-NULL fixtures); `retryAfterSeconds` is the
+ * STRONGEST provider Retry-After lower bound already observed earlier in
+ * the SAME sequence (R10.1/B3 — a subsequent denial must not erase it,
+ * zero stays valid); items are always empty — a denied window is deferred
+ * whole and refetched after the budget becomes available.
+ */
+export function budgetDeniedOutput(input: {
+  readonly requestCount: number;
+  readonly cursor: string | null;
+  readonly etag: string | null;
+  readonly lastModified: string | null;
+  readonly retryAfterSeconds: number | null;
+  readonly denialKind: 'budget_exhausted' | 'source_missing';
+}): ConnectorFetchOutput {
+  return {
+    status: 'failed',
+    items: [],
+    cursor: input.cursor,
+    etag: input.etag,
+    lastModified: input.lastModified,
+    retryAfterSeconds: input.retryAfterSeconds,
+    requestCount: input.requestCount,
+    malformedCount: 0,
+    failureReason: 'budget_exhausted',
+    budgetDenied: true,
+    budgetDenialKind: input.denialKind,
+  };
+}
+
+/**
+ * R10.1 (Round 1.8.1, B4): run ONE top-level SafeFetch sequence and, when
+ * the budget authority throws mid-sequence, re-surface the typed
+ * `SafeFetchAuthorityError` with the POLL-LEVEL observed attempt total:
+ * prior completed sequences' counts (`priorObserved`) + the failing
+ * sequence's own count — each aggregated EXACTLY ONCE. The handler exposes
+ * this safe attempted total on its stable infrastructure warning; it is
+ * DISTINCT from durable charged units (charge-before-fetch windows can
+ * legitimately differ). No raw error payload is attached.
+ */
+export async function fetchWithObservedAttempts(
+  priorObserved: number,
+  sequence: () => Promise<SafeFetchResult>,
+): Promise<SafeFetchResult> {
+  try {
+    return await sequence();
+  } catch (error) {
+    if (error instanceof SafeFetchAuthorityError) {
+      throw new SafeFetchAuthorityError(priorObserved + error.requestCount);
+    }
+    throw error;
+  }
+}
 
 /** Parse a Retry-After header (delta-seconds or HTTP-date) as seconds. */
 export function parseRetryAfterSeconds(headerValue: string | null, nowMs: number): number | null {
