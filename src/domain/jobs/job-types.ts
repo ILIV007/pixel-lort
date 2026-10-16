@@ -87,6 +87,11 @@ export const JOB_ERROR_CODES = [
   // Phase 4 source ingestion (ADR-0038 §4) — stable, safe constants.
   'ingestion_source_missing',
   'ingestion_connector_unavailable',
+  // Round 1.6 policy pause (ADR-0040): a schema-KNOWN type whose handler is
+  // missing in this deployment while its enablement gate is NOT holding it
+  // back — a visible wiring bug, deliberately DISTINCT from the pause
+  // (`paused_by_policy`) and from the unknown-type poison class.
+  'handler_misconfigured',
 ] as const;
 
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];

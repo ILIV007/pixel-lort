@@ -31,6 +31,18 @@
  * Logging: stable event names, counts, and authored codes only — never
  * payloads, envelope bodies, SQL text, or error strings (AGENTS.md §3,
  * ADR-0017/0022).
+ *
+ * Policy pause (Round 1.6 — ADR-0040, the D01 contract): job types mapped
+ * by the explicit enablement policy (`domain/jobs/policy.ts`) whose gate is
+ * off are PAUSED, never poisoned — the consumer acknowledges
+ * `paused_by_policy` BEFORE the atomic claim (zero durable writes), and the
+ * dispatch/recovery scans exclude the paused types IN SQL (zero scan-slot
+ * cost, other types keep making progress). Schema-known handler-missing
+ * types with their gate NOT holding them are a DISTINCT visible
+ * `handler_misconfigured` class, never a silent pause. The gate snapshot is
+ * per-invocation state supplied by `resolveJobsEngine`; absent (offline
+ * harnesses) means every gate is ON: no pause or scan exclusion; the new
+ * distinct handler_misconfigured class still applies.
  */
 import type { Clock } from '../../shared/time/clock';
 import type { IdGenerator } from '../../shared/ids/id';
@@ -40,6 +52,8 @@ import type { DlqProducerPort, JobsQueueProducerPort } from '../../adapters/queu
 import {
   claimJob,
   completeJob,
+  countPolicyPausedDue,
+  countPolicyPausedExpiredClaims,
   createJob,
   findJobById,
   markDlqDelivered,
@@ -62,6 +76,12 @@ import {
   type CreateJobInput,
 } from '../../domain/jobs/payloads';
 import {
+  isHandlerMisconfigured,
+  isPausedByPolicy,
+  policyExcludedTypes,
+  type JobsPolicyGates,
+} from '../../domain/jobs/policy';
+import {
   decideRetry,
   DEFAULT_BACKOFF_BASE_MS,
   DEFAULT_BACKOFF_CAP_MS,
@@ -83,6 +103,16 @@ export interface JobsEnginePorts {
   readonly jobsProducer?: JobsQueueProducerPort;
   /** DLQ producer. Reconciliation skips sends (rows stay reconcilable) when absent. */
   readonly dlqProducer?: DlqProducerPort;
+  /**
+   * Per-invocation enablement-gate snapshot (Round 1.6 ADR-0040) — the
+   * strictly parsed configuration flags, passed by `resolveJobsEngine` and
+   * constant for the engine's lifetime (an environment variable never
+   * changes inside a running invocation). ABSENT (direct offline
+   * harnesses) behaves as if every gate is ON: no type is policy-paused
+   * and scan filtering defaults remain unchanged. The new distinct
+   * handler_misconfigured class still applies to missing known handlers.
+   */
+  readonly policyGates?: JobsPolicyGates;
 }
 
 /** Engine bounds (ADR-0036 §1/§3/§4 — reviewed constants). */
@@ -118,6 +148,16 @@ export interface DispatchSummary {
   readonly markedQueued: number;
   readonly sendFailures: number;
   readonly poisonedUnregistered: number;
+  /** Misconfiguration poisons (distinct visible class — never a pause). */
+  readonly misconfiguredPoisoned: number;
+  /** Due rows of policy-paused types: counted, never dispatched or written. */
+  readonly policyPaused: number;
+  /**
+   * Expired claimed rows of policy-paused types observed by a COUNT
+   * aggregate (one result, not a bound on physical rows scanned) — never selected, never mutated, never part of the active
+   * recovery page (observability only, ADR-0040).
+   */
+  readonly pausedExpiredObserved: number;
   readonly reclaimedLeases: number;
   /** Spent-budget expired claims dead-lettered at the recovery boundary. */
   readonly reclaimedExhausted: number;
@@ -162,6 +202,16 @@ export function createJobsEngine(
   bounds: JobsEngineBounds = DEFAULT_ENGINE_BOUNDS,
 ): JobsEngine {
   const { executor, handlers, idGenerator, clock, random, logger } = ports;
+
+  // Enablement policy (Round 1.6 ADR-0040): the gate snapshot is fixed for
+  // the engine's lifetime — it is resolved from the strictly parsed
+  // configuration ONCE per invocation and never re-read. Absent snapshot
+  // (direct offline harnesses) = every gate ON = no policy exclusions.
+  const policyGates: JobsPolicyGates = ports.policyGates ?? { ingestionGateOn: true };
+  const excludedTypes = policyExcludedTypes(policyGates);
+  const pausedByPolicy = (jobType: string): boolean => isPausedByPolicy(jobType, policyGates);
+  const misconfigured = (jobType: string): boolean =>
+    isHandlerMisconfigured(jobType, handlers, policyGates);
 
   function logDebug(event: string, fields?: Record<string, unknown>): void {
     logger?.debug(event, fields);
@@ -226,10 +276,27 @@ export function createJobsEngine(
   async function dispatchDueJobs(nowMsInput?: number): Promise<DispatchSummary> {
     const nowMs = nowMsInput ?? clock.now();
 
-    // 1. Recover expired claims first (bounded) so stranded executions
-    //    re-enter the dispatchable pool — and spent-budget rows dead-letter
-    //    at the recovery boundary WITHOUT re-execution (ADR-0037).
-    const reclaimResult = await reclaimExpiredClaims(executor, nowMs, bounds.reclaimBatch);
+    // 1. Policy pause FIRST (Round 1.6 ADR-0040): with a gate off, the
+    //    observability COUNT reports already-resolved policy exclusions BEFORE
+    //    any recovery candidate is selected, then the recovery scan EXCLUDES
+    //    the paused types IN SQL — paused expired claims are neither
+    //    requeued nor dead-lettered while the gate is off (dormant), never
+    //    consume an active recovery scan slot, and never reach exhaustion
+    //    decisions. Enabled work is reached in the FIRST page (fairness).
+    const pausedExpiredObserved = await countPolicyPausedExpiredClaims(
+      executor,
+      nowMs,
+      excludedTypes,
+    );
+    // 2. Recover expired claims (bounded) so stranded executions re-enter
+    //    the dispatchable pool — and spent-budget rows dead-letter at the
+    //    recovery boundary WITHOUT re-execution (ADR-0037).
+    const reclaimResult = await reclaimExpiredClaims(
+      executor,
+      nowMs,
+      bounds.reclaimBatch,
+      excludedTypes,
+    );
     if (reclaimResult.reclaimed > 0 || reclaimResult.exhaustedToDeadLetter > 0) {
       logDebug('jobs.recover.leases_reclaimed', {
         count: reclaimResult.reclaimed,
@@ -237,19 +304,24 @@ export function createJobsEngine(
       });
     }
 
-    // 2. Bounded, deterministic, indexed scans.
-    const due = await scanDueJobs(executor, nowMs, bounds.dispatchBatch);
+    // 3. Bounded, deterministic, indexed scans — policy-paused types are
+    //    excluded IN SQL from BOTH pages, so a page full of paused rows can
+    //    never starve other types of dispatch progress (ADR-0040).
+    const due = await scanDueJobs(executor, nowMs, bounds.dispatchBatch, excludedTypes);
     const stranded = await scanStrandedQueuedJobs(
       executor,
       nowMs - bounds.dispatchGraceMs,
       bounds.dispatchBatch,
+      excludedTypes,
     );
+    const policyPaused = await countPolicyPausedDue(executor, nowMs, excludedTypes);
     const selected = mergeDispatchCandidates(due, stranded, bounds.dispatchBatch);
 
     let dispatched = 0;
     let markedQueued = 0;
     let sendFailures = 0;
     let poisonedUnregistered = 0;
+    let misconfiguredPoisoned = 0;
     let producerMissingReported = false;
 
     for (const row of selected) {
@@ -266,6 +338,28 @@ export function createJobsEngine(
         );
         if (poisoned) {
           poisonedUnregistered += 1;
+        }
+        continue;
+      }
+      // Defense in depth (ADR-0040): the SQL filter above already excluded
+      // paused types from both pages — this never fires through the scans.
+      if (pausedByPolicy(row.type)) {
+        continue;
+      }
+      // Distinct visible misconfiguration class (ADR-0040): the payload
+      // schema is known, the handler is missing in THIS deployment, and no
+      // policy gate holds the type — a wiring bug, poisoned pre-claim with
+      // `handler_misconfigured`; never a silent pause.
+      if (misconfigured(row.type)) {
+        const poisoned = await markJobDeadLetter(
+          executor,
+          row.id,
+          null,
+          'handler_misconfigured',
+          nowMs,
+        );
+        if (poisoned) {
+          misconfiguredPoisoned += 1;
         }
         continue;
       }
@@ -312,6 +406,9 @@ export function createJobsEngine(
       markedQueued,
       sendFailures,
       poisonedUnregistered,
+      misconfiguredPoisoned,
+      policyPaused,
+      pausedExpiredObserved,
       reclaimedLeases: reclaimResult.reclaimed,
       reclaimedExhausted: reclaimResult.exhaustedToDeadLetter,
     };
@@ -427,6 +524,41 @@ export function createJobsEngine(
         return { action: 'retry', outcome: 'poison_transition_lost' };
       }
 
+      // 4.5 POLICY PAUSE (Round 1.6 ADR-0040 — the D01 contract) — BEFORE
+      //     the atomic claim, BEFORE any attempt burn, BEFORE any poison.
+      //     The decision uses the DURABLE row type (never the untrusted
+      //     queue envelope type). A valid known paused job is acknowledged
+      //     `paused_by_policy` with ZERO durable writes: status, attempts,
+      //     lease, schedule and error/exhaustion information stay exactly
+      //     as they are; the next dispatch pass once the gate is back ON
+      //     resumes it (bounded resumption — pending/retry rows through the
+      //     bounded pages, recovered claims first re-queued behind the
+      //     stranded-queue grace).
+      if (pausedByPolicy(row.type)) {
+        logDebug('jobs.msg.paused_by_policy', { messageId });
+        return { action: 'ack', outcome: 'paused_by_policy' };
+      }
+      // 4.6 DISTINCT visible misconfiguration class (ADR-0040): the payload
+      //     schema is known, no policy gate holds the type, and THIS
+      //     deployment has no handler — a wiring bug. Pre-claim poison with
+      //     `handler_misconfigured` (never a silent pause, never the
+      //     unknown-type code). The pause takes precedence: a paused type
+      //     with a missing handler is expected gate-off operation.
+      if (misconfigured(row.type)) {
+        const poisoned = await markJobDeadLetter(
+          executor,
+          row.id,
+          null,
+          'handler_misconfigured',
+          nowMs,
+        );
+        if (poisoned) {
+          logWarn('jobs.msg.poisoned_job', { messageId });
+          return { action: 'ack', outcome: 'poisoned_handler_misconfigured' };
+        }
+        return { action: 'retry', outcome: 'poison_transition_lost' };
+      }
+
       // 5. Atomic claim — one winner, one generation award.
       const claim = await claimJob(executor, envelope.jobId, nowMs, bounds.leaseMs);
       switch (claim.kind) {
@@ -488,17 +620,19 @@ export function createJobsEngine(
   ): Promise<DeliveryAction> {
     const handler = handlers.get(row.type);
     if (handler === undefined) {
-      // Unreachable through createDurableJob (registration-checked) but
-      // reachable for replayed/legacy rows: fail safe, no execution.
+      // Unreachable through createDurableJob (registration-checked) and
+      // through the pre-claim policy layer (step 4.6 poisons a schema-known
+      // handler-less type first); kept as fail-safe defense in depth with
+      // the DISTINCT misconfiguration code (ADR-0040).
       const poisoned = await markJobDeadLetter(
         executor,
         row.id,
         generation,
-        'job_type_unregistered',
+        'handler_misconfigured',
         nowMs,
       );
       return poisoned
-        ? { action: 'ack', outcome: 'poisoned_job_type_unregistered' }
+        ? { action: 'ack', outcome: 'poisoned_handler_misconfigured' }
         : { action: 'retry', outcome: 'poison_transition_lost' };
     }
 

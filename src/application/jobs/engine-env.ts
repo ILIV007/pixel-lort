@@ -18,12 +18,20 @@
  *   Tests and offline harnesses that need a producer-less engine construct
  *   `createJobsEngine` directly instead of going through the environment.
  *
- * Phase 4 ingestion gate (ADR-0038 §1):
+ * Phase 4 ingestion gate (ADR-0038 §1; pause semantics corrected by
+ * Round 1.6 ADR-0040):
  * - `SOURCE_INGESTION_ENABLED` is validated whenever PRESENT (invalid
  *   values → `config_invalid`, never silently ignored).
- * - The gate controls ONLY ingestion: with the gate OFF the resolved
- *   engine is byte-identical to Phase 3 v1.3.1 (no poll handler, no
- *   scheduling).
+ * - The gate controls ONLY ingestion: with the gate OFF no poll handler is
+ *   registered and no scheduling runs. The strictly parsed gate is ALSO
+ *   passed to the engine as the per-invocation `policyGates` snapshot, so
+ *   `sources.fetch_poll` work is LOSSLESSLY PAUSED (ADR-0040): delivered
+ *   poll messages are acknowledged `paused_by_policy` pre-claim (durable
+ *   row, attempts, lease and exhaustion information preserved exactly),
+ *   and the dispatch/recovery scans exclude the paused type IN SQL. This
+ *   is the corrective D01 behavior — the earlier "byte-identical to Phase 3
+ *   v1.3.1" gate-off claim (ADR-0038 §1) is superseded on exactly this
+ *   point; every other Phase 3 mechanic is unchanged.
  * - Ingestion enabled while the jobs engine is disabled/invalid →
  *   `ingestion_requires_jobs` (fail closed — ingestion can never run
  *   half-wired).
@@ -146,6 +154,9 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
       logger,
       jobsProducer: createJobsQueueProducer(env.JOBS as Queue<unknown>),
       dlqProducer: createDlqQueueProducer(env.DLQ as Queue<unknown>),
+      // Round 1.6 (ADR-0040): the strictly parsed, strictly per-invocation
+      // gate snapshot — the engine never re-reads an environment variable.
+      policyGates: { ingestionGateOn: ingestionEnabled },
     },
     DEFAULT_ENGINE_BOUNDS,
   );

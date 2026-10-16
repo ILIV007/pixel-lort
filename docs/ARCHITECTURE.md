@@ -280,8 +280,14 @@ payload) and never echo rejected values.
 Cron (gate-gated) performs ONE bounded indexed due-source scan and creates
 durable `sources.fetch_poll` jobs (deterministic window idempotency keys,
 atomic reservation holds) — it NEVER fetches inline. The ACCEPTED Phase 3
-engine dispatches/consumes unchanged; the poll handler registers ONLY while
-`SOURCE_INGESTION_ENABLED` is 'true'. One handler execution = ONE bounded
+engine now applies the Round 1.6 lossless dispatch/recovery/consumer
+policy pause (ADR-0040, the D01 contract): while
+`SOURCE_INGESTION_ENABLED` is 'true' the poll handler registers and poll
+jobs execute normally; while it is 'false' the handler is unregistered AND
+delivered poll messages are acknowledged `paused_by_policy` pre-claim (no
+attempt burn, no poison) with the paused type excluded from the
+dispatch/recovery scans IN SQL — never poisoned as the pre-1.6 engine did.
+One handler execution = ONE bounded
 poll attempt: pre-flight (implemented + configured + credentials) → atomic
 budget reservation (budgets table, Asia/Tehran day) → safe HTTP via the
 connector (allowlisted hosts, bounded reading, manual redirects) →

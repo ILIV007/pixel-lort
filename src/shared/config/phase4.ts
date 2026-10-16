@@ -8,8 +8,14 @@
  * (ADR-0036).
  *
  * Activation is fail-closed and layered:
- * - While DISABLED, cron/queue behavior is byte-identical to Phase 3
- *   v1.3.1 (the exact Telegram + jobs deployment).
+ * - While DISABLED, source scheduling never runs and the poll handler is
+ *   never registered. Since Round 1.6 (ADR-0040) the OFF gate additionally
+ *   LOSSLESSLY PAUSES in-flight `sources.fetch_poll` durable work (the D01
+ *   contract): delivered poll messages are acknowledged `paused_by_policy`
+ *   pre-claim and the engine's dispatch/recovery scans exclude the paused
+ *   type IN SQL — no poison, no attempt burn, no durable rewrite. (The
+ *   earlier "byte-identical to Phase 3 v1.3.1" wording in ADR-0038 §1 is
+ *   superseded on exactly this point; all other mechanics are unchanged.)
  * - While ENABLED, the jobs engine must ALSO be enabled and valid
  *   (`ingestion_requires_jobs` otherwise — readiness fails closed, no
  *   scheduling, no handler registration).

@@ -256,3 +256,17 @@ with a bounded retry delay (10 min), no network, no items.
   (point 4); the failure ladder and circuit carry the observable health.
 - Job-level retries remain exclusively for infrastructure uncertainty
   (ADR-0036 semantics unchanged and retested).
+
+## Amendment (Round 1.6 — ADR-0040, corrective note; original §1 wording preserved)
+
+§1 above states "With the gate off, cron/queue behavior is byte-identical to
+Phase 3 v1.3.1". That wording is superseded on exactly ONE point by the
+accepted Round 1.5.1 pause design, implemented in Round 1.6 (ADR-0040): with
+the gate off, a delivered `sources.fetch_poll` message is now acknowledged
+`paused_by_policy` BEFORE the atomic claim (durable row, attempts, lease and
+error/exhaustion information preserved exactly), and the paused type is
+excluded from the dispatch and recovery scans IN SQL — instead of burning a
+claim and dead-lettering the durable job as `job_type_unregistered` (the
+shipped D01 defect). Scheduling stays skipped and the poll handler stays
+unregistered while the gate is off; every other Phase 3 mechanic is
+unchanged. See ADR-0040 for the full decision and its scope guards.

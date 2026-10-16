@@ -80,6 +80,9 @@ export async function handleScheduled(
       dispatched: summary.dispatched,
       sendFailures: summary.sendFailures,
       poisonedUnregistered: summary.poisonedUnregistered,
+      misconfiguredPoisoned: summary.misconfiguredPoisoned,
+      policyPaused: summary.policyPaused,
+      pausedExpiredObserved: summary.pausedExpiredObserved,
       reclaimedLeases: summary.reclaimedLeases,
       reclaimedExhausted: summary.reclaimedExhausted,
     });

@@ -85,8 +85,18 @@ target; production stays untouched.
    `last_error` reason and backs off adaptively; 401/403 opens a 30-min
    circuit (`circuit_open_until`); 429 honors Retry-After exactly.
 9. Rollback: set `SOURCE_INGESTION_ENABLED="false"` on preview (no new
-   scheduling, no poll handler; in-flight poll jobs are poisoned safely —
-   drain first if possible). To pause one source:
+   scheduling, no poll handler). CORRECTED (Round 1.6, ADR-0040 — the D01
+   contract): in-flight poll jobs are NO LONGER poisoned. Delivered poll
+   messages are acknowledged `paused_by_policy` (durable row, attempts,
+   lease and error/exhaustion information preserved exactly), paused poll
+   jobs are excluded from the dispatch/recovery scans. This is a policy pause,
+   not cancellation: a handler already executing in an earlier gate-ON
+   invocation can still finish; its in-flight request cannot be recalled.
+   Eligible paused work resumes when ON (bounded pages and stranded-queue
+   grace); genuinely exhausted claims follow ordinary exhaustion. Do NOT
+   treat this flag pause as proof that deploying an older pre-D01 bundle
+   safely handles these durable rows; old bundles can still poison them.
+   To pause ONE source:
    `UPDATE sources SET enabled = 0 WHERE id = ?` — owner-managed, never
    touched by re-seeding.
 
