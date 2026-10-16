@@ -7,6 +7,22 @@
  * The official endpoint is PINNED: a config `endpoint` descriptor, when
  * present, must equal it exactly (R03) — official host restrictions are
  * preserved and arbitrary endpoints are rejected, never ignored.
+ *
+ * Round 1.7 (R04): bounded PERSISTENT CYCLIC ROTATION through the
+ * existing `source_state.cursor`. Each successful poll visits exactly
+ * min(appsPerBatch, apps.length) configured entries starting at the
+ * validated cursor (wrapping at the end) and proposes the next cursor
+ * `(start + selectedCount) mod currentLength`, persisted ONLY through
+ * the poll handler's atomic items/state commit. Failed/rate_limited
+ * outcomes preserve the input window's cursor so the SAME window is
+ * retried; failed D1 batches cannot advance the durable cursor (atomic
+ * batch). The cursor is a bounded, versioned, opaque JSON that never
+ * carries an app ID/URL/host — see ./steam-cursor.ts and
+ * docs/reviews/PIXEL_ROUND1_7_STEAM_ROTATION.md. Fairness (disclosed
+ * honestly): with a stable watchlist every configured position is
+ * visited within ceil(N/B) SUCCESSFUL polls; a permanently failing
+ * selected window delays rotation under the conservative retry policy
+ * rather than silently skipping data.
  */
 import { INGESTION_LIMITS } from '../domain/source/source-registry';
 import { normalizeRawItem, type NormalizedItemOut } from './normalize';
@@ -18,6 +34,7 @@ import {
   type ConnectorFetchOutput,
   type SourceConnector,
 } from './contract';
+import { buildSteamCursor, nextSteamCursorStart, normalizeSteamCursor } from './steam-cursor';
 import { z } from 'zod';
 
 const STEAM_ENDPOINT = 'https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/';
@@ -84,13 +101,37 @@ export function createSteamNewsConnector(): SourceConnector {
       return [endpointHost(STEAM_ENDPOINT) ?? 'api.steampowered.com'];
     },
     async fetch(input: ConnectorFetchInput): Promise<ConnectorFetchOutput> {
-      const { config, effects, sourceId } = input;
+      const { config, effects, sourceId, state } = input;
       const parsedConfig = SteamRuntimeConfigSchema.safeParse(config);
       if (!parsedConfig.success || parsedConfig.data.apps.length === 0) {
-        return failed('watchlist_empty', 0);
+        // No rotation without a watchlist — preserve whatever cursor was
+        // persisted (conservative pass-through; production reaches this
+        // only behind the handler's fail-closed preflight).
+        return failed('watchlist_empty', 0, state.cursor);
       }
       const { apps, appsPerBatch, maxItemsPerApp } = parsedConfig.data;
-      const batch = apps.slice(0, appsPerBatch);
+      // R04 rotation: ordered cyclic window from the VALIDATED owner
+      // watchlist, starting at the normalized durable cursor. Duplicate
+      // configured entries are honored as configured (never silently
+      // deduplicated); every requested ID comes from `apps` and the
+      // pinned endpoint — the cursor can never introduce one.
+      const placement = normalizeSteamCursor(state.cursor, apps);
+      const selectedCount = Math.min(appsPerBatch, apps.length);
+      const batch: number[] = [];
+      for (let offset = 0; offset < selectedCount; offset += 1) {
+        // The index is always within [0, apps.length): the placement is
+        // validated against the CURRENT list and the step wraps modulo it
+        // (apps is non-empty here — the empty case returned above).
+        const appId = apps[(placement.start + offset) % apps.length];
+        if (appId !== undefined) {
+          batch.push(appId);
+        }
+      }
+      // The cursor preserved by every FAILED / rate_limited outcome: the
+      // normalized placement of THIS attempt, so the same selected window
+      // is retried (never null while a watchlist exists — a non-null
+      // cursor is never reset to null by an early return).
+      const retryCursor = buildSteamCursor(apps, placement.start);
       const items: NormalizedItemOut[] = [];
       let requestCount = 0;
       let malformed = 0;
@@ -107,13 +148,13 @@ export function createSteamNewsConnector(): SourceConnector {
         });
         requestCount += response.requestCount;
         if (!response.ok) {
-          return failed('http_status_error', requestCount);
+          return failed('http_status_error', requestCount, retryCursor);
         }
         if (response.status === 429) {
           return {
             status: 'rate_limited',
             items: [],
-            cursor: null,
+            cursor: retryCursor,
             etag: null,
             lastModified: null,
             retryAfterSeconds: parseRetryAfterSeconds(
@@ -126,16 +167,16 @@ export function createSteamNewsConnector(): SourceConnector {
           };
         }
         if (response.status < 200 || response.status >= 300) {
-          return failed('http_status_error', requestCount);
+          return failed('http_status_error', requestCount, retryCursor);
         }
         if (!isJsonContentType(response.headers.get('content-type'))) {
-          return failed('unexpected_content_type', requestCount);
+          return failed('unexpected_content_type', requestCount, retryCursor);
         }
         let parsedResponse: SteamNewsResponse;
         try {
           parsedResponse = JSON.parse(response.bodyText) as SteamNewsResponse;
         } catch {
-          return failed('response_malformed', requestCount);
+          return failed('response_malformed', requestCount, retryCursor);
         }
         const newsItems = parsedResponse.appnews?.newsitems;
         if (!Array.isArray(newsItems)) {
@@ -169,10 +210,18 @@ export function createSteamNewsConnector(): SourceConnector {
         }
       }
 
+      // Successful complete-batch outcome: propose the next cursor
+      // (start + selectedCount) mod currentLength. Persisted ONLY via the
+      // poll handler's atomic items/state commit — a failed D1 batch
+      // cannot advance it. Empty successful responses still rotate
+      // (progress is defined by windows visited, not items seen).
       return {
         status: 'changed',
         items,
-        cursor: null,
+        cursor: buildSteamCursor(
+          apps,
+          nextSteamCursorStart(placement.start, selectedCount, apps.length),
+        ),
         etag: null,
         lastModified: null,
         retryAfterSeconds: null,
@@ -187,11 +236,12 @@ export function createSteamNewsConnector(): SourceConnector {
 function failed(
   reason: ConnectorFetchOutput['failureReason'],
   requestCount: number,
+  cursor: string | null,
 ): ConnectorFetchOutput {
   return {
     status: 'failed',
     items: [],
-    cursor: null,
+    cursor,
     etag: null,
     lastModified: null,
     retryAfterSeconds: null,
