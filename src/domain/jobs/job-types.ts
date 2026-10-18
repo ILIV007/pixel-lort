@@ -92,6 +92,11 @@ export const JOB_ERROR_CODES = [
   // back — a visible wiring bug, deliberately DISTINCT from the pause
   // (`paused_by_policy`) and from the unknown-type poison class.
   'handler_misconfigured',
+  // Round 1.9.1 (R19-01): the schema capability is unavailable or not a
+  // known version — the handler fails closed BEFORE budget/network/items/
+  // source-state effects and returns this stable RECOVERABLE code; the
+  // engine's own retry bookkeeping (retry_wait/last_error) carries it.
+  'ingestion_capability_unresolved',
 ] as const;
 
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];

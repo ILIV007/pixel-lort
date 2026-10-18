@@ -60,6 +60,13 @@ export async function handleScheduled(
       });
       if (outcome.kind === 'registry_invalid') {
         logger.warn('cron.ingestion_registry_invalid');
+      } else if (outcome.kind === 'capability_unresolved') {
+        // R19-01: the pass stopped before every seed/job/state effect — a
+        // stable, recoverable condition that self-heals on a later pass
+        // once the schema metadata is readable and a known version again.
+        logger.warn('cron.ingestion_capability_unresolved', {
+          reason: outcome.reason,
+        });
       } else if (outcome.kind === 'scheduled') {
         logger.info('cron.ingestion_scheduled', {
           jobsCreated: outcome.jobsCreated,

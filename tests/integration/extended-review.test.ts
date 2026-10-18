@@ -1,6 +1,6 @@
 import { beforeEach, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
-import { applyMigrations } from '../helpers/migrations';
+import { applyMigrations, ROUND19_MIGRATION_PLAN } from '../helpers/migrations';
 import { createDbExecutor } from '../../src/adapters/db/db-executor';
 import { parseEmbeddedRegistry } from '../../src/domain/source/source-registry';
 import { seedSourcesFromRegistry } from '../../src/adapters/db/source-registry-store';
@@ -35,7 +35,15 @@ const resolution = (flag = 'true') => {
   return r;
 };
 beforeEach(async () => {
-  await applyMigrations(env.DB);
+  // Round 1.9 (R09) fixture adaptation — SETUP ONLY: this file hosts the
+  // ORIGINAL R09 acceptance, which must turn green through the REAL product
+  // ownership path. Ownership is a schema-4 capability (migration candidate
+  // 0004), so THIS file's disposable test database applies the explicit
+  // test-only ROUND19_MIGRATION_PLAN (0001–0003 + the 0004 candidate;
+  // disposable workerd D1 ONLY — never applied anywhere real). All test
+  // names, scripts, payloads and assertion lines below are UNCHANGED;
+  // the two additional R10 fixture rows are documented at that test.
+  await applyMigrations(env.DB, ROUND19_MIGRATION_PLAN);
   for (const table of ['source_items', 'source_state', 'sources', 'jobs'])
     await db.run({ sql: `DELETE FROM ${table}` });
   await db.run({ sql: "DELETE FROM budgets WHERE scope='ingestion'" });
@@ -69,7 +77,10 @@ it('R03b: seeded YouTube config plus owner playlist and key must pass preflight'
 });
 it('R04: Steam batching must eventually visit watched apps after the first batch', async () => {
   const mock = createFetchMock(
-    Array.from({ length: 4 }, () => ({ status: 200, bodyText: '{"appnews":{"newsitems":[]}}' })),
+    Array.from({ length: 4 }, () => ({
+      status: 200,
+      bodyText: '{"appnews":{"newsitems":[]}}',
+    })),
   );
   const connector = createSteamNewsConnector();
   const input = {
@@ -79,7 +90,10 @@ it('R04: Steam batching must eventually visit watched apps after the first batch
     effects: connectorEffects(mock.fetchFn, {}),
   };
   const first = await connector.fetch(input);
-  await connector.fetch({ ...input, state: { ...state, cursor: first.cursor } });
+  await connector.fetch({
+    ...input,
+    state: { ...state, cursor: first.cursor },
+  });
   expect(mock.calls.map((c) => new URL(c.url).searchParams.get('appid'))).toContain('730');
 });
 it('R05: RSS multi-feed Retry-After must preserve the longest lower bound', async () => {
@@ -107,7 +121,9 @@ it('R06: YouTube must count earlier successful calls when a later playlist fails
       playlists: ['PLreview123456', 'PLreview654321'],
     },
     state,
-    effects: connectorEffects(mock.fetchFn, { YOUTUBE_API_KEY: 'fixture-not-a-real-key' }),
+    effects: connectorEffects(mock.fetchFn, {
+      YOUTUBE_API_KEY: 'fixture-not-a-real-key',
+    }),
   });
   expect(mock.calls).toHaveLength(2);
   expect(result.requestCount).toBe(2);
@@ -175,12 +191,16 @@ it('R08: interrupted catalog seeding must recover on a later cron pass', async (
     secrets: () => undefined,
     nowMs: NOW,
   });
-  const count = await db.first<{ n: number }>({ sql: 'SELECT COUNT(*) AS n FROM sources' });
+  const count = await db.first<{ n: number }>({
+    sql: 'SELECT COUNT(*) AS n FROM sources',
+  });
   expect(count!.n).toBe(14);
 });
 it('R09: a new source reservation must hold until after now, not in 1970', async () => {
   await seed();
-  await db.run({ sql: "UPDATE sources SET enabled=1 WHERE id='playstation_blog'" });
+  await db.run({
+    sql: "UPDATE sources SET enabled=1 WHERE id='playstation_blog'",
+  });
   await scheduleDueSources({
     executor: db,
     engine: resolution().engine,
@@ -194,13 +214,31 @@ it('R09: a new source reservation must hold until after now, not in 1970', async
   expect(row!.next_poll_at).toBeGreaterThan(NOW);
 });
 it('R10: redirects must not consume requests beyond a one-request daily budget', async () => {
+  // Round 1.9 (R09) fixture adaptation — SETUP ONLY (two additions, the
+  // script, invocation and BOTH assertion lines below are unchanged):
+  // under ownership the handler (1) ACQUIRES the window at claim time
+  // (A1 branch (i): owner NULL AND next_poll_at = the payload marker) and
+  // (2) commits behind the ownership fence, which requires the job row to
+  // exist CLAIMED with the exact generation. The fixture therefore seeds
+  // the marker at the payload's scheduledForMs (NOW — replacing the legacy
+  // marker+hold value; the hold is now written BY A1 itself) and inserts
+  // the claimed job row the context references. No assertion changed.
   await seed();
   await db.run({
     sql: "UPDATE sources SET enabled=1,daily_request_budget=1 WHERE id='playstation_blog'",
   });
   await db.run({
     sql: "UPDATE source_state SET next_poll_at=? WHERE source_id='playstation_blog'",
-    params: [NOW + 120000],
+    params: [NOW],
+  });
+  await db.run({
+    sql: `INSERT INTO jobs
+            (id, type, aggregate_type, aggregate_id, status, priority, run_after,
+             attempts, max_attempts, lease_until, idempotency_key, payload_json,
+             last_error, created_at, updated_at, dlq_delivered_at)
+          VALUES ('fixture-job', 'sources.fetch_poll', 'source', 'playstation_blog',
+                  'claimed', 40, ?, 1, 3, NULL, 'review-r10-fixture', ?, NULL, ?, ?, NULL)`,
+    params: [NOW, JSON.stringify({ sourceId: 'playstation_blog', scheduledForMs: NOW }), NOW, NOW],
   });
   let calls = 0;
   // Round 1.8 (R10) fixture adaptation — SETUP ONLY: the raw scripted fetch
@@ -233,7 +271,10 @@ it('R10: redirects must not consume requests beyond a one-request daily budget',
     generation: 1,
     payload: { sourceId: 'playstation_blog', scheduledForMs: NOW },
   });
-  const usage = await readIngestionBudget(db, { sourceId: 'playstation_blog', nowMs: NOW });
+  const usage = await readIngestionBudget(db, {
+    sourceId: 'playstation_blog',
+    nowMs: NOW,
+  });
   expect({ networkCalls: calls, usage }).toEqual({ networkCalls: 1, usage: 1 });
 });
 it('D01: disabling ingestion should pause a pending poll instead of permanently poisoning it', async () => {

@@ -35,8 +35,16 @@ import {
   scanDueSources,
   reserveSourcePoll,
   recordBlockedSourceSkip,
+  schedulePollWindowOwned,
+  type SchedulePollWindowOutcome,
 } from '../../adapters/db/source-ingest-store';
+import {
+  resolveSchemaCapability,
+  type SchemaCapabilityUnresolvedReason,
+} from '../../adapters/db/schema-health';
 import { formatIdempotencyKey } from '../../shared/ids/idempotency-key';
+import { canonicalizeJson } from '../../domain/jobs/payloads';
+import { cryptoIdGenerator, type IdGenerator } from '../../shared/ids/id';
 import type { ConnectorRegistry } from '../../connectors/registry';
 import { isImplementedConnector } from '../../domain/source/types';
 import type { SecretReader } from '../../connectors/contract';
@@ -48,6 +56,14 @@ export interface ScheduleDueSourcesDeps {
   readonly secrets: SecretReader;
   readonly nowMs: number;
   readonly logger?: Logger;
+  /**
+   * R09 (schema 4 only): generator for THIS contender's fresh job UUID in
+   * the atomic owned scheduling batch. Defaults to the production
+   * `cryptoIdGenerator` — the same generator the engine wiring uses — so
+   * the production cron wiring needs no extra argument. The legacy schema-3
+   * path never uses it (the engine generates job ids internally there).
+   */
+  readonly idGenerator?: IdGenerator;
 }
 
 export type ScheduleOutcome =
@@ -58,7 +74,20 @@ export type ScheduleOutcome =
       readonly seeded: boolean;
     }
   | { readonly kind: 'registry_invalid' }
-  | { readonly kind: 'failed'; readonly errorCode: 'internal_error' };
+  | { readonly kind: 'failed'; readonly errorCode: 'internal_error' }
+  | {
+      /**
+       * R19-01: the schema capability is unavailable or not a known
+       * version (missing/corrupt/unsafe metadata, unsupported version, or
+       * a failed metadata read). A stable, RECOVERABLE failure outcome:
+       * the pass stopped BEFORE the completeness probe, any seed/repair,
+       * the due scan, and every job/source-state effect — zero ingestion
+       * side effects. Self-heals on a later cron pass once the metadata is
+       * readable and a known version again. Never a fake success.
+       */
+      readonly kind: 'capability_unresolved';
+      readonly reason: SchemaCapabilityUnresolvedReason;
+    };
 
 /**
  * One bounded scheduling pass. Never throws for domain conditions — the
@@ -73,6 +102,22 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
     logger?.warn('ingestion.schedule.registry_invalid');
     return { kind: 'registry_invalid' };
   }
+
+  // R19-01 (R09.1): resolve the schema capability ONCE per pass (ONE
+  // bounded, indexed metadata read) into EXACTLY ONE of three typed
+  // states. Only a readable exact v3 may choose the legacy path and only
+  // a readable exact v4 the ownership path; ANYTHING else must stop the
+  // pass BEFORE the completeness probe / seed / due scan — i.e. before
+  // every source/job/state effect. An unreadable capability must never be
+  // interpreted as permission to run unfenced legacy ingestion (CE1).
+  const capability = await resolveSchemaCapability(executor);
+  if (capability.kind === 'unresolved') {
+    logger?.warn('ingestion.schedule.capability_unresolved', {
+      reason: capability.reason,
+    });
+    return { kind: 'capability_unresolved', reason: capability.reason };
+  }
+  const ownershipEnabled = capability.kind === 'known_v4_ownership';
 
   // Catalog completeness probe (R08): which registry sources are missing
   // a `sources` row or a `source_state` row — even when the table is NOT
@@ -98,7 +143,9 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
     // all-or-nothing — a failure rolls back the whole reconciliation).
     await seedSourcesFromRegistry(executor, registry.registry, nowMs);
     seeded = true;
-    logger?.debug('ingestion.schedule.catalog_reconciled', { count: ids.length });
+    logger?.debug('ingestion.schedule.catalog_reconciled', {
+      count: ids.length,
+    });
   }
 
   const due = await scanDueSources(executor, nowMs);
@@ -162,11 +209,45 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
       continue;
     }
 
-    // Durable job FIRST (deterministic window key).
+    // Deterministic window identity — key and canonical payload derive
+    // ONLY from (sourceId, scheduledForMs); the hold value NEVER enters
+    // either (no same-key/different-payload conflicts).
     const idempotencyKey = await formatIdempotencyKey('sources.poll', [
       source.id,
       String(source.next_poll_at),
     ]);
+
+    if (ownershipEnabled) {
+      // OWNED PATH (readable exact schema 4): creation + reservation +
+      // terminal remediation are ONE atomic D1 batch; the CURRENT-TIME
+      // hold and the durable owner become visible together.
+      const outcome = await schedulePollWindowOwned(
+        executor,
+        {
+          sourceId: source.id,
+          scheduledForMs: source.next_poll_at,
+          idempotencyKey,
+          canonicalPayloadJson: canonicalizeJson({
+            sourceId: source.id,
+            scheduledForMs: source.next_poll_at,
+          }),
+          jobId: (deps.idGenerator ?? cryptoIdGenerator).newId(),
+          priority: 40,
+          maxAttempts: 3,
+          nowMs,
+        },
+        source.interval_seconds,
+      );
+      logSchedulingOutcome(logger, outcome);
+      if (outcome.kind === 'scheduled' || outcome.kind === 'inserted_unreserved') {
+        jobsCreated += 1;
+      }
+      continue;
+    }
+
+    // Legacy schema-3 path (ONLY a readable exact v3 reaches this point;
+    // accepted; byte-identical): durable job FIRST (deterministic window
+    // key), then the guarded marker-CAS reservation.
     const created = await engine.createDurableJob({
       type: 'sources.fetch_poll',
       idempotencyKey,
@@ -194,6 +275,55 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
     jobsCreated,
     blockedSkipped,
     seeded,
+    capability: capability.kind,
   });
   return { kind: 'scheduled', jobsCreated, blockedSkipped, seeded };
+}
+
+/**
+ * R09: honest, stable observability for every owned-scheduling outcome
+ * class. Codes and counts only — never payloads, URLs or error text.
+ */
+function logSchedulingOutcome(
+  logger: Logger | undefined,
+  outcome: SchedulePollWindowOutcome,
+): void {
+  switch (outcome.kind) {
+    case 'scheduled':
+      logger?.debug('ingestion.schedule.owned_window', {
+        jobId: outcome.jobId,
+      });
+      break;
+    case 'inserted_unreserved':
+      // Disclosed per the accepted design: the marker moved between the
+      // scan and the batch; the pending job is harmless (claim-time
+      // acquisition refuses a superseded window) and self-heals.
+      logger?.debug('ingestion.schedule.inserted_unreserved', {
+        jobId: outcome.jobId,
+      });
+      break;
+    case 'window_terminal_skipped':
+      logger?.debug('ingestion.schedule.window_terminal_skipped', {
+        terminalJobId: outcome.terminalJobId,
+      });
+      break;
+    case 'outstanding_job_owns_window':
+      logger?.debug('ingestion.schedule.outstanding_owns_window', {
+        jobId: outcome.jobId,
+      });
+      break;
+    case 'outstanding_elsewhere':
+      logger?.debug('ingestion.schedule.outstanding_elsewhere', {
+        jobId: outcome.jobId,
+      });
+      break;
+    case 'marker_moved':
+      logger?.debug('ingestion.schedule.marker_moved');
+      break;
+    case 'foreign_window_job':
+      logger?.warn('ingestion.schedule.foreign_window_job', {
+        foreignJobId: outcome.foreignJobId,
+      });
+      break;
+  }
 }

@@ -1,12 +1,39 @@
 /**
  * `sources.fetch_poll` handler (Phase 4 — ADR-0038 §4/§5; per-hop budget
- * authority reshaped by Round 1.8 R10).
+ * authority reshaped by Round 1.8 R10; source-poll ownership added by
+ * Round 1.9 R09).
  *
  * Executes ONE bounded poll attempt for one source:
  *   load source+state → defense-in-depth pre-flight → connector fetch
  *   (safe HTTP through the MANDATORY source-bound budgeted transport) →
  *   normalize (inside the connector) → ATOMIC guarded commit (items +
  *   fenced state).
+ *
+ * R09 OWNERSHIP (Round 1.9 — schema-4 capability, feature-detected ONCE
+ * per execution from the APPLIED schema version; R19-01 correction: the
+ * capability resolves into EXACTLY ONE of three typed states — a readable
+ * exact v4 runs the ownership fences, a readable exact v3 the accepted
+ * legacy paths, and ANY unavailable/invalid/unsupported state FAILS
+ * CLOSED): after the engine's atomic claim and BEFORE any preflight/budget
+ * network activity, an unresolved capability returns a stable retryable
+ * outcome with ZERO budget/network/item/source-state effects — it is
+ * never downgraded to the legacy path and never completed silently (CE2/
+ * CE3/CE4). On a schema-4 database the handler ACQUIRES the durable poll
+ * ownership (A1): the CURRENT-TIME hold and the owner become visible
+ * atomically, fenced on job identity/type/aggregate, claimed status and
+ * the EXACT generation.
+ * A non-owner (superseded window, foreign owner, stale generation, or a
+ * cancelled job) skips BEFORE the network: zero fetches, zero budget
+ * rows, zero state writes — it cannot release a newer owner and completes
+ * honestly. The terminal commit is OWNERSHIP-FENCED: every item insert
+ * AND the state write carry the same predicate P (durable hold + owner +
+ * job identity/claimed/generation) inside ONE atomic batch — an old
+ * generation or a lost owner writes zero items and zero state; on success
+ * ownership is released together with the fresh schedule. Mixed-source
+ * batches are rejected BEFORE any statement runs (B1). Under the APPLIED
+ * schema 3 the accepted legacy paths below stay byte-identical (the R09
+ * defect remains honestly visible there — ownership is a schema-4
+ * capability by design).
  *
  * R10 budget authority: there is NO planned reservation and NO post-fetch
  * reconciliation. The handler builds the ingestion transport PER EXECUTION
@@ -34,19 +61,24 @@
  * uncertainty stays on the Phase 3 job-retry path.
  *
  * The fenced terminal write uses the deterministic hold window from the
- * payload (`scheduledForMs + hold`): a stale worker's state write
- * changes 0 rows (visible in meta) and never overwrites a newer poll,
- * while its item inserts still land (dedup absorbs duplicates).
+ * payload (`scheduledForMs + hold`) under the LEGACY schema-3 path: a
+ * stale worker's state write changes 0 rows (visible in meta) and never
+ * overwrites a newer poll, while its item inserts still land (dedup
+ * absorbs duplicates). Under OWNERSHIP (schema 4) the fence is the
+ * OBSERVED durable hold + the durable owner — never payload-derived.
  */
 import type { JobHandler, HandlerOutcome, JobExecutionContext } from '../../domain/jobs/handler';
 import { SourcesPollPayloadSchema, type SourcesPollPayload } from '../../domain/jobs/payloads';
 import type { DbExecutor } from '../../adapters/db/db-executor';
 import {
   commitPollResults,
+  commitOwnedPollResults,
+  acquirePollOwnership,
   type IngestItemRow,
   type PollCommitResult,
   type PollTerminalState,
 } from '../../adapters/db/source-ingest-store';
+import { resolveSchemaCapability } from '../../adapters/db/schema-health';
 import {
   authorizeIngestionUnit,
   readIngestionBudget,
@@ -149,12 +181,71 @@ export function createSourcePollHandler(
         return { kind: 'success' };
       }
       if (!isImplementedConnector(source.connector)) {
-        return { kind: 'permanent', reasonCode: 'ingestion_connector_unavailable' };
+        return {
+          kind: 'permanent',
+          reasonCode: 'ingestion_connector_unavailable',
+        };
       }
       const connector = options.connectors.get(source.connector);
       if (connector === undefined) {
-        return { kind: 'permanent', reasonCode: 'ingestion_connector_unavailable' };
+        return {
+          kind: 'permanent',
+          reasonCode: 'ingestion_connector_unavailable',
+        };
       }
+
+      // R09/R19-01 OWNERSHIP: resolve the capability ONCE per execution
+      // (ONE bounded, indexed metadata read) into exactly one of three
+      // typed states. An UNRESOLVED capability (missing/corrupt/unsafe
+      // metadata, unsupported version, or a failed metadata read) stops
+      // the handler HERE — before ownership, preflight, budget, network,
+      // items and source-state effects — with a stable typed RECOVERABLE
+      // failure. The engine's own claim/lease bookkeeping for THIS
+      // delivery (attempts/lease rows on the jobs table) has already
+      // happened by construction and the retry outcome adds the engine's
+      // fenced retry_wait bookkeeping — that is engine retry accounting,
+      // deliberately distinct from ingestion effects, of which there are
+      // ZERO (CE2/CE3/CE4). The work is neither silently completed nor
+      // poisoned as an unknown type: the SAME window re-executes once the
+      // capability resolves (bounded by the job's max attempts; a persistent
+      // outage then dead-letters observably instead of fabricating a
+      // success).
+      const capability = await resolveSchemaCapability(options.executor);
+      if (capability.kind === 'unresolved') {
+        options.logger?.warn('ingestion.poll.capability_unresolved', {
+          reason: capability.reason,
+        });
+        return { kind: 'retry', reasonCode: 'ingestion_capability_unresolved' };
+      }
+      const ownershipEnabled = capability.kind === 'known_v4_ownership';
+      let ownedHoldUntilMs: number | null = null;
+      if (ownershipEnabled) {
+        const acquisition = await acquirePollOwnership(options.executor, {
+          sourceId,
+          jobId: context.jobId,
+          scheduledForMs,
+          generation: context.generation,
+          nowMs: options.nowMs(),
+        });
+        if (acquisition.kind === 'not_owned') {
+          // Superseded window or foreign owner: skip BEFORE the network —
+          // zero fetches, zero budget rows, zero state writes (an old
+          // generation or lost owner writes zero items, zero state, and
+          // cannot release a newer owner). Completes honestly.
+          options.logger?.debug('ingestion.poll.ownership_refused', {
+            reason: acquisition.reason,
+          });
+          return { kind: 'success' };
+        }
+        ownedHoldUntilMs = acquisition.holdUntilMs;
+      }
+      // The commit fence hold: the OBSERVED durable anchor under ownership
+      // (never payload-derived); the legacy payload-derived window under
+      // the applied schema 3.
+      const fenceHoldUntilMs = ownedHoldUntilMs ?? holdUntilMs;
+      const commitOwner = ownershipEnabled
+        ? ({ jobId: context.jobId, generation: context.generation } as const)
+        : null;
 
       // Pre-flight re-check (payload carries IDs only; config comes from D1).
       let config: Record<string, unknown> = {};
@@ -172,17 +263,23 @@ export function createSourcePollHandler(
       }
       const preflight = connector.preflight(config, options.secrets);
       if (!preflight.ok) {
-        await commitTerminalState(options, source, holdUntilMs, {
-          status: 'failed',
-          items: [],
-          cursor: source.cursor,
-          etag: source.etag,
-          lastModified: source.last_modified,
-          retryAfterSeconds: null,
-          requestCount: 0,
-          malformedCount: 0,
-          failureReason: preflight.reason,
-        });
+        await commitTerminalState(
+          options,
+          source,
+          fenceHoldUntilMs,
+          {
+            status: 'failed',
+            items: [],
+            cursor: source.cursor,
+            etag: source.etag,
+            lastModified: source.last_modified,
+            retryAfterSeconds: null,
+            requestCount: 0,
+            malformedCount: 0,
+            failureReason: preflight.reason,
+          },
+          commitOwner,
+        );
         return { kind: 'success' };
       }
 
@@ -218,7 +315,11 @@ export function createSourcePollHandler(
         fetched = await connector.fetch({
           sourceId,
           config,
-          state: { etag: source.etag, lastModified: source.last_modified, cursor: source.cursor },
+          state: {
+            etag: source.etag,
+            lastModified: source.last_modified,
+            cursor: source.cursor,
+          },
           effects: {
             safeFetch: ingestionFetch,
             nowMs: options.nowMs,
@@ -245,17 +346,23 @@ export function createSourcePollHandler(
           errorCode: 'connector_unavailable',
         });
         void error; // never logged (may carry provider text)
-        await commitTerminalState(options, source, holdUntilMs, {
-          status: 'failed',
-          items: [],
-          cursor: source.cursor,
-          etag: source.etag,
-          lastModified: source.last_modified,
-          retryAfterSeconds: null,
-          requestCount: 0,
-          malformedCount: 0,
-          failureReason: 'connector_unavailable',
-        });
+        await commitTerminalState(
+          options,
+          source,
+          fenceHoldUntilMs,
+          {
+            status: 'failed',
+            items: [],
+            cursor: source.cursor,
+            etag: source.etag,
+            lastModified: source.last_modified,
+            retryAfterSeconds: null,
+            requestCount: 0,
+            malformedCount: 0,
+            failureReason: 'connector_unavailable',
+          },
+          commitOwner,
+        );
         return { kind: 'success' };
       }
 
@@ -271,7 +378,16 @@ export function createSourcePollHandler(
       // denied exits arrive here with the connector's typed output (no
       // items, prior cursor/validators, failureReason 'budget_exhausted')
       // and take the existing INGESTION_BUDGET_RETRY_MS pacing branch.
-      const result = await commitTerminalState(options, source, holdUntilMs, fetched);
+      // Under ownership the batch is the OWNERSHIP-FENCED commit (every
+      // item insert AND the state write carry predicate P; on success
+      // ownership is released atomically).
+      const result = await commitTerminalState(
+        options,
+        source,
+        fenceHoldUntilMs,
+        fetched,
+        commitOwner,
+      );
 
       options.logger?.debug('ingestion.poll.completed', {
         status: fetched.status,
@@ -321,12 +437,21 @@ const LADDER_FAILURE_REASONS = new Set([
  * durable items (ADR-0038 §5). 304 writes ONLY scheduling/health metadata
  * (validators and cursor pass through unchanged). Returns the honest
  * commit classification from the atomic batch.
+ *
+ * R09: with `owner` present (schema-4 ownership capability ON) the commit
+ * is the OWNERSHIP-FENCED batch — every statement carries predicate P
+ * (durable hold + owner + job identity/claimed/exact generation), the
+ * hold fence is the OBSERVED durable anchor (never payload-derived), and
+ * a mixed-source batch is rejected before any statement runs (B1).
+ * Without `owner` (applied schema 3) the accepted legacy fenced commit
+ * runs byte-identically.
  */
 async function commitTerminalState(
   options: SourcePollHandlerOptions,
   source: SourceWithState,
   holdUntilMs: number,
   fetched: TerminalInput,
+  owner: { readonly jobId: string; readonly generation: number } | null,
 ): Promise<PollCommitResult> {
   const nowMs = options.nowMs();
   const intervalMs = source.interval_seconds * 1000;
@@ -416,11 +541,22 @@ async function commitTerminalState(
     rawJson: JSON.stringify(item.rawJson),
   }));
 
-  return commitPollResults(options.executor, {
+  if (owner === null) {
+    return commitPollResults(options.executor, {
+      sourceId: source.id,
+      items: itemRows,
+      state,
+      holdUntilMs,
+      nowMs,
+    });
+  }
+  return commitOwnedPollResults(options.executor, {
     sourceId: source.id,
+    jobId: owner.jobId,
+    generation: owner.generation,
+    observedHoldUntilMs: holdUntilMs,
     items: itemRows,
     state,
-    holdUntilMs,
     nowMs,
   });
 }

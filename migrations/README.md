@@ -25,12 +25,29 @@ migration list below.
   `failure_class = 'retryable'`. Advances `schema_metadata` to
   `schema_version = 2` with `migration_id = 0002_telegram_update_lifecycle`
   inside the same atomic batch.
+- `0004_source_poll_ownership.sql` — **Round 1.9 PRODUCT CANDIDATE (LOCAL
+  ONLY — proposed, NOT applied anywhere real)**: the R09 source-poll
+  ownership capability (`source_state.poll_owner_job_id` durable
+  winner-owned data + the partial unique outstanding-poll index
+  `idx_jobs_source_outstanding_poll` + `schema_metadata` 3 → 4). The DDL
+  statements are byte-identical to the independently reviewed Round 1.5
+  design fixture (`tests/fixtures/proposed-0004-source-poll-ownership.sql`).
+  APPLIED ONLY to disposable workerd D1 test databases through the explicit
+  test-only plan `ROUND19_MIGRATION_PLAN` (tests/helpers/migrations.ts); it
+  is deliberately NOT a member of the default `MIGRATIONS` list and NO
+  Cloudflare/wrangler migration command has been or may be run for it.
+  Creating the index REQUIRES the C.3 duplicate preflight to be empty
+  first; execution on any real database requires separate owner approval
+  and the transition/preflight/rollback runbook
+  (`docs/reviews/PIXEL_ROUND1_9_MIGRATION_0004_TRANSITION.md`).
 
 ## Rules (ADR-0019, AGENTS.md §6)
 
 1. **Append-only.** Applied migration files are never edited or reordered.
    Schema changes append a new file (`0003_*.sql` and newer) whose SQL also
    advances `schema_metadata.schema_version` inside the same atomic unit.
+   0001–0003 remain the ONLY APPLIED files; `0004_source_poll_ownership.sql`
+   is a Round 1.9 LOCAL candidate with zero real-database applications.
 2. **Application metadata vs. Wrangler bookkeeping.** `schema_metadata`
    describes WHAT the running application expects (read by `/health/ready`
    and `/version`); wrangler's `d1_migrations` table records WHICH FILES
