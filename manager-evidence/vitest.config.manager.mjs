@@ -1,3 +1,6 @@
-import {defineConfig} from 'vitest/config';
-import {cloudflareTest} from '@cloudflare/vitest-pool-workers';
-export default defineConfig({plugins:[cloudflareTest({wrangler:{configPath:'./wrangler.jsonc'}})],test:{include:['audit-tools/manager-probes/**/*.test.ts'],maxWorkers:1}});
+import { defineConfig } from 'vitest/config';
+import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+export default defineConfig({
+  plugins: [cloudflareTest({ wrangler: { configPath: './wrangler.jsonc' } })],
+  test: { include: ['audit-tools/manager-probes/**/*.test.ts'], maxWorkers: 1 },
+});

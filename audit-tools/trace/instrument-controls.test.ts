@@ -33,6 +33,7 @@ import {
   snapshot,
   type D1Stats,
 } from './d1-instrument';
+import { traceLog } from './trace-log';
 
 let stats: D1Stats;
 let wrapped: D1Database;
@@ -56,7 +57,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     expect(stats.batchAttempts).toBe(0);
     expect(d.executionApiCallAttempts).toBe(0);
     expect(d.executionApiCallsCompleted).toBe(0);
-    console.log('CONTROL[C-01]', JSON.stringify({ prepares: stats.prepares, ...d }));
+    traceLog('CONTROL[C-01]', JSON.stringify({ prepares: stats.prepares, ...d }));
   });
 
   it('C-02 a 2-statement batch is ONE execution-API call carrying TWO statements; EVERY result metadata captured', async () => {
@@ -74,7 +75,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     // TR-01 fix: EVERY batch result metadata is captured (v1 kept only result[0]).
     expect(d.metaRecordsAvailable).toBe(2);
     expect(stats.metaRecords.filter((m) => m.origin === 'batch')).toHaveLength(2);
-    console.log(
+    traceLog(
       'CONTROL[C-02]',
       JSON.stringify({
         prepares: stats.prepares,
@@ -95,7 +96,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     expect(stats.terminalCompleted).toBe(2);
     expect(d.executionApiCallAttempts).toBe(2);
     expect(d.statementsAttempted).toBe(2);
-    console.log(
+    traceLog(
       'CONTROL[C-03]',
       JSON.stringify({ prepares: stats.prepares, terminalAttempts: stats.terminalAttempts, ...d }),
     );
@@ -114,7 +115,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     const results = await wrapped.batch([b1, b2]);
     const rows = results.map((r) => (r as { results: { v: string }[] }).results[0]?.v);
     expect(rows).toEqual(['TRACE-BIND-A', 'TRACE-BIND-B']);
-    console.log(
+    traceLog(
       'CONTROL[C-04]',
       JSON.stringify({
         terminalRows: ['TRACE-BIND-42'],
@@ -137,14 +138,15 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     expect(d1.metaRecordsAvailable).toBe(0);
     // Failed batch: one failed execution-API call; statements submitted counted.
     const p1 = wrapped.prepare('SELECT 1');
-    await expect(wrapped.batch([p1, wrapped.prepare('SELECT * FROM __also_missing_1102__')]))
-      .rejects.toBeTruthy();
+    await expect(
+      wrapped.batch([p1, wrapped.prepare('SELECT * FROM __also_missing_1102__')]),
+    ).rejects.toBeTruthy();
     const d2 = deriveCounts(stats);
     expect(stats.batchAttempts).toBe(1);
     expect(stats.batchFailed).toBe(1);
     expect(stats.batchStatements).toBe(2);
     expect(d2.executionApiCallAttempts).toBe(2); // 1 failed terminal + 1 failed batch
-    console.log(
+    traceLog(
       'CONTROL[C-05]',
       JSON.stringify({
         terminalAttempts: stats.terminalAttempts,
@@ -167,7 +169,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     expect(stats.terminalAttempts).toBe(0);
     expect(stats.batchAttempts).toBe(0);
     expect(deriveCounts(stats).executionApiCallAttempts).toBe(0);
-    console.log('CONTROL[C-06]', JSON.stringify({ allCountersZero: true }));
+    traceLog('CONTROL[C-06]', JSON.stringify({ allCountersZero: true }));
   });
 
   it('C-07 metadata that is unavailable is LABELED unavailable, never zero-filled', async () => {
@@ -186,7 +188,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     // A .first() on an empty result: null row → unavailable, labeled.
     await wrapped.prepare('SELECT 9 AS v WHERE 1 = 0').first();
     expect(stats.metaAggregates.unavailableTotal).toBe(2);
-    console.log(
+    traceLog(
       'CONTROL[C-07]',
       JSON.stringify({
         metaRecords: snapshot(stats).metaRecords.map((m) => ({
@@ -212,7 +214,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
       expect(stats.metaAggregates.unavailableTotal).toBe(1);
       expect(m.unavailableReason).toBeTruthy();
     }
-    console.log(
+    traceLog(
       'CONTROL[C-08]',
       JSON.stringify({
         rawAttempted: 1,
@@ -233,7 +235,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     wrapped.prepare('SELECT 1');
     expect(stats.prepares).toBe(1);
     expect(deriveCounts(stats).executionApiCallAttempts).toBe(0);
-    console.log('CONTROL[C-09]', JSON.stringify({ passthroughDeclared: true, prepares: 1 }));
+    traceLog('CONTROL[C-09]', JSON.stringify({ passthroughDeclared: true, prepares: 1 }));
   });
 
   // ---------------------------------------------------------------------
@@ -271,13 +273,11 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     // Durable proof: the valid INSERT is NOT visible — the transaction rolled back.
     const rows = await rawDb().prepare('SELECT id FROM __r1103_probe__').all();
     expect(rows.results).toEqual([]);
-    console.log('CONTROL[C-10]', JSON.stringify({ ...d, durableRows: rows.results.length }));
+    traceLog('CONTROL[C-10]', JSON.stringify({ ...d, durableRows: rows.results.length }));
   });
 
   it('C-11 MIXED success/failure sequence: only completed units count as completed (R112-03)', async () => {
-    await rawDb()
-      .prepare('CREATE TABLE IF NOT EXISTS __r1103_mixed__ (id TEXT PRIMARY KEY)')
-      .run();
+    await rawDb().prepare('CREATE TABLE IF NOT EXISTS __r1103_mixed__ (id TEXT PRIMARY KEY)').run();
     await rawDb().prepare('DELETE FROM __r1103_mixed__').run();
     // Batch 1 succeeds: 3 statements.
     await wrapped.batch([
@@ -304,7 +304,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     expect(d.statementsCompleted).toBe(3 + 1); // batch1 statements + final terminal ONLY
     expect(d.statementsNotConfirmedCompleted).toBe(3); // failed terminal + failed batch's 2
     expect(stats.batchStatementsCompleted).toBe(3);
-    console.log('CONTROL[C-11]', JSON.stringify(d));
+    traceLog('CONTROL[C-11]', JSON.stringify(d));
   });
 
   it('C-12 resetStats restores ALL v3 counters including batchStatementsCompleted, reservoir and aggregates', async () => {
@@ -324,7 +324,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     expect(d.statementsAttempted).toBe(0);
     expect(d.statementsCompleted).toBe(0);
     expect(d.statementsNotConfirmedCompleted).toBe(0);
-    console.log('CONTROL[C-12]', JSON.stringify({ resetAllZero: true }));
+    traceLog('CONTROL[C-12]', JSON.stringify({ resetAllZero: true }));
   });
 
   it('C-13 snapshot deep-copies v3 fields; later mutations never leak into the snapshot', async () => {
@@ -339,7 +339,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     expect(snap.metaAggregates.availableTotal).toBe(2); // unchanged
     expect(snap.metaRecords.length).toBe(2); // unchanged
     expect(stats.batchStatementsCompleted).toBe(3); // live moved on
-    console.log(
+    traceLog(
       'CONTROL[C-13]',
       JSON.stringify({
         snapBatchStmtsCompleted: snap.batchStatementsCompleted,
@@ -358,7 +358,9 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
         return {
           async run() {
             value += 1;
-            return value === 4096 ? { success: true } : { success: true, meta: { rows_written: value } };
+            return value === 4096
+              ? { success: true }
+              : { success: true, meta: { rows_written: value } };
           },
         };
       },
@@ -383,8 +385,8 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     expect(d.metaRecordsAvailable).toBe(4096);
     expect(d.metaRecordsUnavailable).toBe(1);
     expect(s.metaAggregates.presence.rowsWritten).toBe(4096);
-    expect(s.metaAggregates.sums.rowsWritten).toBe(4095 * 4096 / 2 + 4097); // 1..4095 + 4097
-    console.log(
+    expect(s.metaAggregates.sums.rowsWritten).toBe((4095 * 4096) / 2 + 4097); // 1..4095 + 4097
+    traceLog(
       'CONTROL[C-14]',
       JSON.stringify({
         completed: s.terminalCompleted,
@@ -422,7 +424,7 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     expect(s.metaAggregates.presence.rowsWritten).toBe(total);
     expect(s.metaAggregates.sums.changes).toBe(total);
     expect(s.metaAggregates.sums.durationMs).toBeCloseTo(total * 0.5, 5);
-    console.log(
+    traceLog(
       'CONTROL[C-15]',
       JSON.stringify({
         total,
@@ -443,6 +445,6 @@ describe('R1.10.2 D1 instrument unit controls (audit tooling — outside accepte
     expect(d.statementsNotConfirmedCompleted).toBe(1);
     // The label is part of the derived shape (documented in the header).
     expect(Object.keys(d)).toContain('statementsNotConfirmedCompleted');
-    console.log('CONTROL[C-16]', JSON.stringify(d));
+    traceLog('CONTROL[C-16]', JSON.stringify(d));
   });
 });

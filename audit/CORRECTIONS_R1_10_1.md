@@ -24,6 +24,7 @@ while simultaneously erroring every schema-4 path and mandating schema 3; S-08
 depended on S-07 yet was referenced from Stage 6; S-10 always expected 3.
 
 **Applied corrections:**
+
 1. `audit/PREVIEW_SMOKE_TESTS.md` — every scenario is now explicitly TWO-BRANCH:
    - **Phase A (pre-migration, schema 3):** Telegram/health/jobs-pause checks
      ONLY. No provider fetch, no R09-ownership experiment, no durable-ownership
@@ -55,6 +56,7 @@ mutation" is wrong (claim/dedup bookkeeping precedes routing —
 external exactly-once.
 
 **Applied corrections (with fresh LOCAL trace evidence, `audit-tools/`):**
+
 1. **S-06** rewritten: pause proof = deliver an ALREADY-DURABLE controlled
    job/reference through the owner-authorized queue path; fixture preparation
    is a separate step from the zero-effect observation window. Local trace
@@ -94,6 +96,7 @@ evidence (no real Cloudflare Time Travel/bookmark/restore was exercised);
 shorthand for the new `unresolved→stop/retry` model.
 
 **Applied corrections:**
+
 1. `audit/SCHEMA3_TO_4_TRANSITION_REVIEW.md` §4 renamed/reframed:
    - VERIFIED locally: whole-file atomicity on disposable workerd D1,
      duplicate-preflight gate, expected-version flip ordering, three-state
@@ -122,6 +125,7 @@ Cloudflare docs explicitly support per-environment Cron Triggers; A.5 lumped
 current connector secrets (YOUTUBE/REDDIT/GITHUB) into "future/not implemented".
 
 **Applied corrections:**
+
 1. `audit/PREVIEW_READINESS_CHECKLIST.md` A.7 now distinguishes THREE layers:
    - Shipped config: the trigger `*/5 * * * *` is declared TOP-LEVEL only; no
      per-env trigger exists in the shipped tree. (The in-source comment
@@ -132,7 +136,7 @@ current connector secrets (YOUTUBE/REDDIT/GITHUB) into "future/not implemented".
      https://developers.cloudflare.com/workers/configuration/cron-triggers/,
      verified 2026-04-21+ fetch date in free-plan/FREE_PLAN_OFFICIAL_SOURCES.md).
    - Real-account state: UNKNOWN — no remote inspection was performed.
-   No config change was made or proposed as done.
+     No config change was made or proposed as done.
 2. A.5 secrets reclassified (NAMES ONLY, no values/IDs):
    - **Telegram — current and required for ingress:** `BOT_TOKEN`,
      `WEBHOOK_SECRET`, `OWNER_TELEGRAM_ID`.

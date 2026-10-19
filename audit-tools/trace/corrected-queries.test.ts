@@ -51,6 +51,7 @@ import {
   type ClassifiedItem,
   type ClassificationOutcome,
 } from './candidate-classification';
+import { traceLog } from './trace-log';
 
 /* ------------------------------------------------------------------ */
 /* Fixture constants (obvious fakes)                                   */
@@ -159,7 +160,7 @@ describe('R1.10.3 corrected candidate queries (audit tooling — outside accepte
     expect(d.statementsAttempted).toBeGreaterThan(50);
     expect(d.statementsCompleted).toBe(102); // v3: completed batch + completed reads
     expect(stats.batchStatementsCompleted).toBe(100);
-    console.log(
+    traceLog(
       'CORRECTED[Q-01]',
       JSON.stringify({
         retainedItemInserts: 100,
@@ -177,7 +178,12 @@ describe('R1.10.3 corrected candidate queries (audit tooling — outside accepte
   it('Q-02 foreign-source identity: corrected grouped own-probe preserves the (id, source_id) pair and equals the accepted probe (CE2 shape, corrected)', async () => {
     // The exact CE2 durable shape: a row whose id matches the attempted
     // item's id but whose source is FOREIGN to the attempted item.
-    await seedItem({ id: 'existing-foreign-id', sourceId: SOURCE_B, externalId: 'ext-b', canonicalUrl: null });
+    await seedItem({
+      id: 'existing-foreign-id',
+      sourceId: SOURCE_B,
+      externalId: 'ext-b',
+      canonicalUrl: null,
+    });
     const attempted: CandidateItem = {
       id: 'existing-foreign-id',
       sourceId: SOURCE_A,
@@ -212,7 +218,7 @@ describe('R1.10.3 corrected candidate queries (audit tooling — outside accepte
     const candidate = await classifyGrouped(wrapped, [attempted]);
     expect(outcomesOf(candidate)).toEqual(outcomesOf(accepted));
     expect(outcomesOf(candidate)).toEqual(['unclassified']);
-    console.log(
+    traceLog(
       'CORRECTED[Q-02]',
       JSON.stringify({
         acceptedProbe: acceptedRow,
@@ -250,7 +256,7 @@ describe('R1.10.3 corrected candidate queries (audit tooling — outside accepte
       .bind(SOURCE_A, ...boundaryIds)
       .all<{ id: string }>();
     expect(boundary.results).toEqual([]); // executes at exactly 100 binds
-    console.log(
+    traceLog(
       'CORRECTED[Q-03]',
       JSON.stringify({
         items: items.length,
@@ -264,18 +270,58 @@ describe('R1.10.3 corrected candidate queries (audit tooling — outside accepte
 
   it('Q-04 outcome matrix parity: inserted / duplicateExternal / duplicateUrl / quirk / null-key / cross-key — grouped equals accepted per item IN ATTEMPT ORDER', async () => {
     // Seeded durable state (raw, outside any window):
-    await seedItem({ id: 'seed-own-hit', sourceId: SOURCE_A, externalId: 'seed-ext-1', canonicalUrl: 'https://seed.example/1' });
-    await seedItem({ id: 'seed-ext-hit', sourceId: SOURCE_A, externalId: 'ext-shared', canonicalUrl: null });
-    await seedItem({ id: 'seed-url-hit', sourceId: SOURCE_A, externalId: 'seed-ext-2', canonicalUrl: 'https://seed.example/2' });
+    await seedItem({
+      id: 'seed-own-hit',
+      sourceId: SOURCE_A,
+      externalId: 'seed-ext-1',
+      canonicalUrl: 'https://seed.example/1',
+    });
+    await seedItem({
+      id: 'seed-ext-hit',
+      sourceId: SOURCE_A,
+      externalId: 'ext-shared',
+      canonicalUrl: null,
+    });
+    await seedItem({
+      id: 'seed-url-hit',
+      sourceId: SOURCE_A,
+      externalId: 'seed-ext-2',
+      canonicalUrl: 'https://seed.example/2',
+    });
     // Attempted items exercising EVERY accepted branch:
     const items: CandidateItem[] = [
-      { id: 'seed-own-hit', sourceId: SOURCE_A, externalId: 'fresh-ext-a', canonicalUrl: 'https://fresh.example/a' }, // own hit → inserted
-      { id: 'fresh-1', sourceId: SOURCE_A, externalId: 'ext-shared', canonicalUrl: 'https://fresh.example/b' }, // external hit → duplicateExternal
+      {
+        id: 'seed-own-hit',
+        sourceId: SOURCE_A,
+        externalId: 'fresh-ext-a',
+        canonicalUrl: 'https://fresh.example/a',
+      }, // own hit → inserted
+      {
+        id: 'fresh-1',
+        sourceId: SOURCE_A,
+        externalId: 'ext-shared',
+        canonicalUrl: 'https://fresh.example/b',
+      }, // external hit → duplicateExternal
       { id: 'fresh-2', sourceId: SOURCE_A, externalId: 'ext-shared', canonicalUrl: null }, // cross-key: SAME external value → duplicateExternal
-      { id: 'fresh-3', sourceId: SOURCE_A, externalId: 'fresh-ext-c', canonicalUrl: 'https://seed.example/2' }, // url hit → duplicateUrl
-      { id: 'fresh-4', sourceId: SOURCE_A, externalId: 'fresh-ext-d', canonicalUrl: 'https://nowhere.example/d' }, // full miss + url → quirk duplicateExternal
+      {
+        id: 'fresh-3',
+        sourceId: SOURCE_A,
+        externalId: 'fresh-ext-c',
+        canonicalUrl: 'https://seed.example/2',
+      }, // url hit → duplicateUrl
+      {
+        id: 'fresh-4',
+        sourceId: SOURCE_A,
+        externalId: 'fresh-ext-d',
+        canonicalUrl: 'https://nowhere.example/d',
+      }, // full miss + url → quirk duplicateExternal
       { id: 'fresh-5', sourceId: SOURCE_A, externalId: null, canonicalUrl: null }, // null keys → unclassified branch
-      { id: 'fresh-6', sourceId: SOURCE_A, externalId: null, canonicalUrl: 'https://nowhere.example/f' }, // null ext + url miss → quirk
+      {
+        id: 'fresh-6',
+        sourceId: SOURCE_A,
+        externalId: null,
+        canonicalUrl: 'https://nowhere.example/f',
+      }, // null ext + url miss → quirk
     ];
     const accepted = await classifyAcceptedPerItem(wrapped, items);
     const candidate = await classifyGrouped(wrapped, items);
@@ -289,7 +335,7 @@ describe('R1.10.3 corrected candidate queries (audit tooling — outside accepte
       'unclassified',
       'duplicateExternal',
     ]);
-    console.log(
+    traceLog(
       'CORRECTED[Q-04]',
       JSON.stringify({ parity: outcomesOf(candidate), items: items.length }),
     );
@@ -299,8 +345,18 @@ describe('R1.10.3 corrected candidate queries (audit tooling — outside accepte
     // Seed 50 rows the attempted items will own-hit, and 50 rows the
     // attempted items will external-hit.
     for (let i = 0; i < 50; i += 1) {
-      await seedItem({ id: `own-${i}`, sourceId: SOURCE_A, externalId: `seeded-a-${i}`, canonicalUrl: null });
-      await seedItem({ id: `other-${i}`, sourceId: SOURCE_A, externalId: `dup-ext-${i}`, canonicalUrl: null });
+      await seedItem({
+        id: `own-${i}`,
+        sourceId: SOURCE_A,
+        externalId: `seeded-a-${i}`,
+        canonicalUrl: null,
+      });
+      await seedItem({
+        id: `other-${i}`,
+        sourceId: SOURCE_A,
+        externalId: `dup-ext-${i}`,
+        canonicalUrl: null,
+      });
     }
     const items: CandidateItem[] = [
       ...Array.from({ length: 50 }, (_, i) => ({
@@ -323,7 +379,7 @@ describe('R1.10.3 corrected candidate queries (audit tooling — outside accepte
     const dupExt = outcomesOf(candidate).filter((o) => o === 'duplicateExternal').length;
     expect(inserted).toBe(50);
     expect(dupExt).toBe(50);
-    console.log(
+    traceLog(
       'CORRECTED[Q-05]',
       JSON.stringify({ inserted, duplicateExternal: dupExt, parity: 'per-item identical' }),
     );
@@ -338,7 +394,12 @@ describe('R1.10.3 corrected candidate queries (audit tooling — outside accepte
       { id: 'a-row', sourceId: SOURCE_A, externalId: 'ext-a1', canonicalUrl: null }, // own hit (A)
       { id: 'b-row', sourceId: SOURCE_B, externalId: 'ext-b1', canonicalUrl: null }, // own hit (B)
       { id: 'fresh-a', sourceId: SOURCE_A, externalId: 'ext-b1', canonicalUrl: null }, // A-external probe must NOT see B's row → unclassified (null url)
-      { id: 'fresh-b', sourceId: SOURCE_B, externalId: 'ext-a1', canonicalUrl: 'https://b.example/x' }, // B probes must NOT see A's rows → quirk dupExternal
+      {
+        id: 'fresh-b',
+        sourceId: SOURCE_B,
+        externalId: 'ext-a1',
+        canonicalUrl: 'https://b.example/x',
+      }, // B probes must NOT see A's rows → quirk dupExternal
       { id: 'a-row', sourceId: SOURCE_B, externalId: 'ext-z', canonicalUrl: null }, // SAME id, DIFFERENT source → own miss (source pair preserved)
     ];
     const accepted = await classifyAcceptedPerItem(wrapped, items);
@@ -351,7 +412,7 @@ describe('R1.10.3 corrected candidate queries (audit tooling — outside accepte
       'duplicateExternal',
       'unclassified',
     ]);
-    console.log(
+    traceLog(
       'CORRECTED[Q-06]',
       JSON.stringify({
         parity: outcomesOf(candidate),

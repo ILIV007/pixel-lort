@@ -13,6 +13,7 @@ the R1.10.1 edition is preserved inside the sealed input
 `input/R1.10.1_61a01947_ORIGINAL.zip`.
 
 Authority documents reviewed:
+
 - `docs/reviews/PIXEL_ROUND1_9_MIGRATION_0004_TRANSITION.md` (plan of record)
 - `docs/reviews/PIXEL_ROUND1_9_R09_OWNERSHIP_IMPLEMENTATION.md` (+ 1.9.1 amendment)
 - `docs/reviews/ROUND1_9_1_CORRECTIONS.md`
@@ -116,11 +117,11 @@ are and remain ONLY the local, disposable-workerd facts in §1–§3 and §5.
 
 ## 5. Three-state runtime model (VERIFIED locally)
 
-| State | Detection | Scheduling behavior | Poll behavior |
-|---|---|---|---|
-| known readable v3 legacy | metadata row readable, version 3 | legacy marker-CAS reservation | legacy hold-only fence (R09 defect honestly visible) |
-| known readable v4 ownership | metadata readable, version 4 | atomic S1/S2/S3 owned scheduling | A1 acquisition + ownership-fenced commit + partial-index exclusivity |
-| unresolved | metadata missing/corrupt/oversized/unsupported/read-throw | stops BEFORE probe/seed/due-scan (`cron.ingestion_capability_unresolved`); zero side effects | returns recoverable retry `ingestion_capability_unresolved` BEFORE preflight/budget/network/items/state; bounded retries → observable dead-letter |
+| State                       | Detection                                                 | Scheduling behavior                                                                          | Poll behavior                                                                                                                                     |
+| --------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| known readable v3 legacy    | metadata row readable, version 3                          | legacy marker-CAS reservation                                                                | legacy hold-only fence (R09 defect honestly visible)                                                                                              |
+| known readable v4 ownership | metadata readable, version 4                              | atomic S1/S2/S3 owned scheduling                                                             | A1 acquisition + ownership-fenced commit + partial-index exclusivity                                                                              |
+| unresolved                  | metadata missing/corrupt/oversized/unsupported/read-throw | stops BEFORE probe/seed/due-scan (`cron.ingestion_capability_unresolved`); zero side effects | returns recoverable retry `ingestion_capability_unresolved` BEFORE preflight/budget/network/items/state; bounded retries → observable dead-letter |
 
 **R110-03 wording correction:** the stale shorthand "unreadable → fail-safe
 OFF" is superseded by the accepted model: **unresolved → STOP/RETRY** — the

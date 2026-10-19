@@ -394,9 +394,7 @@ export function instrumentD1(db: D1Database, stats: D1Stats): D1Database {
             const bucket = stats.terminalByMethod[method];
             bucket.attempts += 1;
             try {
-              const result = await (target[prop] as (...a: unknown[]) => Promise<unknown>)(
-                ...args,
-              );
+              const result = await (target[prop] as (...a: unknown[]) => Promise<unknown>)(...args);
               stats.terminalCompleted += 1;
               bucket.completed += 1;
               const record: D1MetaRecord = {
@@ -444,9 +442,9 @@ export function instrumentD1(db: D1Database, stats: D1Stats): D1Database {
             // Unwrap to the ORIGINAL underlying statements: the real
             // workerd batch receives exactly what an unwrapped caller
             // would have passed (bind identity preserved).
-            const result = await (
-              target.batch as (s: D1PreparedStatement[]) => Promise<unknown>
-            )(statements.map(unwrap));
+            const result = await (target.batch as (s: D1PreparedStatement[]) => Promise<unknown>)(
+              statements.map(unwrap),
+            );
             stats.batchCompleted += 1;
             // R112-03: only a COMPLETED batch's statements count as
             // completed (D1 batch = implicit all-or-nothing transaction).

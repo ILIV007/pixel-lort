@@ -25,6 +25,7 @@ No paid upgrade / Cloudflare operation / real migration / deployment /
 activation is authorized or performed.
 
 Reproduction evidence (this round, logs preserved):
+
 - Supplied UNFILTERED recursive trace command on the EXACT sealed input:
   **exit 1** (9 assertions pass; nested duplicate suite fails import) —
   reproduced byte-exactly as the manager documented
@@ -46,10 +47,11 @@ captured ONLY `result[0].meta` per batch. Official API:
 https://developers.cloudflare.com/d1/worker-api/d1-database/
 
 **Applied corrections:**
+
 1. `audit-tools/trace/d1-instrument.ts` — REWRITTEN (v2) with separated
    counters: `prepares` (construction only), terminal attempts/completed/
    failed BY METHOD (`run/all/first/raw`), `batchAttempts/batchCompleted/
-   batchFailed`, `batchStatements`, `batchResultRecords`, EVERY available
+batchFailed`, `batchStatements`, `batchResultRecords`, EVERY available
    result-metadata record (`metaRecords`, terminal + every batch result —
    the v1 result[0]-only omission is fixed), explicit UNAVAILABLE labeling
    (`metaUnavailableCount` + `unavailableReason`; never zero-filled),
@@ -91,6 +93,7 @@ Free 50-query row under both unit readings; lowering queue batch size does
 not fix it.
 
 **Applied corrections:**
+
 1. `audit-tools/trace/trace-suite.test.ts` — REBUILT (28 traces): active
    schema-4 SINGLE polls at 0/2/100 new items (T-10 304-not-modified,
    T-11 empty-200, T-12 redirect, T-13 100-new), duplicate-heavy (T-14
@@ -126,6 +129,7 @@ ordinary grant); empty-success treated as `not_modified` on all connectors;
 global abort on infrastructure DLQ.
 
 **Applied corrections (all operator docs consistently):**
+
 1. `audit/PREVIEW_READINESS_CHECKLIST.md` — the cycle is REMOVED:
    Stage 7 = migration + health at 4; **Stage 8a** = explicit owner
    authorization for a BOUNDED gate-ON test window (permission BEFORE any
@@ -161,6 +165,7 @@ queued row is re-enqueued by the REAL cron (same job id), exit 0. Also:
 T-09's durable dead_letter is not DLQ send/receive proof.
 
 **Applied corrections:**
+
 1. `free-plan/FREE_PLAN_COMPATIBILITY.md` §5/§7/§12 — the "no automatic
    re-kick exists" claim is WITHDRAWN; the implemented application-level
    recovery is documented with file evidence
@@ -194,10 +199,11 @@ nonexistent `audit-tools/src/...`; fresh-extraction exit1. README also
 omitted the overlay-at-clone-root bootstrap.
 
 **Applied corrections:**
+
 1. The nested `trace/trace/` duplicate directory is REMOVED — the delivered
    `audit-tools/` contains exactly ONE copy of each tool file
    (verification: fresh-extraction UNFILTERED command `npx vitest run
-   --config audit-tools/vitest.config.trace.mjs --maxWorkers=1` on the
+--config audit-tools/vitest.config.trace.mjs --maxWorkers=1` on the
    FINAL artifact = **37/37, exit 0**, log bound to the exact package:
    `logs/20-final-fresh-extract-trace-run.log`).
 2. `audit-tools/README.md` — REWRITTEN with the EXACT bootstrap: clone the
@@ -219,6 +225,7 @@ Queue UTC reset asserted without evidence; official-source report invented
 a February fetch session against October log timestamps.
 
 **Applied corrections:**
+
 1. `free-plan/FREE_PLAN_WORKSHEET.md` — REBUILT: formulas take items/day,
    duplicates, index/meta samples, all configured requests (per-connector
    caps from T-17…T-21), retries, re-kicks, DLQ, retention/headroom

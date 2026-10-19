@@ -35,10 +35,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
 import worker from '../../src/entrypoints/worker';
-import {
-  applyMigrations,
-  ROUND19_MIGRATION_PLAN,
-} from '../../tests/helpers/migrations';
+import { applyMigrations, ROUND19_MIGRATION_PLAN } from '../../tests/helpers/migrations';
 import {
   createD1Stats,
   deriveCounts,
@@ -49,6 +46,7 @@ import {
 } from './d1-instrument';
 import { createRawFetchMock, type RawFetchMock } from '../../tests/helpers/fetch-mock';
 import type { QueueEnvelope } from '../../src/domain/jobs/envelope';
+import { traceLog } from './trace-log';
 
 /* ------------------------------------------------------------------ */
 /* Fixture constants (obvious fakes — never real secrets/IDs)          */
@@ -176,10 +174,7 @@ function fakeBatch(bodies: unknown[], queue = 'pixel-jobs-preview') {
   };
 }
 
-function traceEnv(
-  schema: 3 | 4,
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+function traceEnv(schema: 3 | 4, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     APP_VERSION: '1.4.0',
     ENVIRONMENT: 'preview',
@@ -364,7 +359,7 @@ async function report(label: string, context: ReportContext): Promise<void> {
     metaRowsWritten: s.metaRecords.reduce((a, m) => a + (m.rowsWritten ?? 0), 0),
     metaChanges: s.metaRecords.reduce((a, m) => a + (m.changes ?? 0), 0),
   };
-  console.log(
+  traceLog(
     `TRACE[${label}] ` +
       JSON.stringify({
         entrypoint: context.entrypoint,
@@ -451,7 +446,7 @@ describe('R1.10.2 traces — schema 3 surface (audit tooling — outside accepte
       },
     });
     const res = await worker.fetch(webhookRequest(foreign), e as never, ctx());
-    console.log(`TRACE[T-03 status] ${res.status} (tokenless offline → retryable 503)`);
+    traceLog(`TRACE[T-03 status] ${res.status} (tokenless offline → retryable 503)`);
     // Shared disposable D1 across this file's tests: count THIS update only.
     const claimRows = await scalar(
       'SELECT COUNT(*) n FROM telegram_updates WHERE update_id = 5203',
@@ -591,7 +586,10 @@ describe('R1.10.2 traces — schema 3 surface (audit tooling — outside accepte
     let guard = 0;
     while ((await pendingPollJobIds(10)).length < 10 && guard < 8) {
       guard += 1;
-      await rawDb().prepare('UPDATE source_state SET next_poll_at = ?').bind(NOW - 60_000 * guard).run();
+      await rawDb()
+        .prepare('UPDATE source_state SET next_poll_at = ?')
+        .bind(NOW - 60_000 * guard)
+        .run();
       await runGateOnCronPass(3);
     }
     const ids = await pendingPollJobIds(10);
@@ -619,7 +617,13 @@ describe('R1.10.2 traces — schema 3 surface (audit tooling — outside accepte
       entrypoint: 'queue',
       window: 'ONE handleQueue delivery of 10 durable poll jobs (gate OFF)',
       expectedSchema: 3,
-      flags: { jobs: true, ingestion: false, batchSize: 10, acked: 10, outcome: 'paused_by_policy' },
+      flags: {
+        jobs: true,
+        ingestion: false,
+        batchSize: 10,
+        acked: 10,
+        outcome: 'paused_by_policy',
+      },
     });
   });
 });
@@ -653,9 +657,7 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
       SOURCE_INGESTION_ENABLED: 'true',
       ...FAKE_CONNECTOR_SECRETS,
     });
-    const batch = fakeBatch([
-      { version: 1, jobId, type: 'sources.fetch_poll', attempt, traceId },
-    ]);
+    const batch = fakeBatch([{ version: 1, jobId, type: 'sources.fetch_poll', attempt, traceId }]);
     const { handleQueue } = await import('../../src/entrypoints/queue');
     await handleQueue(batch as never, e as never, ctx());
     return batch;
@@ -669,7 +671,11 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     const feed = rss(2, 't10');
     useScriptedFetch(
       createRawFetchMock([
-        { status: 200, headers: { 'content-type': 'application/xml', etag: 'W/"t10-etag-1"' }, bodyText: feed },
+        {
+          status: 200,
+          headers: { 'content-type': 'application/xml', etag: 'W/"t10-etag-1"' },
+          bodyText: feed,
+        },
       ]),
     );
     const batch0 = await deliverOnePoll(first, 1, 'trace-t10-w0');
@@ -677,7 +683,10 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     const stored = await scalar('SELECT COUNT(*) n FROM source_items');
     expect(stored).toBe(2);
     // New due window (fixture, unmeasured): schedule the next poll.
-    await rawDb().prepare('UPDATE source_state SET next_poll_at = ?').bind(NOW - 1).run();
+    await rawDb()
+      .prepare('UPDATE source_state SET next_poll_at = ?')
+      .bind(NOW - 1)
+      .run();
     await runGateOnCronPass(4);
     const second = (await pendingPollJobIds(1))[0];
     expect(second).toBeDefined();
@@ -779,17 +788,24 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     const feed = rss(100, 't14');
     const first = (await pendingPollJobIds(1))[0];
     useScriptedFetch(
-      createRawFetchMock([{ status: 200, headers: { 'content-type': 'application/xml' }, bodyText: feed }]),
+      createRawFetchMock([
+        { status: 200, headers: { 'content-type': 'application/xml' }, bodyText: feed },
+      ]),
     );
     const batch0 = await deliverOnePoll(first, 1, 'trace-t14-w0');
     expect(batch0.messages[0]?.acked).toBe(true);
     expect(await scalar('SELECT COUNT(*) n FROM source_items')).toBe(100);
-    await rawDb().prepare('UPDATE source_state SET next_poll_at = ?').bind(NOW - 1).run();
+    await rawDb()
+      .prepare('UPDATE source_state SET next_poll_at = ?')
+      .bind(NOW - 1)
+      .run();
     await runGateOnCronPass(4);
     const second = (await pendingPollJobIds(1))[0];
     expect(second).not.toBe(first);
     useScriptedFetch(
-      createRawFetchMock([{ status: 200, headers: { 'content-type': 'application/xml' }, bodyText: feed }]),
+      createRawFetchMock([
+        { status: 200, headers: { 'content-type': 'application/xml' }, bodyText: feed },
+      ]),
     );
     resetStats(stats);
     const batch = await deliverOnePoll(second, 1, 'trace-t14-measured');
@@ -816,7 +832,9 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
       '</channel></rss>';
     const first = (await pendingPollJobIds(1))[0];
     useScriptedFetch(
-      createRawFetchMock([{ status: 200, headers: { 'content-type': 'application/xml' }, bodyText: firstFeed }]),
+      createRawFetchMock([
+        { status: 200, headers: { 'content-type': 'application/xml' }, bodyText: firstFeed },
+      ]),
     );
     const batch0 = await deliverOnePoll(first, 1, 'trace-t15-w0');
     expect(batch0.messages[0]?.acked).toBe(true);
@@ -830,11 +848,16 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
           `<guid isPermaLink="false">t15-${i}</guid><pubDate>Tue, 03 Feb 2026 10:00:00 +0000</pubDate></item>`,
       ).join('') +
       '</channel></rss>';
-    await rawDb().prepare('UPDATE source_state SET next_poll_at = ?').bind(NOW - 1).run();
+    await rawDb()
+      .prepare('UPDATE source_state SET next_poll_at = ?')
+      .bind(NOW - 1)
+      .run();
     await runGateOnCronPass(4);
     const second = (await pendingPollJobIds(1))[0];
     useScriptedFetch(
-      createRawFetchMock([{ status: 200, headers: { 'content-type': 'application/xml' }, bodyText: secondFeed }]),
+      createRawFetchMock([
+        { status: 200, headers: { 'content-type': 'application/xml' }, bodyText: secondFeed },
+      ]),
     );
     resetStats(stats);
     const batch = await deliverOnePoll(second, 1, 'trace-t15-measured');
@@ -863,7 +886,10 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     let guard = 0;
     while ((await pendingPollJobIds(10)).length < 10 && guard < 8) {
       guard += 1;
-      await rawDb().prepare('UPDATE source_state SET next_poll_at = ?').bind(NOW - 60_000 * guard).run();
+      await rawDb()
+        .prepare('UPDATE source_state SET next_poll_at = ?')
+        .bind(NOW - 60_000 * guard)
+        .run();
       await runGateOnCronPass(4);
     }
     const ids = await pendingPollJobIds(10);
@@ -948,7 +974,10 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
         'https://blog.playstation.com/feed-extra-3.xml',
       ],
     });
-    await rawDb().prepare('UPDATE source_state SET next_poll_at = ?').bind(NOW - 1).run();
+    await rawDb()
+      .prepare('UPDATE source_state SET next_poll_at = ?')
+      .bind(NOW - 1)
+      .run();
     await runGateOnCronPass(4);
     const jobId = (await pendingPollJobIds(1))[0];
     const scripted = createRawFetchMock();
@@ -998,7 +1027,10 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
   it('T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)', async () => {
     await produceJobsViaCron(4, ['steam_news_watchlist']);
     await setSourceConfig('steam_news_watchlist', { apps: [570, 440, 730], appsPerBatch: 10 });
-    await rawDb().prepare('UPDATE source_state SET next_poll_at = ?').bind(NOW - 1).run();
+    await rawDb()
+      .prepare('UPDATE source_state SET next_poll_at = ?')
+      .bind(NOW - 1)
+      .run();
     await runGateOnCronPass(4);
     const jobId = (await pendingPollJobIds(1))[0];
     const urls: string[] = [];
@@ -1030,7 +1062,10 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     await setSourceConfig('youtube_official_watchlist', {
       playlists: ['PLtraceplaylist01', 'PLtraceplaylist02'],
     });
-    await rawDb().prepare('UPDATE source_state SET next_poll_at = ?').bind(NOW - 1).run();
+    await rawDb()
+      .prepare('UPDATE source_state SET next_poll_at = ?')
+      .bind(NOW - 1)
+      .run();
     await runGateOnCronPass(4);
     const jobId = (await pendingPollJobIds(1))[0];
     const urls: string[] = [];
@@ -1052,7 +1087,9 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
             { status: 200, headers: { 'content-type': 'application/json' } },
           );
         }
-        const playlistId = url.includes('PLtraceplaylist01') ? 'PLtraceplaylist01' : 'PLtraceplaylist02';
+        const playlistId = url.includes('PLtraceplaylist01')
+          ? 'PLtraceplaylist01'
+          : 'PLtraceplaylist02';
         const videoId = playlistId === 'PLtraceplaylist01' ? 'tracevid1' : 'tracevid2';
         return new Response(
           JSON.stringify({
@@ -1092,7 +1129,10 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     await setSourceConfig('github_release_watchlist', {
       repositories: ['trace-fixture/alpha', 'trace-fixture/beta'],
     });
-    await rawDb().prepare('UPDATE source_state SET next_poll_at = ?').bind(NOW - 1).run();
+    await rawDb()
+      .prepare('UPDATE source_state SET next_poll_at = ?')
+      .bind(NOW - 1)
+      .run();
     await runGateOnCronPass(4);
     const jobId = (await pendingPollJobIds(1))[0];
     const urls: string[] = [];
@@ -1122,7 +1162,10 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
   it('T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)', async () => {
     await produceJobsViaCron(4, ['reddit_crack_signals']);
     await setSourceConfig('reddit_crack_signals', { subreddits: ['tracefixa', 'tracefixb'] });
-    await rawDb().prepare('UPDATE source_state SET next_poll_at = ?').bind(NOW - 1).run();
+    await rawDb()
+      .prepare('UPDATE source_state SET next_poll_at = ?')
+      .bind(NOW - 1)
+      .run();
     await runGateOnCronPass(4);
     const jobId = (await pendingPollJobIds(1))[0];
     const urls: string[] = [];
@@ -1170,7 +1213,9 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     const batch = await deliverOnePoll(jobId, 1, 'trace-t22-d1');
     expect(batch.messages[0]?.acked).toBe(true); // acked; pacing owned by D1
     const state = await rawDb()
-      .prepare("SELECT consecutive_failures, next_poll_at FROM source_state WHERE source_id = 'playstation_blog'")
+      .prepare(
+        "SELECT consecutive_failures, next_poll_at FROM source_state WHERE source_id = 'playstation_blog'",
+      )
       .first<{ consecutive_failures: number; next_poll_at: number }>();
     expect(state?.consecutive_failures).toBe(1); // adaptive ladder step
     const charged = await rawDb()
@@ -1204,7 +1249,9 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     expect(batch.messages[0]?.acked).toBe(true);
     expect(scripted.calls.length).toBe(0); // denial happens before hop 0
     const state = await rawDb()
-      .prepare("SELECT last_error, consecutive_failures FROM source_state WHERE source_id = 'playstation_blog'")
+      .prepare(
+        "SELECT last_error, consecutive_failures FROM source_state WHERE source_id = 'playstation_blog'",
+      )
       .first<{ last_error: string | null; consecutive_failures: number }>();
     expect(state?.last_error).toBe('budget_exhausted');
     expect(state?.consecutive_failures).toBe(0); // denial is NOT a ladder failure
@@ -1216,7 +1263,13 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
       entrypoint: 'queue',
       window: 'ONE handleQueue delivery (daily_request_budget=0)',
       expectedSchema: 4,
-      flags: { jobs: true, ingestion: true, label: 'budget-denied', rawFetches: 0, chargedUnits: 0 },
+      flags: {
+        jobs: true,
+        ingestion: true,
+        label: 'budget-denied',
+        rawFetches: 0,
+        chargedUnits: 0,
+      },
     });
   });
 
@@ -1224,8 +1277,15 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     await produceJobsViaCron(4, ['playstation_blog']);
     const jobId = (await pendingPollJobIds(1))[0];
     const before = await rawDb()
-      .prepare("SELECT cursor, etag, last_modified, consecutive_failures FROM source_state WHERE source_id = 'playstation_blog'")
-      .first<{ cursor: string | null; etag: string | null; last_modified: string | null; consecutive_failures: number }>();
+      .prepare(
+        "SELECT cursor, etag, last_modified, consecutive_failures FROM source_state WHERE source_id = 'playstation_blog'",
+      )
+      .first<{
+        cursor: string | null;
+        etag: string | null;
+        last_modified: string | null;
+        consecutive_failures: number;
+      }>();
     await rawDb().prepare('DROP TABLE budgets').run(); // fixture: authority storage out
     const scripted = createRawFetchMock();
     useScriptedFetch(scripted);
@@ -1238,8 +1298,15 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     expect(batch.messages[0]?.acked).toBe(true);
     expect(scripted.calls.length).toBe(0); // fail-closed BEFORE network
     const after = await rawDb()
-      .prepare("SELECT cursor, etag, last_modified, consecutive_failures FROM source_state WHERE source_id = 'playstation_blog'")
-      .first<{ cursor: string | null; etag: string | null; last_modified: string | null; consecutive_failures: number }>();
+      .prepare(
+        "SELECT cursor, etag, last_modified, consecutive_failures FROM source_state WHERE source_id = 'playstation_blog'",
+      )
+      .first<{
+        cursor: string | null;
+        etag: string | null;
+        last_modified: string | null;
+        consecutive_failures: number;
+      }>();
     expect(after).toEqual(before); // ZERO terminal ingestion effects
     const row = await rawDb()
       .prepare('SELECT status, attempts FROM jobs WHERE id = ?')
@@ -1278,7 +1345,13 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     });
     resetStats(stats);
     const poisonBatch = fakeBatch([
-      { version: 1, jobId: 'nonexistent-poison-1', type: 'totally.unknown_type', attempt: 1, traceId: 'trace-t25' },
+      {
+        version: 1,
+        jobId: 'nonexistent-poison-1',
+        type: 'totally.unknown_type',
+        attempt: 1,
+        traceId: 'trace-t25',
+      },
     ]);
     const { handleQueue } = await import('../../src/entrypoints/queue');
     await handleQueue(poisonBatch as never, e as never, ctx());
@@ -1315,7 +1388,13 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
       });
       resetStats(stats);
       const batch = fakeBatch([
-        { version: 1, jobId, type: 'sources.fetch_poll', attempt: delivery, traceId: `trace-t26-d${delivery}` },
+        {
+          version: 1,
+          jobId,
+          type: 'sources.fetch_poll',
+          attempt: delivery,
+          traceId: `trace-t26-d${delivery}`,
+        },
       ]);
       const { handleQueue } = await import('../../src/entrypoints/queue');
       await handleQueue(batch as never, e as never, ctx());
@@ -1340,7 +1419,7 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
       .bind(jobId)
       .first<{ status: string; attempts: number; dlq_delivered_at: number | null }>();
     expect(final?.status).toBe('dead_letter');
-    console.log(
+    traceLog(
       'TRACE[T-26 summary] ' +
         JSON.stringify({
           deliveries: history.length,
@@ -1370,7 +1449,13 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
     const { handleQueue } = await import('../../src/entrypoints/queue');
     for (let delivery = 1; delivery <= 5; delivery++) {
       const batch = fakeBatch([
-        { version: 1, jobId, type: 'sources.fetch_poll', attempt: delivery, traceId: `trace-t27-d${delivery}` },
+        {
+          version: 1,
+          jobId,
+          type: 'sources.fetch_poll',
+          attempt: delivery,
+          traceId: `trace-t27-d${delivery}`,
+        },
       ]);
       await handleQueue(batch as never, e as never, ctx());
       const row = await rawDb()
@@ -1413,7 +1498,8 @@ describe('R1.10.2 traces — schema 4 active ingestion (audit tooling — outsid
         jobs: true,
         ingestion: false,
         dlqSends: 1,
-        label: 'application DLQ send + guarded confirmation; real Queue send/receive LIVE-UNVERIFIED',
+        label:
+          'application DLQ send + guarded confirmation; real Queue send/receive LIVE-UNVERIFIED',
       },
     });
   });

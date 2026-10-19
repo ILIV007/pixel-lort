@@ -12,7 +12,7 @@ and its counts have their OWN logs — never added to the accepted suite's
     counter `batchStatementsCompleted` increments ONLY on a completed
     batch (D1 batches are implicit all-or-nothing transactions).
     `deriveCounts().statementsCompleted = terminalCompleted +
-    batchStatementsCompleted`; the gap is reported as
+batchStatementsCompleted`; the gap is reported as
     `statementsNotConfirmedCompleted` and is LABELED UNKNOWN-outcome
     (workerd does not expose per-statement rollback internals) — never
     "completed", never silently renamed "failed".
@@ -58,14 +58,14 @@ and its counts have their OWN logs — never added to the accepted suite's
 
 ## Unit vocabulary (mandatory in every report)
 
-| Term | Meaning |
-|---|---|
-| `prepares` | `prepare()` construction calls — NOT executions/queries/RPC |
-| execution-API-call attempts | terminal executions + batch calls (per window) |
-| statements attempted | terminal executions + batch statements |
-| statements completed | terminal completions + completed-batch statements ONLY (v3) |
+| Term                               | Meaning                                                       |
+| ---------------------------------- | ------------------------------------------------------------- |
+| `prepares`                         | `prepare()` construction calls — NOT executions/queries/RPC   |
+| execution-API-call attempts        | terminal executions + batch calls (per window)                |
+| statements attempted               | terminal executions + batch statements                        |
+| statements completed               | terminal completions + completed-batch statements ONLY (v3)   |
 | statements not-confirmed-completed | the gap — UNKNOWN outcome (rolled-back/unobservable), labeled |
-| meta available / unavailable | complete ALL-result totals (v3), independent of the reservoir |
+| meta available / unavailable       | complete ALL-result totals (v3), independent of the reservoir |
 
 These are LOCAL workerd + miniflare D1 PROXY measurements. They do NOT prove
 Cloudflare-side CPU (network wait is not CPU), do NOT emulate Cloudflare
@@ -118,9 +118,18 @@ the SEALED R1.10.2 input: supplied 37/37 exit 0 + frozen counterexamples
 
 ```bash
 cp -a <package-root>/manager-evidence/manager-probes ./audit-tools/
+mv ./audit-tools/manager-probes/design-counterexamples.test.ts.frozen \
+   ./audit-tools/manager-probes/design-counterexamples.test.ts
 cp <package-root>/manager-evidence/vitest.config.manager.mjs ./audit-tools/
 npx vitest run --config audit-tools/vitest.config.manager.mjs --maxWorkers=1
+rm -rf ./audit-tools/manager-probes ./audit-tools/vitest.config.manager.mjs
 ```
+
+(The probe source is stored OPAQUE as `.frozen` — byte-preserved
+historical evidence that formatters/linters never touch — and is
+materialized TEMPORARILY for its standalone run; remove the copy
+afterwards. `bash manager-evidence/reproduce.sh` does the same inside a
+disposable scratch tree.)
 
 Expected: **exit 1, 1 failed / 3 passed** — CE1 and CE3 turn GREEN under
 the v3 instrument (the R112-03 fixes), CONTROL stays green (3 API / 102

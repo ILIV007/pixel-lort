@@ -1,6 +1,7 @@
 # PIXEL R1.10.2 — independent review and scoped decisions
 
 ## Outcome
+
 **PARTIAL ACCEPTANCE.** The major corrected trace/unit vocabulary, executable
 package layout, recovery correction and stage-order correction are accepted
 as progress. The Free-safe DESIGN is **CHANGES REQUIRED**. Do NOT implement
@@ -10,6 +11,7 @@ Current advertised ingestion profile remains NOT_READY_FOR_INGESTION_ON_FREE.
 This does not establish that a narrower Free profile is impossible.
 
 ## Independent evidence, not copied totals
+
 Reviewed ZIP SHA-256:
 `bd7d3462ab8c3eaf2e5b51e1ac5b69db399748a6d916a0f1ecbdd83caf22c80b`
 4,295,898 bytes. Manifest353/353; real bundle exact HEAD; source297/297
@@ -21,14 +23,16 @@ NOT rerun by manager this review, because source is unchanged and byte-verified;
 the submitted full1142/DB301 logs remain GLM evidence, not a fresh manager claim.
 
 Manager counterexample suite: **3 FAILED / 1 CONTROL PASSED, exit1**:
+
 - CE1 actual failed batch incorrectly reported as completed statements.
 - CE2 proposed Probe A drops the accepted source predicate.
 - CE3 metadata-cap overflow can overwrite a retained unavailable record.
 - CONTROL100 inserts +2 grouped reads =3 execution calls but102 SQL statements.
-The first/control/CE2 use real disposable workerd D1; CE3 is explicitly a fake
-binding unit test of instrumentation memory only. No cloud enforcement/CPU/fees.
+  The first/control/CE2 use real disposable workerd D1; CE3 is explicitly a fake
+  binding unit test of instrumentation memory only. No cloud enforcement/CPU/fees.
 
 ## R112-01 — P1 BLOCKER: grouped reads do NOT remove retained insert statements
+
 `free-plan/FREE_SAFE_EXECUTION_DESIGN.md` sections3,6,7,8.
 The proposal keeps the atomic item batch UNCHANGED. It still submits one
 INSERT per item plus its state UPDATE and budget statements. Therefore100
@@ -58,6 +62,7 @@ batch; lossless durable continuation if required; or explicit narrower initial
 profile. Each must be proved, not merely named.
 
 ## R112-02 — P1: per-connector capacity and losslessness not proved
+
 T18 uses3 Steam apps, T19 two playlists, T20 two repositories, T21 two
 subreddits. These are representative multi-request tests, NOT supported-max
 traces. Global cheap100-item-poll claims don't follow from them.
@@ -83,6 +88,7 @@ also acceptable if proved. Never silently lower feed caps/drop old items or
 claim cadence controls queue occupancy. No config/profile applied this round.
 
 ## R112-03 — P2: failure and overflow counters still misreport
+
 `audit-tools/trace/d1-instrument.ts:deriveCounts` sets
 `statementsCompleted = terminalCompleted + batchStatements` even when a batch
 fails. CE1: attempted2, batchFailed1, batchCompleted0, no results and transaction
@@ -98,6 +104,7 @@ truncated sum complete. Use the record just created, not the last array entry.
 Both new failing controls must turn green after tooling correction.
 
 ## R112-04 — P2: grouped lookup must preserve source identity
+
 Proposed Probe A removes `AND source_id=?` on the rationale that id is a PK.
 PK uniqueness does NOT prove that an existing row belongs to the attempted
 item's source. CE2's accepted query returns[], proposed query returns the
@@ -117,6 +124,7 @@ the frozen test and claim the original4/4 now pass. Expected frozen-suite state
 after fixing CE1/CE3 is1F/3P (CE2 remains the old-query counterexample).
 
 ## Operator nits to correct in-place (not another product redesign)
+
 - Stage order7→8a→8b→8c is now non-circular. However 'automatic reversion to
   false' in checklist has no supplied timer/implementation. Call it an explicit
   timed operator shutdown/check, or identify a separately authorized mechanism;
@@ -127,6 +135,7 @@ after fixing CE1/CE3 is1F/3P (CE2 remains the old-query counterexample).
 - Label current small connector fixtures representative, not max-bound proofs.
 
 ## What is accepted now / what stays open
+
 - Accepted progress: executable37-test package; prepare-vs-execution units;
   every-normal-batch-result capture; schema4 active measurements and honest
   NOT_READY verdict; existing recovery recognition; corrected stage topology;

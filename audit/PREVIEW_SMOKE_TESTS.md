@@ -45,7 +45,7 @@ Every scenario states the EXPECTED and the APPLIED schema separately.
 
 ---
 
-## S-01 Webhook authentication — wrong secret  [Phase A]
+## S-01 Webhook authentication — wrong secret [Phase A]
 
 - **Expected schema:** 3. **Applied schema (verify first):** 3.
   **Flags:** ingress ON, jobs ON, ingestion OFF.
@@ -56,7 +56,7 @@ Every scenario states the EXPECTED and the APPLIED schema separately.
   payload; log line contains rejection reason, no body content.
 - **Stage:** Stage 6. **Abort:** any 2xx, any echoed value. **Cleanup:** none.
 
-## S-02 Webhook authentication — missing header / disabled-ingress probe  [Phase A]
+## S-02 Webhook authentication — missing header / disabled-ingress probe [Phase A]
 
 - **Expected/Applied schema:** 3/3. **Flags:** as S-01.
 - **Fixture prep:** none. **Allowed writes:** none.
@@ -66,7 +66,7 @@ Every scenario states the EXPECTED and the APPLIED schema separately.
 - **Stage:** Stage 6. **Abort:** differentiated error messages per verb.
   **Cleanup:** none.
 
-## S-03 Command routing — owner `/start`  [Phase A]
+## S-03 Command routing — owner `/start` [Phase A]
 
 - **Expected/Applied schema:** 3/3. **Flags:** as S-01.
 - **Fixture prep:** none. **Allowed writes:** `telegram_updates` claim/terminal
@@ -84,7 +84,7 @@ Every scenario states the EXPECTED and the APPLIED schema separately.
   accepted delivery; no reply; 5xx to Telegram without a durable claim.
   **Cleanup:** none.
 
-## S-04 Command routing — unauthorized actor  [Phase A]  (R110-02 corrected, kept)
+## S-04 Command routing — unauthorized actor [Phase A] (R110-02 corrected, kept)
 
 - **Expected/Applied schema:** 3/3. **Flags:** as S-01.
 - **Fixture prep:** a second Telegram account (pre-arranged, NOT an admin).
@@ -107,7 +107,7 @@ Every scenario states the EXPECTED and the APPLIED schema separately.
   actor changes admin settings, sources, budgets, jobs, or publication state.
   **Cleanup:** none (bookkeeping rows are historical record).
 
-## S-05 Command routing — `/language fa` persistence  [Phase A]
+## S-05 Command routing — `/language fa` persistence [Phase A]
 
 - **Expected/Applied schema:** 3/3. **Flags:** as S-01.
 - **Fixture prep:** none. **Allowed writes:** `admin_ui_language:` settings row
@@ -118,7 +118,7 @@ Every scenario states the EXPECTED and the APPLIED schema separately.
 - **Stage:** Stage 6. **Abort:** language flips without persistence; error on
   read-back. **Cleanup:** owner may restore `/language en` (allowed write).
 
-## S-06 Policy pause semantics on preview (gate OFF)  [Phase A]  (R110-02 corrected, kept)
+## S-06 Policy pause semantics on preview (gate OFF) [Phase A] (R110-02 corrected, kept)
 
 - **Expected/Applied schema:** 3/3. **Flags:** `JOBS_ENABLED="true"`,
   `SOURCE_INGESTION_ENABLED="false"` (shipped preview profile).
@@ -148,7 +148,7 @@ Every scenario states the EXPECTED and the APPLIED schema separately.
   job may be left in its `paused_by_policy`-acked durable state or cancelled
   by the owner; document which.
 
-## S-07 One bounded provider fetch with budget  [Stage 8b ONLY — inside the 8a window]
+## S-07 One bounded provider fetch with budget [Stage 8b ONLY — inside the 8a window]
 
 - **Expected schema:** **4**. **Applied schema (verify first):** 4 (this
   scenario EXISTS only post-migration inside a Stage-8a window; at schema 3
@@ -210,7 +210,7 @@ Every scenario states the EXPECTED and the APPLIED schema separately.
   (durable state remains historical record); the window auto-reverts at
   Stage 8c.
 
-## S-08 Durable state & ownership observability  [Stage 8b ONLY]  (R110-01 corrected, kept)
+## S-08 Durable state & ownership observability [Stage 8b ONLY] (R110-01 corrected, kept)
 
 - **Expected/Applied schema:** 4/4. Depends on S-07 having run; **S-08
   CANNOT precede S-07** (dependency stated).
@@ -235,7 +235,7 @@ Every scenario states the EXPECTED and the APPLIED schema separately.
   ownership fields missing. **Cleanup:** none (durable history is the
   record).
 
-## S-09 No publication side effect (constant invariant)  [All phases]
+## S-09 No publication side effect (constant invariant) [All phases]
 
 - **Schema expectation:** any (invariant). **Flags:** any.
 - **Fixture prep:** none. **Allowed writes:** none by this test.
@@ -247,7 +247,7 @@ Every scenario states the EXPECTED and the APPLIED schema separately.
   this would falsify the capability matrix and stop everything. **Cleanup:**
   N/A (abort = stop).
 
-## S-10 Health & version endpoints  [Both phases — stage-dependent expectations]
+## S-10 Health & version endpoints [Both phases — stage-dependent expectations]
 
 - **Schema expectation:** STAGE-DEPENDENT (R110-01 correction, kept).
 - **Flags:** any. **Fixture prep:** none. **Allowed writes:** none.

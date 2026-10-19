@@ -12,10 +12,10 @@ UNKNOWN (remote checks are out of scope).
 
 ## 1. Verdict
 
-**Free-plan compatibility for the CURRENT SHIPPED surface (Telegram admin
+*_Free-plan compatibility for the CURRENT SHIPPED surface (Telegram admin
 bot + webhook, jobs engine ON with ingestion gate OFF, cron */5, schema 3):
 plausibly trivial on paper, UNPROVEN pending owner-approved cloud
-measurement.**
+measurement.*_
 
 **Operational status for the CURRENT ADVERTISED ingestion profile
 (batch-10 consumer, ≤100-item polls, schema-4 owned path):
@@ -34,8 +34,8 @@ enforcement claim:
   statements** (trace T-16; manager C3 independently: 1001/1812).
 - "Cloud enforcement" (whether/how Cloudflare actually enforces the row)
   and CPU remain **LIVE-UNVERIFIED**; this verdict is a local-measurement
-  + documented-limit conclusion, and it does NOT assert that every
-  possible Free deployment profile is impossible.
+  - documented-limit conclusion, and it does NOT assert that every
+    possible Free deployment profile is impossible.
 
 The gate-OFF surface and future ingestion are separate decisions. The
 minimal next step is the DESIGN-ONLY Free-safe path
@@ -45,13 +45,13 @@ weakened fence.
 
 ## 2. Method and evidence classes
 
-| Class | Meaning | Where |
-|---|---|---|
-| OFFICIAL | Cloudflare docs as retrieved in `manager-evidence/official/*.json` (URL + retrieval provenance) | `free-plan/FREE_PLAN_OFFICIAL_SOURCES.md` |
-| MEASURED-LOCAL | Fresh corrected-unit traces of the REAL entrypoints on disposable workerd D1 | `audit-tools/trace/`, `audit-tools/logs/trace-run-r1102.log`; summarized in `free-plan/FREE_PLAN_WORKSHEET.md` + `free-plan/FREE_PLAN_RESOURCE_LEDGER.json` |
-| CODE-FACT | Reviewed constants read from the accepted source (no behavior change) | cited inline |
-| CHOSEN | Scenario assumption chosen for estimation (labeled, not measured) | `free-plan/FREE_PLAN_WORKSHEET.md` |
-| UNKNOWN | Cannot be known without owner-side/cloud access | §8 |
+| Class          | Meaning                                                                                         | Where                                                                                                                                                       |
+| -------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OFFICIAL       | Cloudflare docs as retrieved in `manager-evidence/official/*.json` (URL + retrieval provenance) | `free-plan/FREE_PLAN_OFFICIAL_SOURCES.md`                                                                                                                   |
+| MEASURED-LOCAL | Fresh corrected-unit traces of the REAL entrypoints on disposable workerd D1                    | `audit-tools/trace/`, `audit-tools/logs/trace-run-r1102.log`; summarized in `free-plan/FREE_PLAN_WORKSHEET.md` + `free-plan/FREE_PLAN_RESOURCE_LEDGER.json` |
+| CODE-FACT      | Reviewed constants read from the accepted source (no behavior change)                           | cited inline                                                                                                                                                |
+| CHOSEN         | Scenario assumption chosen for estimation (labeled, not measured)                               | `free-plan/FREE_PLAN_WORKSHEET.md`                                                                                                                          |
+| UNKNOWN        | Cannot be known without owner-side/cloud access                                                 | §8                                                                                                                                                          |
 
 **Honesty labels (mandatory):** local traces are a workerd/miniflare PROXY.
 Local elapsed wall time does NOT measure Cloudflare CPU (network wait is not
@@ -119,6 +119,7 @@ UNPROVEN.
 
 **Unit vocabulary (TR-01 corrected; the old "prepare+batch = binding
 invocation" formula is withdrawn):**
+
 - `prepares` = `prepare()` CONSTRUCTION only (official API: "Prepares a
   query statement to be later executed"). NEVER an execution, RPC, query,
   or billable event.
@@ -278,18 +279,18 @@ seed time), OR operator vars already documented
 (`SOURCE_INGESTION_ENABLED`, per-source `enabled`). No new env var is
 claimed.
 
-| Knob | PROPOSED value | Where it lives |
-|---|---|---|
-| Enabled sources at first bounded window | **1** (the S-07 discipline: ONE low-volume RSS source) | `sources.enabled` (owner runbook) |
-| Cadence | registry intervals (≥ 900 s); cron stays `*/5` | registry seed (reviewed data) |
-| Staggering | registry intervals are naturally distinct; **explicitly NOT a deterministic batch bound** (§7.2) | registry data |
-| Item cap | shipped reviewed constant (`maxItemsPerFeed = 100`) | CODE-FACT |
-| Consumer limits | unchanged: batch 10 / timeout 5 / retries 3 | `wrangler.jsonc` (shipped) |
-| Retry ceilings | engine backoff ladder + `max_retries: 3` + `daily_request_budget` per source | CODE-FACT + registry |
-| Provider requests | per-connector caps measured (T-17…T-21); counted per-hop against the source's Tehran-day budget | MEASURED-LOCAL caps × CHOSEN cadence |
-| Expected queue ops | 3 ops × (polls/day) + retries + re-kicks + DLQ margin (components itemized, worksheet §3) | derived (worksheet) |
-| Expected D1 daily | formula-driven from the corrected per-invocation measurements (worksheet §3); local estimates UNDERCOUNT cloud writes | derived (worksheet) |
-| Account headroom | UNKNOWN — do not assume empty | §8 |
+| Knob                                    | PROPOSED value                                                                                                        | Where it lives                       |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| Enabled sources at first bounded window | **1** (the S-07 discipline: ONE low-volume RSS source)                                                                | `sources.enabled` (owner runbook)    |
+| Cadence                                 | registry intervals (≥ 900 s); cron stays `*/5`                                                                        | registry seed (reviewed data)        |
+| Staggering                              | registry intervals are naturally distinct; **explicitly NOT a deterministic batch bound** (§7.2)                      | registry data                        |
+| Item cap                                | shipped reviewed constant (`maxItemsPerFeed = 100`)                                                                   | CODE-FACT                            |
+| Consumer limits                         | unchanged: batch 10 / timeout 5 / retries 3                                                                           | `wrangler.jsonc` (shipped)           |
+| Retry ceilings                          | engine backoff ladder + `max_retries: 3` + `daily_request_budget` per source                                          | CODE-FACT + registry                 |
+| Provider requests                       | per-connector caps measured (T-17…T-21); counted per-hop against the source's Tehran-day budget                       | MEASURED-LOCAL caps × CHOSEN cadence |
+| Expected queue ops                      | 3 ops × (polls/day) + retries + re-kicks + DLQ margin (components itemized, worksheet §3)                             | derived (worksheet)                  |
+| Expected D1 daily                       | formula-driven from the corrected per-invocation measurements (worksheet §3); local estimates UNDERCOUNT cloud writes | derived (worksheet)                  |
+| Account headroom                        | UNKNOWN — do not assume empty                                                                                         | §8                                   |
 
 **This profile does NOT change the §1 verdict:** even at ONE enabled source,
 a single supported 100-item poll exceeds the documented 50-query row under

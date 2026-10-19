@@ -16,7 +16,13 @@ if [ -n "${PIXEL_NODE_MODULES:-}" ]; then ln -s "$PIXEL_NODE_MODULES" node_modul
 cp -a "$WORK/input/audit-tools" ./audit-tools
 ./node_modules/.bin/vitest run --config audit-tools/vitest.config.trace.mjs --maxWorkers=1 > "$LOGS/supplied37.log" 2>&1
 echo 'SUPPLIED_37_EXIT=0'
+# The frozen probe source is stored OPAQUE (design-counterexamples.test.ts.frozen,
+# byte-preserved historical evidence that must never be reformatted or linted).
+# Materialize it TEMPORARILY for its standalone run inside this disposable
+# scratch tree; the scratch is removed by the trap below.
 cp -a "$ROOT/manager-evidence/manager-probes" ./audit-tools/
+mv ./audit-tools/manager-probes/design-counterexamples.test.ts.frozen \
+   ./audit-tools/manager-probes/design-counterexamples.test.ts
 cp "$ROOT/manager-evidence/vitest.config.manager.mjs" ./audit-tools/
 set +e
 ./node_modules/.bin/vitest run --config audit-tools/vitest.config.manager.mjs > "$LOGS/counterexamples.log" 2>&1

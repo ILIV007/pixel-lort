@@ -41,10 +41,7 @@ export const MAX_BOUND_PARAMS = 100;
 export const CHUNK_SIZE = MAX_BOUND_PARAMS - 1;
 
 export type ClassificationOutcome =
-  | 'inserted'
-  | 'duplicateExternal'
-  | 'duplicateUrl'
-  | 'unclassified';
+  'inserted' | 'duplicateExternal' | 'duplicateUrl' | 'unclassified';
 
 export interface CandidateItem {
   readonly id: string;
@@ -122,9 +119,7 @@ export async function classifyGrouped(
     for (const ids of chunk(distinct(group.map((i) => i.id)), CHUNK_SIZE)) {
       const placeholders = ids.map(() => '?').join(', ');
       const res = await executor
-        .prepare(
-          `SELECT id FROM source_items WHERE source_id = ? AND id IN (${placeholders})`,
-        )
+        .prepare(`SELECT id FROM source_items WHERE source_id = ? AND id IN (${placeholders})`)
         .bind(sourceId, ...ids)
         .all<{ id: string }>();
       for (const row of res.results) ownSet.add(row.id);
@@ -155,8 +150,7 @@ export async function classifyGrouped(
         )
         .bind(sourceId, ...values)
         .all<{ canonical_url: string | null }>();
-      for (const row of res.results)
-        if (row.canonical_url !== null) urlSet.add(row.canonical_url);
+      for (const row of res.results) if (row.canonical_url !== null) urlSet.add(row.canonical_url);
     }
   }
 
