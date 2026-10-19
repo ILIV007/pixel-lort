@@ -1,0 +1,1232 @@
+{
+  "class": "DESIGN-LAB measured cost ledger — LOCAL workerd proxy units; NOT cloud quota/CPU/billing evidence",
+  "instrument": "audit-tools/trace/d1-instrument.ts v3 (R112-03 corrected units)",
+  "firstProfileTarget": {
+    "executionApiCallAttemptsMax": 40,
+    "statementsAttemptedMax": 40
+  },
+  "rows": [
+    {
+      "id": "C-11-legacy-zero-not-modified",
+      "schema": 3,
+      "path": "legacy-candidate",
+      "items": 0,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 8,
+      "executionApiCallsCompleted": 8,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 9,
+      "statementsCompleted": 9,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 9,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 0,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 0,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 0,
+      "rowsPerInsertStatement": 0,
+      "chunkLimitedBy": "single",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 1,
+          "stmt": 1,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 0,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-12-legacy-100-new-1hop",
+      "schema": 3,
+      "path": "legacy-candidate",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 14,
+      "executionApiCallsCompleted": 14,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 27,
+      "statementsCompleted": 27,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 27,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 0,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 12,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 12,
+      "rowsPerInsertStatement": 9,
+      "chunkLimitedBy": "binds",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 19,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 100,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-13-legacy-100-dup-url-1hop",
+      "schema": 3,
+      "path": "legacy-candidate",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 14,
+      "executionApiCallsCompleted": 14,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 27,
+      "statementsCompleted": 27,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 27,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 0,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 12,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 12,
+      "rowsPerInsertStatement": 9,
+      "chunkLimitedBy": "binds",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 19,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 0,
+        "duplicateExternal": 0,
+        "duplicateUrl": 100,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-14-legacy-100-new-3hops",
+      "schema": 3,
+      "path": "legacy-candidate",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 3,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 16,
+      "executionApiCallsCompleted": 16,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 31,
+      "statementsCompleted": 31,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 31,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 0,
+        "authorizations": 3,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 12,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 12,
+      "rowsPerInsertStatement": 9,
+      "chunkLimitedBy": "binds",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "authorization",
+          "api": 3,
+          "stmt": 6,
+          "note": "accepted authorizeIngestionUnit × hops (3)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 19,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 100,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-01-owned-zero-not-modified",
+      "schema": 4,
+      "path": "owned-candidate",
+      "items": 0,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 9,
+      "executionApiCallsCompleted": 9,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 10,
+      "statementsCompleted": 10,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 10,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 0,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 0,
+      "rowsPerInsertStatement": 0,
+      "chunkLimitedBy": "single",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 1,
+          "stmt": 1,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 0,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-02-owned-100-new-1hop",
+      "schema": 4,
+      "path": "owned-candidate",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 15,
+      "executionApiCallsCompleted": 15,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 29,
+      "statementsCompleted": 29,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 29,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 13,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 13,
+      "rowsPerInsertStatement": 8,
+      "chunkLimitedBy": "binds",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 20,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 100,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-03-owned-100-dup-external-1hop",
+      "schema": 4,
+      "path": "owned-candidate",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 15,
+      "executionApiCallsCompleted": 15,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 29,
+      "statementsCompleted": 29,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 29,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 13,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 13,
+      "rowsPerInsertStatement": 8,
+      "chunkLimitedBy": "binds",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 20,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 0,
+        "duplicateExternal": 100,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-04-owned-100-dup-url-1hop",
+      "schema": 4,
+      "path": "owned-candidate",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 15,
+      "executionApiCallsCompleted": 15,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 29,
+      "statementsCompleted": 29,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 29,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 13,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 13,
+      "rowsPerInsertStatement": 8,
+      "chunkLimitedBy": "binds",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 20,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 0,
+        "duplicateExternal": 0,
+        "duplicateUrl": 100,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-05-owned-50-50-mix-1hop",
+      "schema": 4,
+      "path": "owned-candidate",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 15,
+      "executionApiCallsCompleted": 15,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 29,
+      "statementsCompleted": 29,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 29,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 13,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 13,
+      "rowsPerInsertStatement": 8,
+      "chunkLimitedBy": "binds",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 20,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 50,
+        "duplicateExternal": 50,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-06-owned-100-new-max-bytes-1hop",
+      "schema": 4,
+      "path": "owned-candidate",
+      "items": 100,
+      "itemShape": "max",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 15,
+      "executionApiCallsCompleted": 15,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 29,
+      "statementsCompleted": 29,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 29,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 13,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 13,
+      "rowsPerInsertStatement": 8,
+      "chunkLimitedBy": "binds",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 20,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 100,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-07-owned-100-new-3hops",
+      "schema": 4,
+      "path": "owned-candidate",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 3,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 17,
+      "executionApiCallsCompleted": 17,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 33,
+      "statementsCompleted": 33,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 33,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 3,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 13,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 13,
+      "rowsPerInsertStatement": 8,
+      "chunkLimitedBy": "binds",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 3,
+          "stmt": 6,
+          "note": "accepted authorizeIngestionUnit × hops (3)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 20,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 100,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-08-owned-budget-denied",
+      "schema": 4,
+      "path": "owned-candidate",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 0,
+      "authority": "denied",
+      "executionApiCallAttempts": 10,
+      "executionApiCallsCompleted": 10,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 11,
+      "statementsCompleted": 11,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 11,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 0,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 0,
+      "rowsPerInsertStatement": 0,
+      "chunkLimitedBy": "single",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 2,
+          "stmt": 3,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 1,
+          "stmt": 1,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 0,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-09-owned-authority-failure",
+      "schema": 4,
+      "path": "owned-candidate",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "failure",
+      "executionApiCallAttempts": 6,
+      "executionApiCallsCompleted": 6,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 6,
+      "statementsCompleted": 6,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 6,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 0,
+        "budgetReadbacks": 0,
+        "multiRowInserts": 0,
+        "stateWrites": 0,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 0,
+      "rowsPerInsertStatement": 0,
+      "chunkLimitedBy": "n/a",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 0,
+          "stmt": 0,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted markJobRetryWait (authority failure path)"
+        }
+      ],
+      "outcome": {
+        "kind": "retry_wait",
+        "zeroTerminalIngestionWrites": true
+      }
+    },
+    {
+      "id": "C-10-owned-baseline-100-new-1hop",
+      "schema": 4,
+      "path": "owned-baseline",
+      "items": 100,
+      "itemShape": "normal",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 109,
+      "executionApiCallsCompleted": 109,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 210,
+      "statementsCompleted": 210,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 210,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 100,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 100,
+      "rowsPerInsertStatement": 1,
+      "chunkLimitedBy": "per-item (accepted shape)",
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 101,
+          "stmt": 201,
+          "note": "ACCEPTED baseline: per-item INSERT batch + fenced state write + per-item probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 100,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    }
+  ]
+}

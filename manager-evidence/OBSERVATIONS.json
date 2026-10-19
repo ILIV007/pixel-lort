@@ -1,0 +1,48 @@
+{
+  "class": "LOCAL independent counterexamples; NOT cloud enforcement",
+  "tests": "3failed/1passed",
+  "rows": [
+    {
+      "id": "CE1",
+      "batchCompleted": 0,
+      "batchFailed": 1,
+      "batchResultRecords": 0,
+      "executionApiCallAttempts": 1,
+      "executionApiCallsCompleted": 0,
+      "executionApiCallsFailed": 1,
+      "statementsAttempted": 2,
+      "statementsCompleted": 2,
+      "metaRecordsAvailable": 0,
+      "metaRecordsUnavailable": 0
+    },
+    {
+      "id": "CONTROL",
+      "retainedItemInserts": 100,
+      "groupedReads": 2,
+      "stateUpdateAndEngineOverhead": "omitted: lower bound only",
+      "executionApiCallAttempts": 3,
+      "executionApiCallsCompleted": 3,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 102,
+      "statementsCompleted": 102,
+      "metaRecordsAvailable": 102,
+      "metaRecordsUnavailable": 0
+    },
+    {
+      "id": "CE2",
+      "accepted": [],
+      "proposed": [
+        {
+          "id": "existing-foreign-id"
+        }
+      ],
+      "note": "query-equivalence counterexample; not a claim of normal-path foreign writes"
+    },
+    {
+      "id": "CE3",
+      "completed": 4097,
+      "retainedRecords": 4096,
+      "lastRetainedRowsWritten": 4097
+    }
+  ]
+}

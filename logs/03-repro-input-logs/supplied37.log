@@ -1,0 +1,801 @@
+
+ RUN  v4.1.11 /tmp/tmp.piQ1qrz93F/repo
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-01 webhook NORMAL noop update (offline, shipped preview profile)
+TRACE[T-01 webhook-normal-noop] {"entrypoint":"http","window":"one webhook POST (noop channel_post)","expectedSchema":3,"appliedSchema":3,"flags":{"ingress":true,"jobs":true,"ingestion":false},"prepares":2,"terminalAttempts":2,"terminalCompleted":2,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":2,"completed":2,"failed":0},"all":{"attempts":0,"completed":0,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":2,"metaUnavailable":0,"executionApiCallAttempts":2,"executionApiCallsCompleted":2,"executionApiCallsFailed":0,"statementsAttempted":2,"statementsCompleted":2,"localMeta":{"metaRowsRead":4,"metaRowsWritten":5,"metaChanges":2},"distinctSqlShapes":2,"sqlShapes":["INSERT INTO telegram_updates (update_id, received_at, status, claim_expires_at, failure_class, attempt_count) VALUES (?,","UPDATE telegram_updates SET status = 'processed', processed_at = ?, claim_expires_at = NULL, failure_class = NULL WHERE "]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-02 webhook DUPLICATE redelivery (delta of the second delivery)
+TRACE[T-02 webhook-duplicate-second-delivery] {"entrypoint":"http","window":"SECOND delivery of the SAME update_id (delta window)","expectedSchema":3,"appliedSchema":3,"flags":{"ingress":true,"jobs":true,"ingestion":false},"prepares":2,"terminalAttempts":2,"terminalCompleted":1,"terminalFailed":1,"terminalByMethod":{"run":{"attempts":1,"completed":0,"failed":1},"all":{"attempts":1,"completed":1,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":1,"metaUnavailable":0,"executionApiCallAttempts":2,"executionApiCallsCompleted":1,"executionApiCallsFailed":1,"statementsAttempted":2,"statementsCompleted":1,"localMeta":{"metaRowsRead":1,"metaRowsWritten":0,"metaChanges":0},"distinctSqlShapes":2,"sqlShapes":["INSERT INTO telegram_updates (update_id, received_at, status, claim_expires_at, failure_class, attempt_count) VALUES (?,","SELECT status, claim_expires_at, failure_class, attempt_count FROM telegram_updates WHERE update_id = ?"]}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-03 webhook UNAUTHORIZED foreign /start (tokenless offline 503 path)
+{"ts":"2026-10-19T11:34:24.963Z","level":"warn","msg":"telegram.action.outbound_unavailable","requestId":"74d08a0e-9495-4218-bc11-9a6def6118a2","action":"denied"}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-03 webhook UNAUTHORIZED foreign /start (tokenless offline 503 path)
+{"ts":"2026-10-19T11:34:24.964Z","level":"warn","msg":"telegram.update.failed","requestId":"74d08a0e-9495-4218-bc11-9a6def6118a2","updateId":5203,"errorCode":"service_unavailable","retryable":true}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-03 webhook UNAUTHORIZED foreign /start (tokenless offline 503 path)
+{"ts":"2026-10-19T11:34:24.966Z","level":"error","msg":"http.request.failed","requestId":"74d08a0e-9495-4218-bc11-9a6def6118a2","code":"service_unavailable","httpStatus":503,"error":{"errorKind":"app_error","name":"AppError","code":"service_unavailable","httpStatus":503}}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-03 webhook UNAUTHORIZED foreign /start (tokenless offline 503 path)
+TRACE[T-03 status] 503 (tokenless offline → retryable 503)
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-03 webhook UNAUTHORIZED foreign /start (tokenless offline 503 path)
+TRACE[T-03 webhook-unauthorized-offline] {"entrypoint":"http","window":"one webhook POST (foreign /start, no BOT_TOKEN)","expectedSchema":3,"appliedSchema":3,"flags":{"ingress":true,"jobs":true,"ingestion":false,"botToken":false},"prepares":3,"terminalAttempts":3,"terminalCompleted":3,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":2,"completed":2,"failed":0},"all":{"attempts":1,"completed":1,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":3,"metaUnavailable":0,"executionApiCallAttempts":3,"executionApiCallsCompleted":3,"executionApiCallsFailed":0,"statementsAttempted":3,"statementsCompleted":3,"localMeta":{"metaRowsRead":5,"metaRowsWritten":5,"metaChanges":2},"distinctSqlShapes":3,"sqlShapes":["INSERT INTO telegram_updates (update_id, received_at, status, claim_expires_at, failure_class, attempt_count) VALUES (?,","SELECT role, status FROM admins WHERE telegram_user_id = ? LIMIT 1","UPDATE telegram_updates SET status = 'failed', processed_at = ?, failure_class = ?, claim_expires_at = NULL WHERE update"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-04 webhook OWNER /start with fake-but-valid Telegram transport (full outbound path)
+TRACE[T-04 webhook-owner-start-transport] {"entrypoint":"http","window":"one webhook POST (owner /start) incl. ONE scripted sendMessage","expectedSchema":3,"appliedSchema":3,"flags":{"ingress":true,"jobs":true,"ingestion":false,"botToken":true,"outboundCalls":1},"prepares":3,"terminalAttempts":3,"terminalCompleted":3,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":2,"completed":2,"failed":0},"all":{"attempts":1,"completed":1,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":3,"metaUnavailable":0,"executionApiCallAttempts":3,"executionApiCallsCompleted":3,"executionApiCallsFailed":0,"statementsAttempted":3,"statementsCompleted":3,"localMeta":{"metaRowsRead":4,"metaRowsWritten":5,"metaChanges":2},"distinctSqlShapes":3,"sqlShapes":["INSERT INTO telegram_updates (update_id, received_at, status, claim_expires_at, failure_class, attempt_count) VALUES (?,","SELECT value_json FROM settings WHERE key = ? LIMIT 1","UPDATE telegram_updates SET status = 'processed', processed_at = ?, claim_expires_at = NULL, failure_class = NULL WHERE "]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-05 webhook UNAUTHORIZED foreign /start with transport (denial reply measured)
+TRACE[T-05 webhook-unauthorized-transport] {"entrypoint":"http","window":"one webhook POST (foreign /start) incl. ONE scripted denial sendMessage","expectedSchema":3,"appliedSchema":3,"flags":{"ingress":true,"jobs":true,"ingestion":false,"botToken":true,"outboundCalls":1},"prepares":3,"terminalAttempts":3,"terminalCompleted":3,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":2,"completed":2,"failed":0},"all":{"attempts":1,"completed":1,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":3,"metaUnavailable":0,"executionApiCallAttempts":3,"executionApiCallsCompleted":3,"executionApiCallsFailed":0,"statementsAttempted":3,"statementsCompleted":3,"localMeta":{"metaRowsRead":5,"metaRowsWritten":5,"metaChanges":2},"distinctSqlShapes":3,"sqlShapes":["INSERT INTO telegram_updates (update_id, received_at, status, claim_expires_at, failure_class, attempt_count) VALUES (?,","SELECT role, status FROM admins WHERE telegram_user_id = ? LIMIT 1","UPDATE telegram_updates SET status = 'processed', processed_at = ?, claim_expires_at = NULL, failure_class = NULL WHERE "]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-06 cron IDLE at shipped preview profile (jobs ON, ingestion OFF)
+{"ts":"2026-10-19T11:34:24.994Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-06 cron IDLE at shipped preview profile (jobs ON, ingestion OFF)
+{"ts":"2026-10-19T11:34:25.001Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-06 cron IDLE at shipped preview profile (jobs ON, ingestion OFF)
+TRACE[T-06 cron-idle-gate-off] {"entrypoint":"cron","window":"one scheduled pass (gate OFF)","expectedSchema":3,"appliedSchema":3,"flags":{"jobs":true,"ingestion":false,"envelopes":0},"prepares":6,"terminalAttempts":6,"terminalCompleted":6,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":0,"completed":0,"failed":0},"all":{"attempts":6,"completed":6,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":6,"metaUnavailable":0,"executionApiCallAttempts":6,"executionApiCallsCompleted":6,"executionApiCallsFailed":0,"statementsAttempted":6,"statementsCompleted":6,"localMeta":{"metaRowsRead":12,"metaRowsWritten":0,"metaChanges":0},"distinctSqlShapes":4,"sqlShapes":["SELECT COUNT(*) AS n FROM jobs WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ? AND type IN (?)","SELECT id, attempts, max_attempts FROM jobs WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ? AN","SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","SELECT COUNT(*) AS n FROM jobs WHERE status IN ('pending', 'retry_wait') AND run_after <= ? AND type IN (?)"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-07 cron INITIAL SEEDING pass only (gate ON, measured window = pass 1)
+{"ts":"2026-10-19T11:34:25.009Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-07 cron INITIAL SEEDING pass only (gate ON, measured window = pass 1)
+{"ts":"2026-10-19T11:34:25.020Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-07 cron INITIAL SEEDING pass only (gate ON, measured window = pass 1)
+{"ts":"2026-10-19T11:34:25.023Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-07 cron INITIAL SEEDING pass only (gate ON, measured window = pass 1)
+TRACE[T-07 cron-seed-pass] {"entrypoint":"cron","window":"ONE scheduled pass (initial registry seeding)","expectedSchema":3,"appliedSchema":3,"flags":{"jobs":true,"ingestion":true,"seededSources":14,"envelopes":0},"prepares":36,"terminalAttempts":8,"terminalCompleted":8,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":0,"completed":0,"failed":0},"all":{"attempts":8,"completed":8,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":1,"batchCompleted":1,"batchFailed":0,"batchStatements":28,"batchResultRecords":28,"metaAvailable":36,"metaUnavailable":0,"executionApiCallAttempts":9,"executionApiCallsCompleted":9,"executionApiCallsFailed":0,"statementsAttempted":36,"statementsCompleted":36,"localMeta":{"metaRowsRead":66,"metaRowsWritten":84,"metaChanges":28},"distinctSqlShapes":8,"sqlShapes":["SELECT value FROM schema_metadata WHERE key = ?","SELECT id FROM sources WHERE id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)","SELECT source_id FROM source_state WHERE source_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)","INSERT INTO sources (id, name, connector, lane, trust_tier, enabled, interval_seconds, priority, daily_request_budget, a","INSERT INTO source_state (source_id, next_poll_at, consecutive_failures, requests_today, updated_at) VALUES (?, 0, 0, 0,","SELECT s.id, s.connector, s.interval_seconds, s.daily_request_budget, s.config_json, st.next_poll_at, st.etag, st.last_m","SELECT id, attempts, max_attempts FROM jobs WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ? OR","SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-08 cron DUE-SCHEDULING pass only (gate ON, after enabling ONE source; separate window)
+{"ts":"2026-10-19T11:34:25.032Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-08 cron DUE-SCHEDULING pass only (gate ON, after enabling ONE source; separate window)
+{"ts":"2026-10-19T11:34:25.039Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-08 cron DUE-SCHEDULING pass only (gate ON, after enabling ONE source; separate window)
+{"ts":"2026-10-19T11:34:25.042Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-08 cron DUE-SCHEDULING pass only (gate ON, after enabling ONE source; separate window)
+{"ts":"2026-10-19T11:34:25.044Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-08 cron DUE-SCHEDULING pass only (gate ON, after enabling ONE source; separate window)
+{"ts":"2026-10-19T11:34:25.051Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-08 cron DUE-SCHEDULING pass only (gate ON, after enabling ONE source; separate window)
+{"ts":"2026-10-19T11:34:25.056Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-08 cron DUE-SCHEDULING pass only (gate ON, after enabling ONE source; separate window)
+TRACE[T-08 cron-due-pass] {"entrypoint":"cron","window":"ONE scheduled pass (due scan + dispatch after enable-1)","expectedSchema":3,"appliedSchema":3,"flags":{"jobs":true,"ingestion":true,"envelopes":1,"fetchDuringCron":0},"prepares":11,"terminalAttempts":11,"terminalCompleted":11,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":8,"completed":8,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":11,"metaUnavailable":0,"executionApiCallAttempts":11,"executionApiCallsCompleted":11,"executionApiCallsFailed":0,"statementsAttempted":11,"statementsCompleted":11,"localMeta":{"metaRowsRead":72,"metaRowsWritten":11,"metaChanges":3},"distinctSqlShapes":9,"sqlShapes":["SELECT value FROM schema_metadata WHERE key = ?","SELECT id FROM sources WHERE id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)","SELECT source_id FROM source_state WHERE source_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)","SELECT s.id, s.connector, s.interval_seconds, s.daily_request_budget, s.config_json, st.next_poll_at, st.etag, st.last_m","INSERT INTO jobs (id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_unt","UPDATE source_state SET next_poll_at = ?, updated_at = ? WHERE source_id = ? AND next_poll_at = ?","SELECT id, attempts, max_attempts FROM jobs WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ? OR","SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'queued', updated_at = ? WHERE id = ? AND status IN ('pending', 'retry_wait', 'queued')"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.064Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.071Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.073Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.076Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.095Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":7,"blockedSkipped":3,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.104Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":7,"strandedScanned":0,"dispatched":7,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.106Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.128Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":7,"blockedSkipped":3,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.137Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":7,"strandedScanned":0,"dispatched":7,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.141Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":10}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+{"ts":"2026-10-19T11:34:25.149Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":10,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 3 surface (audit tooling — outside accepted source) > T-09 queue consumer BATCH OF 10 at shipped preview profile (gate OFF, all paused_by_policy)
+TRACE[T-09 queue-batch10-gate-off] {"entrypoint":"queue","window":"ONE handleQueue delivery of 10 durable poll jobs (gate OFF)","expectedSchema":3,"appliedSchema":3,"flags":{"jobs":true,"ingestion":false,"batchSize":10,"acked":10,"outcome":"paused_by_policy"},"prepares":10,"terminalAttempts":10,"terminalCompleted":10,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":0,"completed":0,"failed":0},"all":{"attempts":10,"completed":10,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":10,"metaUnavailable":0,"executionApiCallAttempts":10,"executionApiCallsCompleted":10,"executionApiCallsFailed":0,"statementsAttempted":10,"statementsCompleted":10,"localMeta":{"metaRowsRead":10,"metaRowsWritten":0,"metaChanges":0},"distinctSqlShapes":1,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.160Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.166Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.169Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.172Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.177Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.181Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.184Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.200Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.202Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.207Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.210Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.213Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+{"ts":"2026-10-19T11:34:25.222Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-10 ACTIVE schema4 single poll, 0 NEW items via 304 not_modified (second window)
+TRACE[T-10 poll-0-new-304-not-modified] {"entrypoint":"queue","window":"ONE handleQueue delivery (single poll job, 304 answer)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"newItems":0,"transport":"304-not-modified"},"prepares":11,"terminalAttempts":8,"terminalCompleted":8,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":5,"completed":5,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":2,"batchCompleted":2,"batchFailed":0,"batchStatements":3,"batchResultRecords":3,"metaAvailable":11,"metaUnavailable":0,"executionApiCallAttempts":10,"executionApiCallsCompleted":10,"executionApiCallsFailed":0,"statementsAttempted":11,"statementsCompleted":11,"localMeta":{"metaRowsRead":19,"metaRowsWritten":12,"metaChanges":5},"distinctSqlShapes":10,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-11 ACTIVE schema4 single poll, 0 NEW items via EMPTY 200 feed (changed, not 304)
+{"ts":"2026-10-19T11:34:25.232Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-11 ACTIVE schema4 single poll, 0 NEW items via EMPTY 200 feed (changed, not 304)
+{"ts":"2026-10-19T11:34:25.238Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-11 ACTIVE schema4 single poll, 0 NEW items via EMPTY 200 feed (changed, not 304)
+{"ts":"2026-10-19T11:34:25.241Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-11 ACTIVE schema4 single poll, 0 NEW items via EMPTY 200 feed (changed, not 304)
+{"ts":"2026-10-19T11:34:25.243Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-11 ACTIVE schema4 single poll, 0 NEW items via EMPTY 200 feed (changed, not 304)
+{"ts":"2026-10-19T11:34:25.248Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-11 ACTIVE schema4 single poll, 0 NEW items via EMPTY 200 feed (changed, not 304)
+{"ts":"2026-10-19T11:34:25.252Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-11 ACTIVE schema4 single poll, 0 NEW items via EMPTY 200 feed (changed, not 304)
+{"ts":"2026-10-19T11:34:25.254Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-11 ACTIVE schema4 single poll, 0 NEW items via EMPTY 200 feed (changed, not 304)
+{"ts":"2026-10-19T11:34:25.263Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-11 ACTIVE schema4 single poll, 0 NEW items via EMPTY 200 feed (changed, not 304)
+TRACE[T-11 poll-0-new-empty-200] {"entrypoint":"queue","window":"ONE handleQueue delivery (single poll job, empty 200 feed)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"newItems":0,"transport":"200-empty-feed"},"prepares":11,"terminalAttempts":8,"terminalCompleted":8,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":5,"completed":5,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":2,"batchCompleted":2,"batchFailed":0,"batchStatements":3,"batchResultRecords":3,"metaAvailable":11,"metaUnavailable":0,"executionApiCallAttempts":10,"executionApiCallsCompleted":10,"executionApiCallsFailed":0,"statementsAttempted":11,"statementsCompleted":11,"localMeta":{"metaRowsRead":16,"metaRowsWritten":13,"metaChanges":5},"distinctSqlShapes":10,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-12 ACTIVE schema4 single poll, 2 NEW items, redirect hop (per-hop charging)
+{"ts":"2026-10-19T11:34:25.272Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-12 ACTIVE schema4 single poll, 2 NEW items, redirect hop (per-hop charging)
+{"ts":"2026-10-19T11:34:25.278Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-12 ACTIVE schema4 single poll, 2 NEW items, redirect hop (per-hop charging)
+{"ts":"2026-10-19T11:34:25.281Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-12 ACTIVE schema4 single poll, 2 NEW items, redirect hop (per-hop charging)
+{"ts":"2026-10-19T11:34:25.283Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-12 ACTIVE schema4 single poll, 2 NEW items, redirect hop (per-hop charging)
+{"ts":"2026-10-19T11:34:25.288Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-12 ACTIVE schema4 single poll, 2 NEW items, redirect hop (per-hop charging)
+{"ts":"2026-10-19T11:34:25.291Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-12 ACTIVE schema4 single poll, 2 NEW items, redirect hop (per-hop charging)
+{"ts":"2026-10-19T11:34:25.294Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-12 ACTIVE schema4 single poll, 2 NEW items, redirect hop (per-hop charging)
+{"ts":"2026-10-19T11:34:25.307Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-12 ACTIVE schema4 single poll, 2 NEW items, redirect hop (per-hop charging)
+TRACE[T-12 poll-2-new-redirect] {"entrypoint":"queue","window":"ONE handleQueue delivery (single poll job, 301→200, 2 items)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"newItems":2,"rawHops":2,"chargedUnits":2},"prepares":17,"terminalAttempts":10,"terminalCompleted":10,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":7,"completed":7,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":3,"batchCompleted":3,"batchFailed":0,"batchStatements":7,"batchResultRecords":7,"metaAvailable":17,"metaUnavailable":0,"executionApiCallAttempts":13,"executionApiCallsCompleted":13,"executionApiCallsFailed":0,"statementsAttempted":17,"statementsCompleted":17,"localMeta":{"metaRowsRead":29,"metaRowsWritten":28,"metaChanges":8},"distinctSqlShapes":12,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","INSERT INTO source_items (id, source_id, external_id, canonical_url, title, body_excerpt, author, published_at, fetched_","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","SELECT id FROM source_items WHERE id = ? AND source_id = ?","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-13 ACTIVE schema4 single poll, 100 NEW items (worst-supported single-job shape)
+{"ts":"2026-10-19T11:34:25.316Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-13 ACTIVE schema4 single poll, 100 NEW items (worst-supported single-job shape)
+{"ts":"2026-10-19T11:34:25.321Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-13 ACTIVE schema4 single poll, 100 NEW items (worst-supported single-job shape)
+{"ts":"2026-10-19T11:34:25.324Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-13 ACTIVE schema4 single poll, 100 NEW items (worst-supported single-job shape)
+{"ts":"2026-10-19T11:34:25.326Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-13 ACTIVE schema4 single poll, 100 NEW items (worst-supported single-job shape)
+{"ts":"2026-10-19T11:34:25.333Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-13 ACTIVE schema4 single poll, 100 NEW items (worst-supported single-job shape)
+{"ts":"2026-10-19T11:34:25.336Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-13 ACTIVE schema4 single poll, 100 NEW items (worst-supported single-job shape)
+{"ts":"2026-10-19T11:34:25.339Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-13 ACTIVE schema4 single poll, 100 NEW items (worst-supported single-job shape)
+{"ts":"2026-10-19T11:34:25.428Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-13 ACTIVE schema4 single poll, 100 NEW items (worst-supported single-job shape)
+TRACE[T-13 poll-100-new] {"entrypoint":"queue","window":"ONE handleQueue delivery (single poll job, 100 new items)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"newItems":100},"prepares":211,"terminalAttempts":108,"terminalCompleted":108,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":105,"completed":105,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":2,"batchCompleted":2,"batchFailed":0,"batchStatements":103,"batchResultRecords":103,"metaAvailable":211,"metaUnavailable":0,"executionApiCallAttempts":110,"executionApiCallsCompleted":110,"executionApiCallsFailed":0,"statementsAttempted":211,"statementsCompleted":211,"localMeta":{"metaRowsRead":416,"metaRowsWritten":713,"metaChanges":105},"distinctSqlShapes":12,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","INSERT INTO source_items (id, source_id, external_id, canonical_url, title, body_excerpt, author, published_at, fetched_","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","SELECT id FROM source_items WHERE id = ? AND source_id = ?","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.437Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.443Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.446Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.448Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.452Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.456Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.458Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.539Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.541Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.545Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.549Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.552Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+{"ts":"2026-10-19T11:34:25.685Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-14 ACTIVE schema4 single poll, DUPLICATE-HEAVY 100 (second window, same content)
+TRACE[T-14 poll-100-all-duplicate] {"entrypoint":"queue","window":"ONE handleQueue delivery (single poll job, 100 duplicate items)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"newItems":0,"duplicateItems":100},"prepares":311,"terminalAttempts":208,"terminalCompleted":208,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":205,"completed":205,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":2,"batchCompleted":2,"batchFailed":0,"batchStatements":103,"batchResultRecords":103,"metaAvailable":311,"metaUnavailable":0,"executionApiCallAttempts":210,"executionApiCallsCompleted":210,"executionApiCallsFailed":0,"statementsAttempted":311,"statementsCompleted":311,"localMeta":{"metaRowsRead":419,"metaRowsWritten":12,"metaChanges":5},"distinctSqlShapes":13,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","INSERT INTO source_items (id, source_id, external_id, canonical_url, title, body_excerpt, author, published_at, fetched_","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","SELECT id FROM source_items WHERE id = ? AND source_id = ?","SELECT id FROM source_items WHERE source_id = ? AND external_id = ?","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.694Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.700Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.703Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.705Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.709Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.712Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.715Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.766Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.768Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.772Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.776Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.778Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+{"ts":"2026-10-19T11:34:25.877Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-15 ACTIVE schema4 single poll, MIXED 50 new + 50 duplicate
+TRACE[T-15 poll-50new-50duplicate] {"entrypoint":"queue","window":"ONE handleQueue delivery (single poll job, 50 new + 50 duplicates)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"newItems":50,"duplicateItems":50},"prepares":261,"terminalAttempts":158,"terminalCompleted":158,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":155,"completed":155,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":2,"batchCompleted":2,"batchFailed":0,"batchStatements":103,"batchResultRecords":103,"metaAvailable":261,"metaUnavailable":0,"executionApiCallAttempts":160,"executionApiCallsCompleted":160,"executionApiCallsFailed":0,"statementsAttempted":261,"statementsCompleted":261,"localMeta":{"metaRowsRead":419,"metaRowsWritten":362,"metaChanges":55},"distinctSqlShapes":13,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","INSERT INTO source_items (id, source_id, external_id, canonical_url, title, body_excerpt, author, published_at, fetched_","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","SELECT id FROM source_items WHERE id = ? AND source_id = ?","SELECT id FROM source_items WHERE source_id = ? AND external_id = ?","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-16 ACTIVE schema4 BATCH10 through ONE real handleQueue (7 RSS + Steam + YouTube + GitHub)
+{"ts":"2026-10-19T11:34:25.886Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-16 ACTIVE schema4 BATCH10 through ONE real handleQueue (7 RSS + Steam + YouTube + GitHub)
+{"ts":"2026-10-19T11:34:25.891Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-16 ACTIVE schema4 BATCH10 through ONE real handleQueue (7 RSS + Steam + YouTube + GitHub)
+{"ts":"2026-10-19T11:34:25.894Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-16 ACTIVE schema4 BATCH10 through ONE real handleQueue (7 RSS + Steam + YouTube + GitHub)
+{"ts":"2026-10-19T11:34:25.903Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-16 ACTIVE schema4 BATCH10 through ONE real handleQueue (7 RSS + Steam + YouTube + GitHub)
+{"ts":"2026-10-19T11:34:25.916Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":10,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-16 ACTIVE schema4 BATCH10 through ONE real handleQueue (7 RSS + Steam + YouTube + GitHub)
+{"ts":"2026-10-19T11:34:25.926Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":10,"strandedScanned":0,"dispatched":10,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-16 ACTIVE schema4 BATCH10 through ONE real handleQueue (7 RSS + Steam + YouTube + GitHub)
+{"ts":"2026-10-19T11:34:25.929Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":10}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-16 ACTIVE schema4 BATCH10 through ONE real handleQueue (7 RSS + Steam + YouTube + GitHub)
+{"ts":"2026-10-19T11:34:26.572Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":10,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-16 ACTIVE schema4 BATCH10 through ONE real handleQueue (7 RSS + Steam + YouTube + GitHub)
+TRACE[T-16 queue-batch10-active-schema4] {"entrypoint":"queue","window":"ONE handleQueue delivery of 10 poll jobs (gate ON, schema 4)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"batchSize":10,"acked":10,"rawFetches":11,"itemsStored":700},"prepares":1812,"terminalAttempts":980,"terminalCompleted":980,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":30,"completed":30,"failed":0},"all":{"attempts":950,"completed":950,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":21,"batchCompleted":21,"batchFailed":0,"batchStatements":832,"batchResultRecords":832,"metaAvailable":1812,"metaUnavailable":0,"executionApiCallAttempts":1001,"executionApiCallsCompleted":1001,"executionApiCallsFailed":0,"statementsAttempted":1812,"statementsCompleted":1812,"localMeta":{"metaRowsRead":3365,"metaRowsWritten":5031,"metaChanges":751},"distinctSqlShapes":13,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","INSERT INTO source_items (id, source_id, external_id, canonical_url, title, body_excerpt, author, published_at, fetched_","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","SELECT id FROM source_items WHERE id = ? AND source_id = ?","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c","SELECT id FROM source_items WHERE source_id = ? AND external_id = ?"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.584Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.588Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.591Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.592Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.596Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.604Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.607Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.610Z","level":"warn","msg":"db.batch.failed","evt":"cron","errorCode":"db_constraint_violation","durationMs":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.612Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.614Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.616Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+{"ts":"2026-10-19T11:34:26.628Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-17 CONNECTOR RSS multi-feed bound incl. redirect (endpoint + 2 templates, ≤4 feeds)
+TRACE[T-17 conn-rss-multifeed-redirect] {"entrypoint":"queue","window":"ONE handleQueue delivery (RSS source, 3 feeds + 1 redirect hop)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"rawRequests":4,"feeds":3,"newItems":6},"prepares":29,"terminalAttempts":14,"terminalCompleted":14,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":11,"completed":11,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":5,"batchCompleted":5,"batchFailed":0,"batchStatements":15,"batchResultRecords":15,"metaAvailable":29,"metaUnavailable":0,"executionApiCallAttempts":19,"executionApiCallsCompleted":19,"executionApiCallsFailed":0,"statementsAttempted":29,"statementsCompleted":29,"localMeta":{"metaRowsRead":55,"metaRowsWritten":58,"metaChanges":14},"distinctSqlShapes":12,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","INSERT INTO source_items (id, source_id, external_id, canonical_url, title, body_excerpt, author, published_at, fetched_","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","SELECT id FROM source_items WHERE id = ? AND source_id = ?","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.633Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.638Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.640Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.646Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.650Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":1,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.652Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.655Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.659Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.662Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.664Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+{"ts":"2026-10-19T11:34:26.672Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-18 CONNECTOR Steam multi-app bound (3 apps in one poll)
+TRACE[T-18 conn-steam-multi-app] {"entrypoint":"queue","window":"ONE handleQueue delivery (Steam source, 3 apps)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"rawRequests":3,"apps":3},"prepares":15,"terminalAttempts":8,"terminalCompleted":8,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":5,"completed":5,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":4,"batchCompleted":4,"batchFailed":0,"batchStatements":7,"batchResultRecords":7,"metaAvailable":15,"metaUnavailable":0,"executionApiCallAttempts":12,"executionApiCallsCompleted":12,"executionApiCallsFailed":0,"statementsAttempted":15,"statementsCompleted":15,"localMeta":{"metaRowsRead":26,"metaRowsWritten":15,"metaChanges":7},"distinctSqlShapes":10,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.678Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.684Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.686Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.688Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.691Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":1,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.693Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.696Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.700Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.702Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.704Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+{"ts":"2026-10-19T11:34:26.714Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-19 CONNECTOR YouTube multi-playlist bound (2 playlists + 1 details call)
+TRACE[T-19 conn-youtube-multi-playlist] {"entrypoint":"queue","window":"ONE handleQueue delivery (YouTube source, 2 playlists + details)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"rawRequests":3,"playlists":2},"prepares":19,"terminalAttempts":10,"terminalCompleted":10,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":7,"completed":7,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":4,"batchCompleted":4,"batchFailed":0,"batchStatements":9,"batchResultRecords":9,"metaAvailable":19,"metaUnavailable":0,"executionApiCallAttempts":14,"executionApiCallsCompleted":14,"executionApiCallsFailed":0,"statementsAttempted":19,"statementsCompleted":19,"localMeta":{"metaRowsRead":34,"metaRowsWritten":29,"metaChanges":9},"distinctSqlShapes":12,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","INSERT INTO source_items (id, source_id, external_id, canonical_url, title, body_excerpt, author, published_at, fetched_","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","SELECT id FROM source_items WHERE id = ? AND source_id = ?","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.719Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.723Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.726Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.727Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.731Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":1,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.733Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.735Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.739Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.741Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.743Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+{"ts":"2026-10-19T11:34:26.751Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-20 CONNECTOR GitHub multi-repo bound (2 repositories)
+TRACE[T-20 conn-github-multi-repo] {"entrypoint":"queue","window":"ONE handleQueue delivery (GitHub source, 2 repositories)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"rawRequests":2,"repositories":2},"prepares":13,"terminalAttempts":8,"terminalCompleted":8,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":5,"completed":5,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":3,"batchCompleted":3,"batchFailed":0,"batchStatements":5,"batchResultRecords":5,"metaAvailable":13,"metaUnavailable":0,"executionApiCallAttempts":11,"executionApiCallsCompleted":11,"executionApiCallsFailed":0,"statementsAttempted":13,"statementsCompleted":13,"localMeta":{"metaRowsRead":21,"metaRowsWritten":14,"metaChanges":6},"distinctSqlShapes":10,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.756Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.760Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.762Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.764Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.767Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.770Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.772Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.776Z","level":"warn","msg":"db.batch.failed","evt":"cron","errorCode":"db_constraint_violation","durationMs":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.777Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.779Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.781Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+{"ts":"2026-10-19T11:34:26.789Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-21 CONNECTOR Reddit token + multi-subreddit bound (1 token + 2 listings)
+TRACE[T-21 conn-reddit-token-and-listings] {"entrypoint":"queue","window":"ONE handleQueue delivery (Reddit source, token + 2 listings)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"rawRequests":3,"subreddits":2},"prepares":15,"terminalAttempts":8,"terminalCompleted":8,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":5,"completed":5,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":4,"batchCompleted":4,"batchFailed":0,"batchStatements":7,"batchResultRecords":7,"metaAvailable":15,"metaUnavailable":0,"executionApiCallAttempts":12,"executionApiCallsCompleted":12,"executionApiCallsFailed":0,"statementsAttempted":15,"statementsCompleted":15,"localMeta":{"metaRowsRead":26,"metaRowsWritten":15,"metaChanges":7},"distinctSqlShapes":10,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-22 PROVIDER FAILURE: ordinary grant, then transport throw (NOT late-authorization evidence)
+{"ts":"2026-10-19T11:34:26.794Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-22 PROVIDER FAILURE: ordinary grant, then transport throw (NOT late-authorization evidence)
+{"ts":"2026-10-19T11:34:26.803Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-22 PROVIDER FAILURE: ordinary grant, then transport throw (NOT late-authorization evidence)
+{"ts":"2026-10-19T11:34:26.805Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-22 PROVIDER FAILURE: ordinary grant, then transport throw (NOT late-authorization evidence)
+{"ts":"2026-10-19T11:34:26.807Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-22 PROVIDER FAILURE: ordinary grant, then transport throw (NOT late-authorization evidence)
+{"ts":"2026-10-19T11:34:26.810Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-22 PROVIDER FAILURE: ordinary grant, then transport throw (NOT late-authorization evidence)
+{"ts":"2026-10-19T11:34:26.813Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-22 PROVIDER FAILURE: ordinary grant, then transport throw (NOT late-authorization evidence)
+{"ts":"2026-10-19T11:34:26.815Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-22 PROVIDER FAILURE: ordinary grant, then transport throw (NOT late-authorization evidence)
+{"ts":"2026-10-19T11:34:26.820Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-22 PROVIDER FAILURE: ordinary grant, then transport throw (NOT late-authorization evidence)
+TRACE[T-22 poll-transport-failure-d1] {"entrypoint":"queue","window":"ONE handleQueue delivery (grant OK → raw fetch throws)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"label":"ordinary-grant-then-transport-throw","lateAuthorizationClaim":false,"chargedUnits":1},"prepares":11,"terminalAttempts":8,"terminalCompleted":8,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":5,"completed":5,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":2,"batchCompleted":2,"batchFailed":0,"batchStatements":3,"batchResultRecords":3,"metaAvailable":11,"metaUnavailable":0,"executionApiCallAttempts":10,"executionApiCallsCompleted":10,"executionApiCallsFailed":0,"statementsAttempted":11,"statementsCompleted":11,"localMeta":{"metaRowsRead":16,"metaRowsWritten":13,"metaChanges":5},"distinctSqlShapes":10,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-23 BUDGET DENIED: zero budget → denied BEFORE any raw fetch (separately labeled)
+{"ts":"2026-10-19T11:34:26.826Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-23 BUDGET DENIED: zero budget → denied BEFORE any raw fetch (separately labeled)
+{"ts":"2026-10-19T11:34:26.831Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-23 BUDGET DENIED: zero budget → denied BEFORE any raw fetch (separately labeled)
+{"ts":"2026-10-19T11:34:26.833Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-23 BUDGET DENIED: zero budget → denied BEFORE any raw fetch (separately labeled)
+{"ts":"2026-10-19T11:34:26.834Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-23 BUDGET DENIED: zero budget → denied BEFORE any raw fetch (separately labeled)
+{"ts":"2026-10-19T11:34:26.838Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-23 BUDGET DENIED: zero budget → denied BEFORE any raw fetch (separately labeled)
+{"ts":"2026-10-19T11:34:26.840Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-23 BUDGET DENIED: zero budget → denied BEFORE any raw fetch (separately labeled)
+{"ts":"2026-10-19T11:34:26.843Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-23 BUDGET DENIED: zero budget → denied BEFORE any raw fetch (separately labeled)
+{"ts":"2026-10-19T11:34:26.849Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-23 BUDGET DENIED: zero budget → denied BEFORE any raw fetch (separately labeled)
+TRACE[T-23 poll-budget-denied-hop0] {"entrypoint":"queue","window":"ONE handleQueue delivery (daily_request_budget=0)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"label":"budget-denied","rawFetches":0,"chargedUnits":0},"prepares":12,"terminalAttempts":9,"terminalCompleted":9,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":6,"completed":6,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":2,"batchCompleted":2,"batchFailed":0,"batchStatements":3,"batchResultRecords":3,"metaAvailable":12,"metaUnavailable":0,"executionApiCallAttempts":11,"executionApiCallsCompleted":11,"executionApiCallsFailed":0,"statementsAttempted":12,"statementsCompleted":12,"localMeta":{"metaRowsRead":16,"metaRowsWritten":11,"metaChanges":4},"distinctSqlShapes":11,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","SELECT daily_request_budget FROM sources WHERE id = ?","SELECT requests FROM budgets WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date = ?","UPDATE source_state SET cursor = ?, etag = ?, last_modified = ?, next_poll_at = ?, last_polled_at = ?, last_changed_at =","UPDATE jobs SET status = 'succeeded', lease_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'c"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+{"ts":"2026-10-19T11:34:26.855Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+{"ts":"2026-10-19T11:34:26.862Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+{"ts":"2026-10-19T11:34:26.864Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+{"ts":"2026-10-19T11:34:26.865Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+{"ts":"2026-10-19T11:34:26.869Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+{"ts":"2026-10-19T11:34:26.871Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+{"ts":"2026-10-19T11:34:26.874Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+{"ts":"2026-10-19T11:34:26.879Z","level":"warn","msg":"db.batch.failed","evt":"queue","errorCode":"db_schema_invalid","durationMs":1}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+{"ts":"2026-10-19T11:34:26.879Z","level":"warn","msg":"ingestion.poll.budget_authority_unavailable","evt":"queue","errorCode":"job_handler_retryable_error","observedRequests":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+{"ts":"2026-10-19T11:34:26.880Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-24 BUDGET AUTHORITY FAILURE: authority storage fails → typed retry, zero terminal state write
+TRACE[T-24 poll-budget-authority-failure] {"entrypoint":"queue","window":"ONE handleQueue delivery (budgets table unavailable)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"label":"authority-storage-failure","rawFetches":0,"terminalStateWrites":0},"prepares":9,"terminalAttempts":7,"terminalCompleted":7,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":3,"completed":3,"failed":0},"all":{"attempts":4,"completed":4,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":1,"batchCompleted":0,"batchFailed":1,"batchStatements":2,"batchResultRecords":0,"metaAvailable":7,"metaUnavailable":0,"executionApiCallAttempts":8,"executionApiCallsCompleted":7,"executionApiCallsFailed":1,"statementsAttempted":9,"statementsCompleted":9,"localMeta":{"metaRowsRead":11,"metaRowsWritten":10,"metaChanges":3},"distinctSqlShapes":8,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE source_state SET next_poll_at = ?, poll_owner_job_id = ?, updated_at = ? WHERE source_id = ? AND ( (poll_owner_jo","UPDATE budgets SET requests = requests + 1, updated_at = ? WHERE scope = 'ingestion' AND budget_key = ? AND bucket_date ","INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_a","UPDATE jobs SET status = 'retry_wait', run_after = ?, last_error = ?, lease_until = NULL, updated_at = ? WHERE id = ? AN"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-25 POISON envelope (nonexistent job) → safe ack, no durable row, no DLQ
+{"ts":"2026-10-19T11:34:26.888Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-25 POISON envelope (nonexistent job) → safe ack, no durable row, no DLQ
+{"ts":"2026-10-19T11:34:26.889Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-25 POISON envelope (nonexistent job) → safe ack, no durable row, no DLQ
+TRACE[T-25 poison-envelope-nonexistent-job] {"entrypoint":"queue","window":"ONE handleQueue delivery (unknown type, nonexistent job)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"durableRowCreated":false,"dlqSent":0},"prepares":1,"terminalAttempts":1,"terminalCompleted":1,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":0,"completed":0,"failed":0},"all":{"attempts":1,"completed":1,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":1,"metaUnavailable":0,"executionApiCallAttempts":1,"executionApiCallsCompleted":1,"executionApiCallsFailed":0,"statementsAttempted":1,"statementsCompleted":1,"localMeta":{"metaRowsRead":0,"metaRowsWritten":0,"metaChanges":0},"distinctSqlShapes":1,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.895Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.900Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.902Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.903Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.907Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.909Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.912Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.915Z","level":"warn","msg":"ingestion.poll.capability_unresolved","evt":"queue","reason":"schema_capability_metadata_invalid"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.916Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+TRACE[T-26 retry-delivery-1] {"entrypoint":"queue","window":"ONE handleQueue delivery (bounded retry 1)","expectedSchema":4,"appliedSchema":-1,"flags":{"jobs":true,"ingestion":true,"delivery":1,"schemaMetadataCorrupted":true},"prepares":6,"terminalAttempts":6,"terminalCompleted":6,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":2,"completed":2,"failed":0},"all":{"attempts":4,"completed":4,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":6,"metaUnavailable":0,"executionApiCallAttempts":6,"executionApiCallsCompleted":6,"executionApiCallsFailed":0,"statementsAttempted":6,"statementsCompleted":6,"localMeta":{"metaRowsRead":9,"metaRowsWritten":8,"metaChanges":2},"distinctSqlShapes":5,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE jobs SET status = 'retry_wait', run_after = ?, last_error = ?, lease_until = NULL, updated_at = ? WHERE id = ? AN"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.919Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.922Z","level":"warn","msg":"ingestion.poll.capability_unresolved","evt":"queue","reason":"schema_capability_metadata_invalid"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.922Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+TRACE[T-26 retry-delivery-2] {"entrypoint":"queue","window":"ONE handleQueue delivery (bounded retry 2)","expectedSchema":4,"appliedSchema":-1,"flags":{"jobs":true,"ingestion":true,"delivery":2,"schemaMetadataCorrupted":true},"prepares":6,"terminalAttempts":6,"terminalCompleted":6,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":2,"completed":2,"failed":0},"all":{"attempts":4,"completed":4,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":6,"metaUnavailable":0,"executionApiCallAttempts":6,"executionApiCallsCompleted":6,"executionApiCallsFailed":0,"statementsAttempted":6,"statementsCompleted":6,"localMeta":{"metaRowsRead":9,"metaRowsWritten":8,"metaChanges":2},"distinctSqlShapes":5,"sqlShapes":["SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'claimed', lease_until = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND run_after ","SELECT s.id, s.connector, s.enabled, s.interval_seconds, s.config_json, st.next_poll_at, st.etag, st.last_modified, st.c","SELECT value FROM schema_metadata WHERE key = ?","UPDATE jobs SET status = 'retry_wait', run_after = ?, last_error = ?, lease_until = NULL, updated_at = ? WHERE id = ? AN"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.925Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.928Z","level":"warn","msg":"ingestion.poll.capability_unresolved","evt":"queue","reason":"schema_capability_metadata_invalid"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+{"ts":"2026-10-19T11:34:26.929Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-26 BOUNDED RETRIES → dead-letter TERMINAL ROW (inline DLQ producer NOT called)
+TRACE[T-26 summary] {"deliveries":3,"history":[{"delivery":1,"acked":true,"status":"retry_wait"},{"delivery":2,"acked":true,"status":"retry_wait"},{"delivery":3,"acked":true,"status":"dead_letter"}],"finalStatus":"dead_letter","dlqDeliveredAt":null,"note":"terminal-row transition only; DLQ producer send traced separately in T-27 (at-least-once reconcile)"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.936Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.940Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.942Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.943Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.947Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.950Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.953Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.955Z","level":"warn","msg":"ingestion.poll.capability_unresolved","evt":"queue","reason":"schema_capability_metadata_invalid"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.956Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.958Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.961Z","level":"warn","msg":"ingestion.poll.capability_unresolved","evt":"queue","reason":"schema_capability_metadata_invalid"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.962Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.963Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stderr | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.966Z","level":"warn","msg":"ingestion.poll.capability_unresolved","evt":"queue","reason":"schema_capability_metadata_invalid"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.967Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.969Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.972Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+{"ts":"2026-10-19T11:34:26.974Z","level":"info","msg":"cron.jobs_dlq_reconciled","evt":"cron","scanned":1,"delivered":1,"sendFailures":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-27 CRON DLQ RECONCILIATION SEND: real cron delivers the dead-letter reference to the DLQ producer
+TRACE[T-27 cron-dlq-reconciliation-send] {"entrypoint":"cron","window":"ONE scheduled pass (reconcileDeadLetters over 1 dead-letter row)","expectedSchema":4,"appliedSchema":-1,"flags":{"jobs":true,"ingestion":false,"dlqSends":1,"label":"application DLQ send + guarded confirmation; real Queue send/receive LIVE-UNVERIFIED"},"prepares":7,"terminalAttempts":7,"terminalCompleted":7,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":1,"completed":1,"failed":0},"all":{"attempts":6,"completed":6,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":7,"metaUnavailable":0,"executionApiCallAttempts":7,"executionApiCallsCompleted":7,"executionApiCallsFailed":0,"statementsAttempted":7,"statementsCompleted":7,"localMeta":{"metaRowsRead":14,"metaRowsWritten":2,"metaChanges":1},"distinctSqlShapes":5,"sqlShapes":["SELECT COUNT(*) AS n FROM jobs WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ? AND type IN (?)","SELECT id, attempts, max_attempts FROM jobs WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ? AN","SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","SELECT COUNT(*) AS n FROM jobs WHERE status IN ('pending', 'retry_wait') AND run_after <= ? AND type IN (?)","UPDATE jobs SET dlq_delivered_at = ? WHERE id = ? AND status = 'dead_letter' AND dlq_delivered_at IS NULL"]}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-28 QUEUE OUTAGE >24h: aged durable queued row re-enqueued by the REAL cron (same job id)
+{"ts":"2026-10-19T11:34:27.013Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-28 QUEUE OUTAGE >24h: aged durable queued row re-enqueued by the REAL cron (same job id)
+{"ts":"2026-10-19T11:34:27.017Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":true}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-28 QUEUE OUTAGE >24h: aged durable queued row re-enqueued by the REAL cron (same job id)
+{"ts":"2026-10-19T11:34:27.019Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":0,"dispatched":0,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-28 QUEUE OUTAGE >24h: aged durable queued row re-enqueued by the REAL cron (same job id)
+{"ts":"2026-10-19T11:34:27.021Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-28 QUEUE OUTAGE >24h: aged durable queued row re-enqueued by the REAL cron (same job id)
+{"ts":"2026-10-19T11:34:27.025Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":1,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-28 QUEUE OUTAGE >24h: aged durable queued row re-enqueued by the REAL cron (same job id)
+{"ts":"2026-10-19T11:34:27.027Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-28 QUEUE OUTAGE >24h: aged durable queued row re-enqueued by the REAL cron (same job id)
+{"ts":"2026-10-19T11:34:27.029Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-28 QUEUE OUTAGE >24h: aged durable queued row re-enqueued by the REAL cron (same job id)
+{"ts":"2026-10-19T11:34:27.032Z","level":"info","msg":"cron.ingestion_scheduled","evt":"cron","jobsCreated":0,"blockedSkipped":0,"seeded":false}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-28 QUEUE OUTAGE >24h: aged durable queued row re-enqueued by the REAL cron (same job id)
+{"ts":"2026-10-19T11:34:27.035Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":0,"strandedScanned":1,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | audit-tools/trace/trace-suite.test.ts > R1.10.2 traces — schema 4 active ingestion (audit tooling — outside accepted source) > T-28 QUEUE OUTAGE >24h: aged durable queued row re-enqueued by the REAL cron (same job id)
+TRACE[T-28 queue-outage-recovery-25h] {"entrypoint":"cron","window":"ONE scheduled pass over a 25h-old queued row (stranded re-kick)","expectedSchema":4,"appliedSchema":4,"flags":{"jobs":true,"ingestion":true,"sameJobIdReenqueued":true,"label":"application re-kick proof ONLY — does NOT prove real Queue TTL expiry, availability, or delivery after real outage"},"prepares":9,"terminalAttempts":9,"terminalCompleted":9,"terminalFailed":0,"terminalByMethod":{"run":{"attempts":1,"completed":1,"failed":0},"all":{"attempts":8,"completed":8,"failed":0},"first":{"attempts":0,"completed":0,"failed":0},"raw":{"attempts":0,"completed":0,"failed":0}},"batchAttempts":0,"batchCompleted":0,"batchFailed":0,"batchStatements":0,"batchResultRecords":0,"metaAvailable":9,"metaUnavailable":0,"executionApiCallAttempts":9,"executionApiCallsCompleted":9,"executionApiCallsFailed":0,"statementsAttempted":9,"statementsCompleted":9,"localMeta":{"metaRowsRead":71,"metaRowsWritten":4,"metaChanges":1},"distinctSqlShapes":7,"sqlShapes":["SELECT value FROM schema_metadata WHERE key = ?","SELECT id FROM sources WHERE id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)","SELECT source_id FROM source_state WHERE source_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)","SELECT s.id, s.connector, s.interval_seconds, s.daily_request_budget, s.config_json, st.next_poll_at, st.etag, st.last_m","SELECT id, attempts, max_attempts FROM jobs WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ? OR","SELECT id, type, aggregate_type, aggregate_id, status, priority, run_after, attempts, max_attempts, lease_until, idempot","UPDATE jobs SET status = 'queued', updated_at = ? WHERE id = ? AND status IN ('pending', 'retry_wait', 'queued')"]}
+
+ ✓ audit-tools/trace/trace-suite.test.ts (28 tests) 2128ms
+     ✓ T-16 ACTIVE schema4 BATCH10 through ONE real handleQueue (7 RSS + Steam + YouTube + GitHub)  696ms
+stdout | audit-tools/trace/instrument-controls.test.ts > R1.10.2 D1 instrument unit controls (audit tooling — outside accepted source) > C-01 an UNUSED prepare is construction only: prepares=1, zero execution-API calls
+CONTROL[C-01] {"prepares":1,"executionApiCallAttempts":0,"executionApiCallsCompleted":0,"executionApiCallsFailed":0,"statementsAttempted":0,"statementsCompleted":0,"metaRecordsAvailable":0,"metaRecordsUnavailable":0}
+
+stdout | audit-tools/trace/instrument-controls.test.ts > R1.10.2 D1 instrument unit controls (audit tooling — outside accepted source) > C-02 a 2-statement batch is ONE execution-API call carrying TWO statements; EVERY result metadata captured
+CONTROL[C-02] {"prepares":2,"batches":1,"batchStatements":2,"executionApiCallAttempts":1,"executionApiCallsCompleted":1,"executionApiCallsFailed":0,"statementsAttempted":2,"statementsCompleted":2,"metaRecordsAvailable":2,"metaRecordsUnavailable":0}
+
+stdout | audit-tools/trace/instrument-controls.test.ts > R1.10.2 D1 instrument unit controls (audit tooling — outside accepted source) > C-03 one REUSED prepared statement executed twice = prepares 1, terminal attempts 2
+CONTROL[C-03] {"prepares":1,"terminalAttempts":2,"executionApiCallAttempts":2,"executionApiCallsCompleted":2,"executionApiCallsFailed":0,"statementsAttempted":2,"statementsCompleted":2,"metaRecordsAvailable":2,"metaRecordsUnavailable":0}
+
+stdout | audit-tools/trace/instrument-controls.test.ts > R1.10.2 D1 instrument unit controls (audit tooling — outside accepted source) > C-04 bind identity is preserved through the wrapper (terminal + batch paths)
+CONTROL[C-04] {"terminalRows":["TRACE-BIND-42"],"batchRows":["TRACE-BIND-A","TRACE-BIND-B"],"prepares":3,"batches":1}
+
+stdout | audit-tools/trace/instrument-controls.test.ts > R1.10.2 D1 instrument unit controls (audit tooling — outside accepted source) > C-05 failures are counted as attempted+failed and never silently dropped; no metadata invented
+CONTROL[C-05] {"terminalAttempts":1,"terminalFailed":1,"batchAttempts":1,"batchFailed":1,"batchStatements":2,"executionApiCallAttempts":2,"executionApiCallsCompleted":0,"executionApiCallsFailed":2,"statementsAttempted":3,"statementsCompleted":2,"metaRecordsAvailable":0,"metaRecordsUnavailable":0}
+
+stdout | audit-tools/trace/instrument-controls.test.ts > R1.10.2 D1 instrument unit controls (audit tooling — outside accepted source) > C-06 NON-instrumented fixture probes never move the counters
+CONTROL[C-06] {"allCountersZero":true}
+
+stdout | audit-tools/trace/instrument-controls.test.ts > R1.10.2 D1 instrument unit controls (audit tooling — outside accepted source) > C-07 metadata that is unavailable is LABELED unavailable, never zero-filled
+CONTROL[C-07] {"metaRecords":[{"origin":"terminal","method":"first","hasRawMeta":false,"unavailableReason":"no_meta_object"},{"origin":"terminal","method":"all","hasRawMeta":true,"unavailableReason":null},{"origin":"terminal","method":"first","hasRawMeta":false,"unavailableReason":"null_result"}],"metaUnavailableCount":2}
+
+stdout | audit-tools/trace/instrument-controls.test.ts > R1.10.2 D1 instrument unit controls (audit tooling — outside accepted source) > C-08 raw() is counted as a terminal attempt with honest metadata labeling
+CONTROL[C-08] {"rawAttempted":1,"metaAvailable":false,"metaUnavailableCount":1,"resultKind":"array"}
+
+stdout | audit-tools/trace/instrument-controls.test.ts > R1.10.2 D1 instrument unit controls (audit tooling — outside accepted source) > C-09 declared unsupported surfaces (exec/withSession) pass through uncounted
+CONTROL[C-09] {"passthroughDeclared":true,"prepares":1}
+
+ ✓ audit-tools/trace/instrument-controls.test.ts (9 tests) 29ms
+
+ Test Files  2 passed (2)
+      Tests  37 passed (37)
+   Start at  11:34:23
+   Duration  4.14s (transform 385ms, setup 0ms, import 1.19s, tests 2.16s, environment 0ms)
+

@@ -1,0 +1,27 @@
+{
+  "project": "PIXEL",
+  "appVersion": "1.4.0",
+  "reviewRevision": "R1.10.3",
+  "artifactFilename": "PIXEL_v1.4.0_R1.10.3_Free-Safe-SQL-Design-Proofs_REVIEW.zip",
+  "purpose": "LOCAL Free-safe SQL feasibility proofs (design lab) + narrow instrumentation corrections (R112-03) + corrected design/counter documents (R112-01/02/04 + nits)",
+  "status": "DESIGN_REVIEW; R112-01_RETRACTED_AND_REPLACED_BY_MEASURED_CANDIDATE; R112-03_FIXED_EXPECTED_1F_3P; R112-04_CORRECTED_PARITY_PROVEN; FIRST_PROFILE_LAB_MEASURED_LE40_LE40; PRODUCT_ACCEPTANCE_UNCHANGED",
+  "sourceCommit": "f70205648922d0f8e60619e45e5d54e6e87b8f1b",
+  "sourceBranch": "phase/04-corrections-round191",
+  "sourceFiles": 297,
+  "sourceChanged": false,
+  "reviewedInputSha256": "bd7d3462ab8c3eaf2e5b51e1ac5b69db399748a6d916a0f1ecbdd83caf22c80b",
+  "evidence": {
+    "instructionsManifest": "313/313",
+    "sealedInputVerification": "verify_package.py PASS (bd7d3462 + bundle HEAD + source 297/297 byte-identical)",
+    "managerReproductionOnSealedInput": "supplied 37/37 exit 0; counterexamples 3F/1P exit 1; accepted diff 0",
+    "v3Tooling": "50/50 exit 0 (28 traces unchanged + 16 instrument controls + 6 corrected-query controls)",
+    "frozenManagerProbesOnV3": "1F/3P exit 1 (CE2 historical intentional red, untouched)",
+    "designLab": "25/25 exit 0; 14-row executable cost ledger; FIRST-profile worst 17 xAPI / 33 STMT lab-measured, 18/34 derived ceiling with queue-envelope residual; target <=40/<=40 met",
+    "fullProductSuite": "not freshly rerun this round; accepted R1.10.2 logs reused WITH provenance (source byte-identical); no fresh-execution claim"
+  },
+  "authorization": "LOCAL design-lab/tooling/docs ONLY; product unchanged",
+  "cloudflareOperations": 0,
+  "paidUpgrade": false,
+  "deployment": false,
+  "activation": false
+}

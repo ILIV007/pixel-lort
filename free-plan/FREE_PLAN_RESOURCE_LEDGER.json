@@ -1,0 +1,169 @@
+{
+  "$comment": "PIXEL R1.10.2 machine-readable Free-plan resource evidence, corrected edition (TR-01 units, TR-02 verdict, TR-04 recovery, TR-06 provenance). OFFICIAL = documented plan limits cited from the retrieved official-page excerpts shipped in manager-evidence/official/ (no fresh GLM web fetch performed or claimed this round). MEASURED-LOCAL = corrected-unit traces of real entrypoints on disposable workerd D1 (audit-tools/logs/trace-run-r1102.log; tool suite 37/37 exit 0). UNKNOWN = requires owner-side/cloud access. Ingestion verdict: NOT_READY_FOR_INGESTION_ON_FREE (local measured evidence under BOTH documented quota-unit interpretations; cloud enforcement and CPU LIVE-UNVERIFIED).",
+  "artifact": {
+    "project": "PIXEL",
+    "appVersion": "1.4.0",
+    "reviewRevision": "R1.10.2",
+    "sourceCommit": "f70205648922d0f8e60619e45e5d54e6e87b8f1b",
+    "sourceBranch": "phase/04-corrections-round191",
+    "sourceFiles": 297,
+    "sourceChanged": false,
+    "productGates": "full 1142/1142; DB subset 301/301 (separate); static gates exit0; scan 297/0; DRY-RUN builds 380.09 KiB x2; tree clean",
+    "toolSuite": "28 traces + 9 instrument unit controls = 37/37 exit 0 (separate counts, never added to product totals)",
+    "reviewedInputSha256": "61a01947968db2902c41b8cd419f80badfbc4adce2397e068090e2416831ca40",
+    "verdict": {
+      "shippedGateOffSurface": "UNPROVEN (plausibly trivial; pending owner-approved cloud measurement)",
+      "advertisedIngestionProfile": "NOT_READY_FOR_INGESTION_ON_FREE"
+    },
+    "paidUpgrade": "none",
+    "cloudflareOperationsByGLM": 0
+  },
+  "unitVocabulary": {
+    "prepares": "prepare() CONSTRUCTION only — never an execution/RPC/query (official D1 API)",
+    "executionApiCallAttempts": "terminalAttempts + batchAttempts (each batch() = ONE execution-API call regardless of statements)",
+    "statementsAttempted": "terminalAttempts + batchStatements",
+    "attemptedVsCompletedVsFailed": "separate counters; a throw is a failed attempt, never dropped",
+    "metadata": "every available result metadata record captured (terminal + every batch result); unavailable metadata LABELED, never zero-filled",
+    "unsupportedSurfaces": "exec()/withSession() declared passthrough-uninstrumented (never exercised by the accepted DbExecutor)",
+    "class": "TR-01 correction of the withdrawn R1.10.1 prepare+batch 'binding invocation' formula"
+  },
+  "officialLimits": {
+    "workers": {
+      "requestsPerDay": 100000,
+      "cpuMsPerHttpRequest": 10,
+      "cpuMsPerCronInvocation": 10,
+      "memoryMB": 128,
+      "subrequestsPerInvocation": 50,
+      "simultaneousOutgoingConnections": 6,
+      "envVarsPerWorker": 64,
+      "cronTriggersPerAccount": 5,
+      "resetClock": "midnight UTC",
+      "source": "https://developers.cloudflare.com/workers/platform/limits/",
+      "provenance": "manager-evidence/official excerpts (retrieved during the independent review); no fresh GLM fetch this round",
+      "class": "OFFICIAL"
+    },
+    "queues": {
+      "operationsPerDayFree": 10000,
+      "operationsPerTypicalDelivery": 3,
+      "operationSemantics": "write+read+delete per message/64KB-chunk; batch of N messages = N x operations; each retry = 1 read operation",
+      "messageRetentionFreeHours": 24,
+      "retentionConfigurableFree": false,
+      "dailyAllowanceResetBoundary": "UNKNOWN (TR-06: not established; not asserted)",
+      "source": "https://developers.cloudflare.com/queues/platform/pricing/",
+      "class": "OFFICIAL"
+    },
+    "d1": {
+      "rowsReadPerDayFree": 5000000,
+      "rowsWrittenPerDayFree": 100000,
+      "maxDatabaseSizeMBFree": 500,
+      "maxAccountStorageGBFree": 5,
+      "queriesPerWorkerInvocationFree": 50,
+      "timeTravelDaysFree": 7,
+      "maxRestoresPer10MinPerDb": 10,
+      "rowsReadDefinition": "rows examined/scanned, not rows returned; indexes add writes",
+      "exhaustionBehavior": "daily limits exceeded -> queries fail with explicit errors; storage full -> inserts/DDL blocked",
+      "quotaUnitAmbiguity": "docs do not state whether the 50 row counts execution-API calls, batch calls, or SQL statements; BOTH interpretations carried; the blocking verdict holds under BOTH",
+      "throughputGuidance": "official page: use batch() to pay per-request overhead once for a whole batch (throughput note; NOT a quota-unit ruling)",
+      "sources": [
+        "https://developers.cloudflare.com/d1/platform/pricing/",
+        "https://developers.cloudflare.com/d1/platform/limits/",
+        "https://developers.cloudflare.com/d1/worker-api/d1-database/"
+      ],
+      "class": "OFFICIAL"
+    }
+  },
+  "codeFacts": {
+    "cronExpression": "*/5 * * * *",
+    "cronFiresPerDay": 288,
+    "consumerMaxBatchSize": 10,
+    "consumerMaxRetries": 3,
+    "consumerMaxBatchTimeoutSeconds": 5,
+    "maxRedirects": 2,
+    "scheduleBatchPerPass": 10,
+    "webhookMaxBodyBytes": 65536,
+    "itemBounds": { "title": 512, "excerpt": 512, "author": 256, "rawJsonCapBytes": 8192, "note": "TR-06: actual constants; the withdrawn 1-2KB row claim replaced by an ASSUMPTION SET" },
+    "maxFeedBytes": 2097152,
+    "connectorRequestCaps": {
+      "rss": "max 4 feed URLs per poll; <=2 redirect hops per request",
+      "steam": "min(appsPerBatch<=25, |apps|<=50) requests",
+      "youtube": "|playlists|<=25 + 1 videos-details call",
+      "github": "|repositories|<=25 requests",
+      "reddit": "1 token + |subreddits| listings"
+    },
+    "providerBudgetClock": "Asia/Tehran (tehranBudgetDay)",
+    "recovery": {
+      "dispatchDueJobs": "expired-claim reclaim + due pending/retry_wait scan + stranded queued re-kick with grace + dead-letter DLQ reconcile (src/application/jobs/engine.ts)",
+      "class": "TR-04: implemented; the R1.10.1 'no automatic re-kick' claim withdrawn"
+    },
+    "class": "CODE-FACT"
+  },
+  "measuredLocal": {
+    "environment": "workerd via @cloudflare/vitest-pool-workers, disposable local D1 (miniflare); scripted raw fetch only; fake queue producer bindings; fixture writes and validation reads on the RAW binding OUTSIDE measured windows; ONE entrypoint per reported window; expected AND applied schema logged per trace",
+    "log": "audit-tools/logs/trace-run-r1102.log",
+    "wrapper": "audit-tools/trace/d1-instrument.ts v2 (corrected units; unit controls audit-tools/trace/instrument-controls.test.ts, 9/9)",
+    "labelWarning": "LOCAL PROXY — NOT cloud billable rows; local elapsed != cloud CPU; quota enforcement not emulated locally",
+    "managerCrossValidation": "T-13 == C2-100 (110 execution-API-call attempts / 211 statements); T-16 == C3 (1001 / 1812) — exact match",
+    "traces": [
+      { "id": "T-01", "window": "webhook noop update", "schema": "3/3", "executionApiCallAttempts": 2, "statementsAttempted": 2 },
+      { "id": "T-02", "window": "webhook duplicate 2nd delivery (delta)", "schema": "3/3", "executionApiCallAttempts": 2, "statementsAttempted": 2 },
+      { "id": "T-03", "window": "webhook foreign /start offline (tokenless 503)", "schema": "3/3", "executionApiCallAttempts": 3, "statementsAttempted": 3 },
+      { "id": "T-04", "window": "webhook owner /start + scripted transport", "schema": "3/3", "executionApiCallAttempts": 3, "statementsAttempted": 3, "outboundBotApiCalls": 1 },
+      { "id": "T-05", "window": "webhook foreign /start + scripted transport", "schema": "3/3", "executionApiCallAttempts": 3, "statementsAttempted": 3, "outboundBotApiCalls": 1, "claimTerminal": "processed" },
+      { "id": "T-06", "window": "cron idle gate OFF", "schema": "3/3", "executionApiCallAttempts": 6, "statementsAttempted": 6, "envelopes": 0 },
+      { "id": "T-07", "window": "cron SEED pass (separate)", "schema": "3/3", "executionApiCallAttempts": 9, "statementsAttempted": 36, "batches": 1, "batchStatements": 28 },
+      { "id": "T-08", "window": "cron DUE pass (separate)", "schema": "3/3", "executionApiCallAttempts": 11, "statementsAttempted": 11 },
+      { "id": "T-09", "window": "queue batch10 gate OFF", "schema": "3/3", "executionApiCallAttempts": 10, "statementsAttempted": 10, "outcome": "10x paused_by_policy, 0 writes" },
+      { "id": "T-10", "window": "ACTIVE poll 0 new (304 not_modified)", "schema": "4/4", "executionApiCallAttempts": 10, "statementsAttempted": 11 },
+      { "id": "T-11", "window": "ACTIVE poll 0 new (empty 200 -> changed)", "schema": "4/4", "executionApiCallAttempts": 10, "statementsAttempted": 11, "note": "NOT not_modified (TR-03)" },
+      { "id": "T-12", "window": "ACTIVE poll 2 new, 301->200", "schema": "4/4", "executionApiCallAttempts": 13, "statementsAttempted": 17, "rawAttempts": 2, "completed": 2, "charged": 2 },
+      { "id": "T-13", "window": "ACTIVE poll 100 new", "schema": "4/4", "executionApiCallAttempts": 110, "statementsAttempted": 211, "verdict": "exceeds documented Free 50 under BOTH interpretations" },
+      { "id": "T-14", "window": "ACTIVE poll 100 duplicates", "schema": "4/4", "executionApiCallAttempts": 210, "statementsAttempted": 311, "classificationProbes": "2 per duplicate" },
+      { "id": "T-15", "window": "ACTIVE poll 50 new + 50 duplicates", "schema": "4/4", "executionApiCallAttempts": 160, "statementsAttempted": 261 },
+      { "id": "T-16", "window": "ACTIVE batch10 via ONE real handleQueue", "schema": "4/4", "executionApiCallAttempts": 1001, "statementsAttempted": 1812, "batches": 21, "batchStatements": 832, "rawFetches": "11", "itemsStored": 700, "allAcked": true },
+      { "id": "T-17", "window": "RSS multi-feed bound + redirect", "schema": "4/4", "executionApiCallAttempts": 19, "statementsAttempted": 29, "rawRequests": 4 },
+      { "id": "T-18", "window": "Steam 3 apps", "schema": "4/4", "executionApiCallAttempts": 12, "statementsAttempted": 15, "rawRequests": 3 },
+      { "id": "T-19", "window": "YouTube 2 playlists + details", "schema": "4/4", "executionApiCallAttempts": 14, "statementsAttempted": 19, "rawRequests": 3 },
+      { "id": "T-20", "window": "GitHub 2 repositories", "schema": "4/4", "executionApiCallAttempts": 11, "statementsAttempted": 13, "rawRequests": 2 },
+      { "id": "T-21", "window": "Reddit token + 2 listings", "schema": "4/4", "executionApiCallAttempts": 12, "statementsAttempted": 15, "rawRequests": 3 },
+      { "id": "T-22", "window": "ordinary grant -> transport throw", "schema": "4/4", "executionApiCallAttempts": 10, "statementsAttempted": 11, "rawAttempts": 1, "completed": 0, "charged": 1, "label": "NOT late-authorization evidence (accepted unit-test property cited instead)" },
+      { "id": "T-23", "window": "budget denied hop 0 (budget=0)", "schema": "4/4", "executionApiCallAttempts": 11, "statementsAttempted": 12, "rawFetches": 0, "charged": 0 },
+      { "id": "T-24", "window": "budget AUTHORITY storage failure", "schema": "4/4", "executionApiCallAttempts": 8, "executionApiCallsFailed": 1, "statementsAttempted": 9, "rawFetches": 0, "terminalIngestionWrites": 0, "outcome": "durable retry_wait scheduled, message acked" },
+      { "id": "T-25", "window": "poison envelope (nonexistent job)", "schema": "4/4", "executionApiCallAttempts": 1, "statementsAttempted": 1, "durableRowCreated": false, "dlqSent": 0 },
+      { "id": "T-26", "window": "bounded retries -> dead_letter (per delivery)", "schema": "4/-1 (metadata corrupted BY FIXTURE; R19-01)", "executionApiCallAttempts": 6, "statementsAttempted": 6, "deliveries": 3, "note": "terminal-row transition only; DLQ send measured separately in T-27" },
+      { "id": "T-27", "window": "cron DLQ reconciliation send", "schema": "4/-1 (fixture-corrupted at window)", "executionApiCallAttempts": 7, "statementsAttempted": 7, "dlqSends": 1, "guardedConfirmation": "dlq_delivered_at set", "note": "real Queue send/receive LIVE-UNVERIFIED" },
+      { "id": "T-28", "window": "cron stranded re-kick of 25h-aged queued row", "schema": "4/4", "executionApiCallAttempts": 9, "statementsAttempted": 9, "sameJobIdReenqueued": true, "note": "application re-kick proof only; no real Queue TTL/availability claim" }
+    ],
+    "class": "MEASURED-LOCAL"
+  },
+  "derivedProfile": {
+    "status": "PROPOSED (not measured, not authorized); does NOT change the ingestion verdict",
+    "enabledSourcesAtActivation": 1,
+    "sourceIntervalSecondsMin": 900,
+    "perPollCostModel": "xAPI ~= 10 + N + 2D (anchors: 0->10, 2->13, 100->110, 100dup->210, 50/50->160)",
+    "expectedQueueOpsPerDay": "3 ops per delivery + retry reads + stranded re-kick sends (outage/reopen component UNKNOWN k) + DLQ reconcile",
+    "expectedD1RowsPerDay": "formula-driven (worksheet §3); cloud >= local estimates (index amplification)",
+    "storage": "UNKNOWN — per-row caps are CODE-FACT; arrival/retention UNMEASURED; 'years of headroom' WITHDRAWN",
+    "class": "CHOSEN+DERIVED"
+  },
+  "unknowns": [
+    "account plan level and actual entitlement",
+    "current account usage and other workloads sharing daily allowances",
+    "cloud-side per-invocation CPU (10ms budgets)",
+    "real D1 rows_read/rows_written actuals",
+    "real queue operations actuals and daily-allowance reset boundary",
+    "actual enforcement semantics of the 50-queries-per-invocation row (both interpretations carried)",
+    "real cron delivery cadence/jitter",
+    "real provider behavior (all connectors mock-only)",
+    "storage arrival/retention actuals; cleanup/rights retention decisions",
+    "real Queue message TTL expiry and DLQ send/receive round-trip (LIVE-UNVERIFIED)"
+  ],
+  "riskRegister": [
+    { "id": "R-CPU", "risk": "10ms CPU per HTTP/cron invocation", "severity": "low-moderate (shipped surface); UNKNOWN (active ingestion)", "status": "UNPROVEN" },
+    { "id": "R-QPI", "risk": "Free '50 queries per Worker invocation' vs ingestion work: single 100-item poll = 110 attempts/211 statements; active batch10 = 1001/1812; duplicate-heavy 100 = 210/311", "severity": "blocks advertised profile", "status": "NOT_READY_FOR_INGESTION_ON_FREE (local measured; enforcement LIVE-UNVERIFIED); batch-size reduction does NOT fix the single-job path; cadence staggering NOT a deterministic bound" },
+    { "id": "R-QOPS", "risk": "Queues 10,000 ops/day under retries/DLQ/re-kick amplification", "severity": "moderate", "status": "UNPROVEN; bounded by max_retries=3 + durable retry scheduling; components itemized in worksheet" },
+    { "id": "R-RET", "risk": "24h queue retention vs long outage", "severity": "moderate", "status": "application re-kick IMPLEMENTED and locally measured (T-28); real-Queue expiry/recovery LIVE-UNVERIFIED; operator procedure still required" },
+    { "id": "R-SHARED", "risk": "shared account usage consumes the same daily allowances", "severity": "unknown", "status": "UNKNOWN" },
+    { "id": "R-STORAGE", "risk": "500MB/DB growth; arrival/retention unmeasured", "severity": "low-moderate", "status": "UNKNOWN (headroom claim WITHDRAWN)" },
+    { "id": "R-TT", "risk": "Time Travel 7-day window constrains bookmark/restore drills", "severity": "low", "status": "DOCUMENTED" }
+  ]
+}
