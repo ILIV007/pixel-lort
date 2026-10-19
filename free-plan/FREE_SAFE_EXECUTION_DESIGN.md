@@ -1,4 +1,4 @@
-# PIXEL — Free-Safe Execution Design v2 (DESIGN REVIEW — R1.10.3)
+# PIXEL — Free-Safe Execution Design v3 (DESIGN REVIEW — R1.10.3 + R1.10.3.1 corrections)
 
 **Status: DESIGN REVIEW — lab-evidenced candidate, NOTHING implemented in the
 product, nothing authorized for product use.** This is the R1.10.3 revision
@@ -6,10 +6,14 @@ of the R1.10.2 design: the grouped-read-only proposal is RETRACTED as a
 Free-safe design (R112-01) and replaced by a parameter-bounded MULTI-ROW
 INSERT + grouped source-bound classification candidate whose semantic
 parity and measured costs are proven in the DESIGN LAB on real disposable
-workerd D1 (`design-lab/`). Product source stays
+workerd D1 (`design-lab/`). R1.10.3.1 (manager verdict CHANGES REQUIRED)
+adds: per-chunk byte accounting (§9.1), the RETRACTION of the universal
+18 xAPI / 34 STMT ceiling as a CONDITIONAL measured scenario (§9.2), the
+NOT_READY verdict for the unchanged supported RSS envelope, and a durable
+continuation design (§9.4). Product source stays
 `f70205648922d0f8e60619e45e5d54e6e87b8f1b` (297 files, byte-identical);
 no product patch, no migration, no config change, no Cloudflare operation,
-no paid upgrade in R1.10.3.
+no paid upgrade in R1.10.3 / R1.10.3.1.
 
 ## 1. The measured problem (unchanged, verified)
 
@@ -64,7 +68,7 @@ reads:
    100 documented binds; 9 rows/statement legacy = 99 ≤ 100), with
    - the TWO targeted conflict clauses byte-identical
      (`ON CONFLICT (source_id, external_id) DO NOTHING /
-       ON CONFLICT (source_id, canonical_url) DO NOTHING`) — a PK
+  ON CONFLICT (source_id, canonical_url) DO NOTHING`) — a PK
      collision / NOT NULL / CHECK violation still RAISES and aborts the
      whole batch (L-06);
    - OWNED path: the accepted ownership predicate P over EVERY row + the
@@ -101,38 +105,53 @@ absorbed row classifies as duplicateExternal).
 
 ## 4. Measured cost ledger (LOCAL PROXY UNITS — design-lab/cost-ledger.json)
 
-14 scenarios; the fixed per-poll sequence is the ACCEPTED one (engine
-claim read+CAS, source select, capability, acquire, authorize-per-hop,
-readback, terminal — imported product functions over the instrumented
-binding); only commit+classification are the candidate. Targets from the
-binding prompt: ≤ 40 execution-API calls AND ≤ 40 submitted statements
-INCLUDING all overhead (10 below the documented 50 row).
+16 scenarios (R1.10.3.1: +C-15/C-16 envelope re-measures); the fixed
+per-poll sequence is the ACCEPTED one (engine claim read+CAS, source
+select, capability, acquire, authorize-per-hop, readback, terminal —
+imported product functions over the instrumented binding); only
+commit+classification are the candidate. Targets from the binding prompt:
+≤ 40 execution-API calls AND ≤ 40 submitted statements INCLUDING all
+overhead (10 below the documented 50 row).
 
-| Row | Profile (schema, items, hops) | xAPI | STMT | Target |
-|---|---|---|---|---|
-| C-01 | owned, 0 new (304), 1 hop | 9 | 10 | — |
-| C-02 | owned, 100 new, 1 hop | **15** | **29** | ✓ ≤40/≤40 |
-| C-03 | owned, 100 dup-external, 1 hop | **15** | **29** | ✓ |
-| C-04 | owned, 100 dup-url (worst probes), 1 hop | **15** | **29** | ✓ |
-| C-05 | owned, 50/50 mix, 1 hop | **15** | **29** | ✓ |
-| C-06 | owned, 100 new MAX content bytes, 1 hop | **15** | **29** | ✓ |
-| C-07 | owned, 100 new, 3 hops (2 redirects) | **17** | **33** | ✓ |
-| C-08 | owned, budget DENIED (budget 0) | 10 | 11 | — (no items) |
-| C-09 | owned, budget AUTHORITY failure | 6 | 6 | — (retry_wait, zero terminal writes) |
-| C-11 | legacy, 0 new, 1 hop | 8 | 9 | — |
-| C-12 | legacy, 100 new, 1 hop | **14** | **27** | ✓ |
-| C-13 | legacy, 100 dup-url, 1 hop | **14** | **27** | ✓ |
-| C-14 | legacy, 100 new, 3 hops | **16** | **31** | ✓ |
-| C-10 | BASELINE accepted per-item, 100 new | 109 | 210 | reference |
+| Row  | Profile (schema, items, hops)                    | xAPI   | STMT   | Target                               |
+| ---- | ------------------------------------------------ | ------ | ------ | ------------------------------------ |
+| C-01 | owned, 0 new (304), 1 hop                        | 9      | 10     | —                                    |
+| C-02 | owned, 100 new, 1 hop                            | **15** | **29** | ✓ ≤40/≤40                            |
+| C-03 | owned, 100 dup-external, 1 hop                   | **15** | **29** | ✓                                    |
+| C-04 | owned, 100 dup-url (worst probes), 1 hop         | **15** | **29** | ✓                                    |
+| C-05 | owned, 50/50 mix, 1 hop                          | **15** | **29** | ✓                                    |
+| C-06 | owned, 100 new MAX content bytes, 1 hop          | **15** | **29** | ✓                                    |
+| C-07 | owned, 100 new, 3 hops (2 redirects)             | **17** | **33** | ✓                                    |
+| C-08 | owned, budget DENIED (budget 0)                  | 10     | 11     | — (no items)                         |
+| C-09 | owned, budget AUTHORITY failure                  | 6      | 6      | — (retry_wait, zero terminal writes) |
+| C-11 | legacy, 0 new, 1 hop                             | 8      | 9      | —                                    |
+| C-12 | legacy, 100 new, 1 hop                           | **14** | **27** | ✓                                    |
+| C-13 | legacy, 100 dup-url, 1 hop                       | **14** | **27** | ✓                                    |
+| C-14 | legacy, 100 new, 3 hops                          | **16** | **31** | ✓                                    |
+| C-15 | owned, 100 new ≈45 KB CJK canonical URLs, 1 hop  | **15** | **66** | **✗ STMT — NOT_READY evidence**      |
+| C-16 | legacy, 100 new ≈45 KB CJK canonical URLs, 1 hop | **14** | **65** | **✗ STMT — NOT_READY evidence**      |
+| C-10 | BASELINE accepted per-item, 100 new              | 109    | 210    | reference                            |
 
-**Derived upper bound for the FIRST chosen invocation profile** (owned
-candidate, 100 items, 2 redirects): lab 17 xAPI / 33 STMT PLUS the
-queue-envelope scope outside the lab harness — reconciled from the
-baseline row (C-10: 109/210) against the accepted trace T-13 (110/211,
-sealed R1.10.2 logs): the residual is exactly **1 API call / 1 statement**
-(queue envelope). Derived ceiling = **18 xAPI / 34 STMT** — the ≤40/≤40
-target holds WITH the residual included. If any future composition
-exceeds, the verdict is NOT_READY with the explicit blocker, never "fit".
+**CONDITIONAL measured scenario (RELABELED R1.10.3.1 — NOT a universal
+bound):** the previously claimed "derived ceiling 18 xAPI / 34 STMT" holds
+ONLY for the fixtures' URL shape (canonical URLs at the ~2 KiB documented
+assumption / max content-byte shape): lab 17 xAPI / 33 STMT (C-07) PLUS the
+1 API / 1 STMT queue-envelope residual (reconciled from C-10: 109/210 vs
+the accepted trace T-13: 110/211, sealed R1.10.2 logs). It is a measured
+SCENARIO inside the unchanged envelope, never a universal ceiling — see
+§9.2 for the retraction and the counterexample that broke it.
+
+**Envelope re-measure (R1.10.3.1, C-15/C-16):** for 100 items whose
+accepted-normalizer canonical URLs are ≈45 KB (percent-encoded 5000-char
+CJK paths — reachable inside the unchanged 2 MiB feed limit), the
+conservative combined-byte policy yields 2 rows/statement → **50 INSERT
+statements ALONE, before all other overhead**: owned 15 xAPI / 66 STMT,
+legacy 14 xAPI / 65 STMT; with the +1/+1 envelope residual ≈ 16 xAPI /
+67 STMT. The ≤40 xAPI target still holds; the ≤40 STMT target FAILS →
+verdict for the unchanged supported RSS envelope: **NOT_READY** (exact
+blocker in §9.2). Correctness is UNCHANGED (all rows land, fences intact,
+every audited statement ≤ the 102,400-byte conservative budget:
+C-15 max 91,728 bytes, C-16 max 90,989 bytes).
 
 Honesty labels (mandatory): every number is a LOCAL workerd + disposable
 D1 proxy measurement under the corrected v3 units (R112-03: failed-batch
@@ -174,15 +193,16 @@ question (both interpretations carried in free-plan/ documents).
 
 ## 7. Scope and approval boundaries
 
-| Item | Type | Where | Status |
-|---|---|---|---|
-| Multi-row owned/legacy inserts + grouped source-bound probes | product code change (future round) | `src/adapters/db/source-ingest-store.ts` (+ classification) | DESIGN-LAB proven; NOT implemented |
-| First-profile connector staging (others OFF) | config/profile decision | wrangler/registry config | PROPOSED ONLY; nothing applied |
-| Grouped-reads-only optimization | product code change | same as above | still possible as an API-call cut; NOT sufficient alone |
-| D4 batch bound | config change | `wrangler.jsonc` env.preview | not evaluated further this round |
-| Migration/schema change | NOT required by this design | — | — |
-| Paid features | NOT required; Free-only path | — | — |
-| This round (R1.10.3) | DESIGN REVIEW — nothing implemented | this document + design-lab/ | manager acceptance first |
+| Item                                                         | Type                                | Where                                                        | Status                                                  |
+| ------------------------------------------------------------ | ----------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------- |
+| Multi-row owned/legacy inserts + grouped source-bound probes | product code change (future round)  | `src/adapters/db/source-ingest-store.ts` (+ classification)  | DESIGN-LAB proven; NOT implemented                      |
+| First-profile connector staging (others OFF)                 | config/profile decision             | wrangler/registry config                                     | PROPOSED ONLY; nothing applied                          |
+| Grouped-reads-only optimization                              | product code change                 | same as above                                                | still possible as an API-call cut; NOT sufficient alone |
+| D4 batch bound                                               | config change                       | `wrangler.jsonc` env.preview                                 | not evaluated further this round                        |
+| Migration/schema change                                      | NOT required by this design         | —                                                            | —                                                       |
+| Paid features                                                | NOT required; Free-only path        | —                                                            | —                                                       |
+| This round (R1.10.3)                                         | DESIGN REVIEW — nothing implemented | this document + design-lab/                                  | manager acceptance first                                |
+| R1.10.3.1 corrections (planner + tests + docs + CI)          | review-side only                    | design-lab/ + this document + audit/CORRECTIONS_R1_10_3_1.md | same                                                    |
 
 ## 8. Non-goals (restated as commitments)
 
@@ -192,3 +212,165 @@ fences; no reinterpretation of PK-collision rollback or the legacy lost
 paid upgrade; no cadence-staggering claims; no cloud-fit declaration from
 local numbers; no self-authorization of the implementation round. **STOP
 for Posidon review.**
+
+## 9. R1.10.3.1 corrections (CHANGES REQUIRED verdict — this revision)
+
+### 9.1 FIX 1 — per-chunk byte accounting (design-lab/candidate-sql.ts)
+
+The R1.10.3 planner derived ONE `rowsPerStatement` from the input PREFIX
+and applied it blindly to every later chunk. The manager's independent
+counterexample broke it: 100 normalized RSS items, first 8 with short
+URLs, remaining 92 with HTTPS paths of 5000 CJK characters (the RSS XML
+stays below the 2 MiB feed limit) — the prefix-derived value was 8 rows,
+and the later statements overflowed to **375,637 audited SQL-plus-bind
+bytes vs the declared 102,400-byte conservative budget**.
+
+Correction (all review-side, in `design-lab/candidate-sql.ts`):
+
+- `planInsertChunks` now builds and validates EACH chunk INDEPENDENTLY:
+  it greedily extends a chunk only while its ACTUAL built SQL text
+  (`buildOwnedMultiRowInsertSql(k)` / `buildLegacyMultiRowInsertSql(k)`)
+  plus the ACTUAL bind bytes — the chunk's own row binds AND the shared
+  guard binds (P + B1, real values, not a count) — stays within BOTH
+  documented limits (≤ 100 bound parameters; the conservative
+  SQL-text-plus-binds budget). Chunk sizes therefore VARY and are audited
+  per chunk (`statementAudits`); no prefix-derived blanket size exists.
+- A single oversized row is handled EXPLICITLY: `OversizedRowPlanError`
+  (code `row_exceeds_statement_budget`) is raised at PLAN time — before
+  any statement is prepared or executed — naming the row index/id and the
+  measured bytes. The whole commit is rejected ATOMICALLY (zero
+  statements, zero durable effects; proven by L-13); the row is never
+  truncated, dropped, or silently skipped. A future implementation round
+  must map this typed error onto the accepted failure-class persistence
+  surface for operator-facing handling.
+- Defense-in-depth: every fully built statement is re-audited
+  (`assertStatementWithinBudget`) against the exact binds about to be
+  sent, so planner/builder drift can never reach the engine.
+- Atomicity, the ownership predicate P, the B1 source binding, and BOTH
+  targeted conflict clauses are byte-identical to R1.10.3 (parity suites
+  L-01…L-11 re-run green).
+
+Reproductions: **L-12** (the manager's heterogeneous counterexample:
+prefix chunk 8 rows, then 46 chunks of 2 rows = 47 INSERT statements,
+every chunk audited ≤ budget, all 100 rows land with full ≈45 KB
+canonical URLs, feed bytes < 2 MiB), **L-13** (single oversized row →
+typed plan-time rejection, zero effects), **L-14** (uniform CJK shape →
+exactly 50 chunks × 2 rows).
+
+### 9.2 FIX 2 — the worst-case claim is RETRACTED as universal; NOT_READY
+
+Claimed basis of the old bound: the cost-ledger fixtures assumed canonical
+URLs at a ~2 KiB documented assumption. **The accepted normalizer
+(`src/connectors/normalize.ts`, byte-identical, unmodified) enforces NO
+canonical-URL length cap** — it percent-encodes every non-ASCII path byte
+(3 UTF-8 bytes → 9 URL bytes per CJK char) and preserves the path
+verbatim. For 100 items sharing the 5000-char CJK path shape, the
+accepted normalizer produces canonical URLs of **exactly 45,023 bytes**
+(pinned by L-14 through the real `normalizeRawItem`), while the
+equivalent raw-CJK RSS XML remains ≈1.4 MB < the 2 MiB feed limit — i.e.
+the shape is INSIDE the unchanged supported RSS envelope.
+
+Consequences under the (unchanged, conservative) combined-byte policy:
+2 rows/statement → **50 INSERT statements alone, before all other
+overhead** — measured end-to-end as C-15 (owned: 15 xAPI / 66 STMT) and
+C-16 (legacy: 14 xAPI / 65 STMT). The ≤40 xAPI target still holds; the
+≤40 STMT target FAILS.
+
+Verdict: the previous "18 xAPI / 34 STMT derived ceiling" is RETRACTED as
+a universal bound and RELABELED a **conditional measured scenario**
+(valid only for fixture URL shapes at the ~2 KiB assumption; §4). For the
+UNCHANGED supported RSS envelope the candidate is **NOT_READY** against
+BOTH ≤40 targets. Exact blocker: canonical-URL byte expansion is uncapped
+by the accepted normalizer, and the conservative combined
+SQL-text-plus-binds budget then caps such rows at 2/statement, so a
+100-item CJK-shaped poll cannot meet ≤40 STMT regardless of planner
+correctness.
+
+No truncation of URLs/items, no lowering of supported caps, no discarding
+of work, no weakening of fences, and no assumption of a paid plan was
+done or is proposed.
+
+### 9.3 Platform-limit justification (documented rows vs internal policy)
+
+Basis: the manager-retrieved official excerpts (provenance:
+`free-plan/FREE_PLAN_OFFICIAL_SOURCES.md`, shipped in the sealed
+R1.10.2/R1.10.3 packages as `manager-evidence/official/d1-limits.json`):
+
+- "Maximum SQL statement length | 100,000 bytes (100 KB)" — applies to
+  the SQL TEXT, "to each statement contained within a batch statement".
+- "Maximum bound parameters per query | 100" — a COUNT row.
+- "Maximum string, `BLOB` or table row size | 2,000,000 bytes (2 MB)" —
+  a ≈45 KB canonical URL is far below the documented ROW-size row.
+- There is **NO documented row for a maximum bound-parameter byte size or
+  a maximum batch payload**. The candidate's combined
+  SQL-text-plus-binds ≤ 100 KB policy is therefore an INTERNAL
+  CONSERVATIVE MARGIN — strictly stronger than the documented rows, and
+  NOT the same as the documented SQL-TEXT limit. R1.10.3.1 keeps it
+  enforced (no weakening without measured evidence).
+
+Remaining risks that the conservative margin deliberately covers (and
+that any policy revision must first measure):
+
+- **Payload risk:** a 100-item CJK-shaped poll sends ≈4.6 MB of binds in
+  ONE batch; the platform's actual enforcement of large bind payloads on
+  the D1 Worker binding is undocumented/unknown.
+- **CPU risk:** Workers Free CPU is 10 ms per invocation (documented);
+  normalizing 100 × ≈15 KB raw CJK URLs plus ≈45 KB canonical strings and
+  hashing them is NOT measured — local elapsed wall time is not CPU
+  evidence.
+- **Quota risk:** rows read/written daily allowances (documented rows)
+  are formula-margined only; no cloud observation exists.
+
+### 9.4 Durable continuation design (submitted for review — nothing executed)
+
+To lift NOT_READY honestly, a future round (R1.10.3.2 proposal, NOT
+authorized by this round) must deliver, in this order:
+
+1. **Measurement gate (requires authorized Cloudflare operations on the
+   PREVIEW database — none performed in R1.10.3/R1.10.3.1):** a scripted,
+   reviewable probe plan that measures on the real preview D1 (a) the
+   largest bind payload accepted by the documented-limits-only policy,
+   (b) end-to-end commit cost for the CJK shape under that policy, and
+   (c) Worker CPU for the same poll. Probes run only with explicit owner
+   authorization; results are bound to logs and only then may the
+   internal combined-byte policy be JUSTIFIABLY revised (or kept).
+2. **Policy decision rule (pre-committed):** if measured evidence shows
+   the documented SQL-TEXT limit (≤ 100 KB text, ≤ 100 params) alone is
+   safe for the envelope, the planner switches to documented-limits
+   accounting with the conservative margin kept as a WARN-level audit —
+   the CJK shape then fits far more rows per statement (the SQL text for
+   N rows is placeholder scaffolding only; the ≈45 KB values ride as
+   binds), restoring ≤40 STMT measurably. If evidence is negative or
+   unavailable, the envelope verdict stays NOT_READY — never "fit by
+   assumption".
+3. **Durable multi-window alternative (no policy change needed):** split
+   one poll's items across SEVERAL queue envelopes (bounded item
+   windows) so every single invocation stays ≤40/≤40 under the CURRENT
+   conservative policy. This REQUIRES the exact durable continuation spec
+   the design already demands (§5): persisted work, cross-window
+   ownership and fencing, crash windows, lossless in-window processing —
+   none of it is designed or implemented here; it is named as the only
+   product-side path that does not depend on undocumented platform
+   behavior.
+4. **Accepted non-goals (unchanged):** no URL/item truncation, no cap
+   lowering, no silent drops, no paid plan, no schema/migration change,
+   no config change, no Cloudflare operation in the review round itself.
+
+### 9.5 FIX 3 — CI restored green (this branch)
+
+- All added review-side files now pass `eslint .` and
+  `prettier --check .` (see `audit/CORRECTIONS_R1_10_3_1.md` for the
+  exact mechanical changes; measurement `console` output is channeled
+  through documented single-exception helpers
+  `design-lab/lab-log.ts` / `audit-tools/trace/trace-log.ts` because the
+  workerd test pool reaches the host log ONLY through console and the
+  ledger extractor parses those lines).
+- The frozen manager probe source is preserved BYTE-IDENTICAL as an
+  opaque fixture
+  (`manager-evidence/manager-probes/design-counterexamples.test.ts.frozen`)
+  and is materialized TEMPORARILY by `manager-evidence/reproduce.sh` (and
+  the documented commands) for its standalone run only; the expected
+  outcome stays **exit 1 = 1 failed / 3 passed** with CE2 intentionally
+  historical red. No ignore lists, no disabled CI, no weakened
+  assertions; historical evidence bytes and the frozen-probe expectations
+  are untouched.

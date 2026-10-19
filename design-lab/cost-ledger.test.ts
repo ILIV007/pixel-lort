@@ -54,8 +54,11 @@ import {
 import {
   commitOwnedPollResultsCandidate,
   commitPollResultsCandidate,
+  type InsertChunkPlan,
   type CandidateItemRow,
 } from './candidate-sql';
+import { cjkCanonicalUrl, CJK_CANONICAL_URL_BYTES } from './fixtures';
+import { labLog } from './lab-log';
 
 const rawDb = () => env.DB as D1Database;
 
@@ -88,7 +91,11 @@ async function seedSources(dailyRequestBudget: number): Promise<void> {
     .run();
 }
 
-async function seedState(nextPollAt: number, owner: string | null, schema: 3 | 4 = 4): Promise<void> {
+async function seedState(
+  nextPollAt: number,
+  owner: string | null,
+  schema: 3 | 4 = 4,
+): Promise<void> {
   if (schema === 3) {
     // Schema 3 has NO poll_owner_job_id column (added by the 0004 candidate).
     await rawDb()
@@ -142,7 +149,7 @@ async function seedExistingItems(
   }
 }
 
-function makeItems(n: number, shape: 'normal' | 'max' = 'normal'): CandidateItemRow[] {
+function makeItems(n: number, shape: 'normal' | 'max' | 'cjk' = 'normal'): CandidateItemRow[] {
   if (shape === 'normal') {
     return Array.from({ length: n }, (_, i) => ({
       id: `led-item-${String(i).padStart(4, '0')}`,
@@ -162,18 +169,37 @@ function makeItems(n: number, shape: 'normal' | 'max' = 'normal'): CandidateItem
   // INGESTION_LIMITS): title 512 chars, excerpt 512, author 256,
   // rawJson ≈ 8 KiB; URL shape at a 2 KiB documented assumption.
   const big = (n: number, ch: string) => ch.repeat(n);
+  if (shape === 'max') {
+    return Array.from({ length: n }, (_, i) => ({
+      id: `led-big-${String(i).padStart(4, '0')}`,
+      sourceId: SOURCE,
+      externalId: `led-big-ext-${i}`,
+      canonicalUrl: `https://ledger.example/${big(2010, 'p')}/${i}`,
+      title: big(511, 't') + String(i % 10),
+      excerpt: big(512, 'e'),
+      author: big(256, 'a'),
+      publishedAtMs: NOW,
+      fetchedAtMs: NOW,
+      contentHash: big(64, 'h'),
+      rawJson: JSON.stringify({ blob: big(8 * 1024 - 40, 'r') }),
+    }));
+  }
+  // R1.10.3.1 Unicode/URL-expansion shape: 5000-char CJK paths → canonical
+  // URLs of EXACTLY CJK_CANONICAL_URL_BYTES (45,023) bytes — byte-identical
+  // to the accepted normalizer's output (proven in lab-suite L-14) and
+  // DISTINCT per item (targeted conflict clauses cannot absorb them).
   return Array.from({ length: n }, (_, i) => ({
-    id: `led-big-${String(i).padStart(4, '0')}`,
+    id: `led-cjk-${String(i).padStart(4, '0')}`,
     sourceId: SOURCE,
-    externalId: `led-big-ext-${i}`,
-    canonicalUrl: `https://ledger.example/${big(2010, 'p')}/${i}`,
-    title: big(511, 't') + String(i % 10),
-    excerpt: big(512, 'e'),
-    author: big(256, 'a'),
+    externalId: `led-cjk-ext-${i}`,
+    canonicalUrl: cjkCanonicalUrl(5000, i),
+    title: `CJK item ${i}`,
+    excerpt: 'CJK body text',
+    author: null,
     publishedAtMs: NOW,
     fetchedAtMs: NOW,
     contentHash: big(64, 'h'),
-    rawJson: JSON.stringify({ blob: big(8 * 1024 - 40, 'r') }),
+    rawJson: JSON.stringify({ i, shape: 'cjk-url-expansion' }),
   }));
 }
 
@@ -215,7 +241,7 @@ interface LedgerRow {
   readonly schema: 3 | 4;
   readonly path: 'owned-candidate' | 'legacy-candidate' | 'owned-baseline' | 'legacy-baseline';
   readonly items: number;
-  readonly itemShape: 'normal' | 'max';
+  readonly itemShape: 'normal' | 'max' | 'cjk';
   readonly hops: number;
   readonly dailyRequestBudget: number;
   readonly authority: 'granted' | 'denied' | 'failure';
@@ -241,8 +267,13 @@ interface LedgerRow {
     jobTerminals: number;
   };
   readonly insertStatementsPlanned: number;
+  /** Largest chunk row count (per-chunk sizes vary; see chunkRows). */
   readonly rowsPerInsertStatement: number;
+  /** Compact per-chunk row summary, run-length encoded (chunks×rows): "50×2", "12×8;1×4". */
+  readonly chunkRows: string;
   readonly chunkLimitedBy: string;
+  /** Max audited statement total bytes (SQL text + ALL binds); null = not audited (accepted baseline shape). */
+  readonly maxStatementTotalBytes: number | null;
   readonly stages: readonly StageRow[];
   readonly outcome: Record<string, unknown>;
 }
@@ -255,11 +286,38 @@ interface SequenceOptions {
   readonly schema: 3 | 4;
   readonly path: 'owned-candidate' | 'legacy-candidate' | 'owned-baseline' | 'legacy-baseline';
   readonly items: readonly CandidateItemRow[];
-  readonly itemShape: 'normal' | 'max';
+  readonly itemShape: 'normal' | 'max' | 'cjk';
   readonly hops: number;
   readonly dailyRequestBudget: number;
   readonly authority: 'granted' | 'denied' | 'failure';
   readonly notModified?: boolean;
+}
+
+/** R1.10.3.1: honest per-chunk plan summary (sizes VARY across chunks). */
+function summarizePlan(plan: InsertChunkPlan): {
+  rowsPerInsertStatement: number;
+  chunkRows: string;
+  chunkLimitedBy: string;
+  maxStatementTotalBytes: number | null;
+} {
+  const runs: string[] = [];
+  for (const rows of plan.rowsPerStatement) {
+    const last = runs[runs.length - 1];
+    const match = last === undefined ? undefined : /^(\d+)×(\d+)$/.exec(last);
+    if (match && Number(match[2]) === rows) {
+      runs[runs.length - 1] = `${Number(match[1]) + 1}×${rows}`;
+    } else {
+      runs.push(`1×${rows}`);
+    }
+  }
+  return {
+    rowsPerInsertStatement: plan.maxRowsPerStatement,
+    chunkRows: plan.chunks.length === 0 ? 'n/a' : runs.join(';'),
+    chunkLimitedBy: plan.limitedBy,
+    maxStatementTotalBytes: plan.statementAudits.length
+      ? Math.max(...plan.statementAudits.map((a) => a.totalBytes))
+      : null,
+  };
 }
 
 async function runPollSequence(opts: SequenceOptions): Promise<LedgerRow> {
@@ -307,7 +365,7 @@ async function runPollSequence(opts: SequenceOptions): Promise<LedgerRow> {
 
   // 3. Capability resolution — ACCEPTED product function.
   snap = snapshot(stats);
-  const capability = await resolveSchemaCapability(executor);
+  const _capability = await resolveSchemaCapability(executor);
   stageDelta('capability', snap, 'accepted resolveSchemaCapability');
   kinds.capabilityReads = 1;
 
@@ -356,12 +414,21 @@ async function runPollSequence(opts: SequenceOptions): Promise<LedgerRow> {
   let outcome: Record<string, unknown> = {};
   let insertStatementsPlanned = 0;
   let rowsPerInsertStatement = 0;
+  let chunkRows = 'n/a';
   let chunkLimitedBy = 'n/a';
+  let maxStatementTotalBytes: number | null = null;
 
   if (authority === 'failure') {
     // Typed retry: fenced retry_wait bookkeeping, NO terminal ingestion write.
     snap = snapshot(stats);
-    await markJobRetryWait(executor, JOB_ID, claim.generation, NOW + 60_000, 'job_handler_retryable_error', NOW);
+    await markJobRetryWait(
+      executor,
+      JOB_ID,
+      claim.generation,
+      NOW + 60_000,
+      'job_handler_retryable_error',
+      NOW,
+    );
     stageDelta('job-terminal', snap, 'accepted markJobRetryWait (authority failure path)');
     kinds.jobTerminals = 1;
     outcome = { kind: 'retry_wait', zeroTerminalIngestionWrites: true };
@@ -390,8 +457,8 @@ async function runPollSequence(opts: SequenceOptions): Promise<LedgerRow> {
         nowMs: NOW,
       });
       insertStatementsPlanned = result.plan.chunks.length;
-      rowsPerInsertStatement = result.plan.rowsPerStatement;
-      chunkLimitedBy = result.plan.limitedBy;
+      ({ rowsPerInsertStatement, chunkRows, chunkLimitedBy, maxStatementTotalBytes } =
+        summarizePlan(result.plan));
       kinds.multiRowInserts = result.plan.chunks.length;
       kinds.stateWrites = 1;
       outcome = {
@@ -409,8 +476,8 @@ async function runPollSequence(opts: SequenceOptions): Promise<LedgerRow> {
         nowMs: NOW,
       });
       insertStatementsPlanned = result.plan.chunks.length;
-      rowsPerInsertStatement = result.plan.rowsPerStatement;
-      chunkLimitedBy = result.plan.limitedBy;
+      ({ rowsPerInsertStatement, chunkRows, chunkLimitedBy, maxStatementTotalBytes } =
+        summarizePlan(result.plan));
       kinds.multiRowInserts = result.plan.chunks.length;
       kinds.stateWrites = 1;
       outcome = {
@@ -431,10 +498,17 @@ async function runPollSequence(opts: SequenceOptions): Promise<LedgerRow> {
       });
       insertStatementsPlanned = items.length;
       rowsPerInsertStatement = 1;
+      chunkRows = items.length === 0 ? 'n/a' : `1×${items.length}`;
       chunkLimitedBy = 'per-item (accepted shape)';
+      maxStatementTotalBytes = null; // accepted path is not byte-audited here
       kinds.multiRowInserts = items.length;
       kinds.stateWrites = 1;
-      outcome = { inserted: result.inserted, duplicateExternal: result.duplicateExternal, duplicateUrl: result.duplicateUrl, stateWriteWon: result.stateWriteWon };
+      outcome = {
+        inserted: result.inserted,
+        duplicateExternal: result.duplicateExternal,
+        duplicateUrl: result.duplicateUrl,
+        stateWriteWon: result.stateWriteWon,
+      };
     } else {
       const result = await commitPollResults(executor, {
         sourceId: SOURCE,
@@ -445,10 +519,17 @@ async function runPollSequence(opts: SequenceOptions): Promise<LedgerRow> {
       });
       insertStatementsPlanned = items.length;
       rowsPerInsertStatement = 1;
+      chunkRows = items.length === 0 ? 'n/a' : `1×${items.length}`;
       chunkLimitedBy = 'per-item (accepted shape)';
+      maxStatementTotalBytes = null; // accepted path is not byte-audited here
       kinds.multiRowInserts = items.length;
       kinds.stateWrites = 1;
-      outcome = { inserted: result.inserted, duplicateExternal: result.duplicateExternal, duplicateUrl: result.duplicateUrl, stateWriteWon: result.stateWriteWon };
+      outcome = {
+        inserted: result.inserted,
+        duplicateExternal: result.duplicateExternal,
+        duplicateUrl: result.duplicateUrl,
+        stateWriteWon: result.stateWriteWon,
+      };
     }
     stageDelta(
       'commit-batch+classification',
@@ -486,11 +567,13 @@ async function runPollSequence(opts: SequenceOptions): Promise<LedgerRow> {
     statementKinds: kinds,
     insertStatementsPlanned,
     rowsPerInsertStatement,
+    chunkRows,
     chunkLimitedBy,
+    maxStatementTotalBytes,
     stages,
     outcome,
   };
-  console.log('LABLEDGER[' + JSON.stringify(row) + ']');
+  labLog('LABLEDGER[' + JSON.stringify(row) + ']');
   return row;
 }
 
@@ -587,6 +670,32 @@ describe('R1.10.3 design lab cost ledger — schema 3 legacy candidate (real wor
     expect(row.outcome.inserted).toBe(100);
     expect(row.executionApiCallAttempts).toBeLessThanOrEqual(40);
     expect(row.statementsAttempted).toBeLessThanOrEqual(40);
+  });
+
+  it('C-16 legacy candidate, 100 new uniform ≈45 KB CJK canonical URLs, 1 hop — envelope re-measure: STMT target FAILS (NOT_READY evidence)', async () => {
+    await seedSources(100);
+    await seedState(NOW, null, 3);
+    await seedDispatchableJob();
+    const row = await runPollSequence({
+      id: 'C-16-legacy-100-cjk-45kb-1hop',
+      schema: 3,
+      path: 'legacy-candidate',
+      items: makeItems(100, 'cjk'),
+      itemShape: 'cjk',
+      hops: 1,
+      dailyRequestBudget: 100,
+      authority: 'granted',
+    });
+    // Correctness unchanged (legacy lost-fence semantics preserved); the
+    // byte-limited legacy planner also lands 2 rows/statement → 50 INSERTs.
+    expect(row.outcome.inserted).toBe(100);
+    expect(row.insertStatementsPlanned).toBe(50);
+    expect(row.rowsPerInsertStatement).toBe(2);
+    expect(row.chunkRows).toBe('50×2');
+    expect(row.chunkLimitedBy).toBe('bytes');
+    expect(row.maxStatementTotalBytes).toBeLessThanOrEqual(100 * 1024);
+    expect(row.executionApiCallAttempts).toBeLessThanOrEqual(40);
+    expect(row.statementsAttempted).toBeGreaterThan(40); // STMT target FAILS
   });
 });
 
@@ -837,5 +946,40 @@ describe('R1.10.3 design lab cost ledger — schema 4 owned candidate (real work
     // envelope scope outside this harness and is reconciled in the docs.
     expect(row.executionApiCallAttempts).toBeGreaterThan(90);
     expect(row.statementsAttempted).toBeGreaterThan(180);
+  });
+
+  it('C-15 owned candidate, 100 new uniform ≈45 KB CJK canonical URLs, 1 hop — envelope re-measure: STMT target FAILS (NOT_READY evidence)', async () => {
+    await seedSources(100);
+    await seedState(NOW, null);
+    await seedDispatchableJob();
+    // Pin the shape: byte-identical to the accepted normalizer's output for
+    // a 5000-char CJK path (proven in lab-suite L-14), distinct per item.
+    expect(new TextEncoder().encode(makeItems(1, 'cjk')[0]!.canonicalUrl!).length).toBe(
+      CJK_CANONICAL_URL_BYTES,
+    );
+    const row = await runPollSequence({
+      id: 'C-15-owned-100-cjk-45kb-1hop',
+      schema: 4,
+      path: 'owned-candidate',
+      items: makeItems(100, 'cjk'),
+      itemShape: 'cjk',
+      hops: 1,
+      dailyRequestBudget: 100,
+      authority: 'granted',
+    });
+    // Correctness is UNCHANGED: every row lands (no truncation, no drop),
+    // atomicity and fences intact under the corrected per-chunk planner.
+    expect(row.outcome.inserted).toBe(100);
+    expect(row.outcome.stateWriteWon).toBe(true);
+    // Per-chunk accounting: 2 rows/statement → 50 INSERT statements ALONE,
+    // before ALL other overhead — the ≤40 STMT target cannot hold for the
+    // unchanged RSS envelope. This row IS the NOT_READY evidence.
+    expect(row.insertStatementsPlanned).toBe(50);
+    expect(row.rowsPerInsertStatement).toBe(2);
+    expect(row.chunkRows).toBe('50×2');
+    expect(row.chunkLimitedBy).toBe('bytes');
+    expect(row.maxStatementTotalBytes).toBeLessThanOrEqual(100 * 1024);
+    expect(row.executionApiCallAttempts).toBeLessThanOrEqual(40); // API target holds
+    expect(row.statementsAttempted).toBeGreaterThan(40); // STMT target FAILS
   });
 });

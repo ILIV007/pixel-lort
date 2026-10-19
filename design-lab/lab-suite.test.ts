@@ -27,6 +27,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
 import { applyMigrations, ROUND19_MIGRATION_PLAN } from '../tests/helpers/migrations';
 import { createDbExecutor } from '../src/adapters/db/db-executor';
+import { INGESTION_LIMITS } from '../src/domain/source/source-registry';
+import { normalizeRawItem } from '../src/connectors/normalize';
 import {
   acquirePollOwnership,
   commitOwnedPollResults,
@@ -38,10 +40,16 @@ import {
   buildOwnedMultiRowInsertSql,
   commitOwnedPollResultsCandidate,
   commitPollResultsCandidate,
+  MAX_SQL_STATEMENT_BYTES,
+  OversizedRowPlanError,
+  ownedSharedGuardBinds,
   planInsertChunks,
   statementByteAudit,
   type CandidateItemRow,
+  type OwnedCommitInput,
 } from './candidate-sql';
+import { labLog } from './lab-log';
+import { CJK_CANONICAL_URL_BYTES, cjkCanonicalUrl, cjkRawLink } from './fixtures';
 
 const rawDb = () => env.DB as D1Database;
 
@@ -129,10 +137,7 @@ async function seedExistingItem(row: {
     .run();
 }
 
-function makeItems(
-  n: number,
-  overrides: Partial<CandidateItemRow> = {},
-): CandidateItemRow[] {
+function makeItems(n: number, overrides: Partial<CandidateItemRow> = {}): CandidateItemRow[] {
   return Array.from({ length: n }, (_, i) => ({
     id: `lab-item-${String(i).padStart(4, '0')}`,
     sourceId: SOURCE,
@@ -151,6 +156,76 @@ function makeItems(
 
 function toIngestRows(items: readonly CandidateItemRow[]): IngestItemRow[] {
   return items.map((i) => ({ ...i }));
+}
+
+/* ------------------------------------------------------------------ */
+/* R1.10.3.1 regression fixtures (Unicode/URL-expansion envelope)      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Build one CandidateItemRow through the ACCEPTED normalizer
+ * (`normalizeRawItem`, imported UNMODIFIED) so the canonical URL is what
+ * the real product path would persist — proving the unchanged RSS envelope
+ * admits ≈45 KB canonical URLs (the normalizer enforces NO URL length cap)
+ * and that the normalizer's percent-encoding yields EXACTLY the fixtures.ts
+ * arithmetic (45,023 bytes for a 5000-char CJK path).
+ */
+async function normalizedCjkItem(index: number, cjkChars: number): Promise<CandidateItemRow> {
+  const rawLink = cjkRawLink(cjkChars, index);
+  const normalized = await normalizeRawItem({
+    connector: 'rss',
+    sourceId: SOURCE,
+    originLabel: 'design-lab',
+    raw: {
+      id: `cjk-${index}`,
+      link: rawLink,
+      title: `CJK item ${index}`,
+      bodyText: 'CJK body text',
+      author: null,
+      publishedRaw: null,
+    },
+    stripDownloads: false,
+    nowMs: NOW,
+  });
+  if (!normalized.ok) throw new Error('fixture normalize failed');
+  const item = normalized.item;
+  // Pin the accepted normalizer's behavior: percent-encoded path, NO cap,
+  // exact expected byte size, and equality with the deterministic fixture.
+  const encoder = new TextEncoder();
+  const expectedUrl = cjkCanonicalUrl(cjkChars, index);
+  if (item.canonicalUrl !== expectedUrl) {
+    throw new Error('normalizer canonical URL diverged from the deterministic fixture');
+  }
+  if (encoder.encode(item.canonicalUrl).length !== expectedUrl.length) {
+    throw new Error('fixture byte-count invariant broken');
+  }
+  return {
+    id: `lab-cjk-${String(index).padStart(4, '0')}`,
+    sourceId: SOURCE,
+    externalId: item.externalId,
+    canonicalUrl: item.canonicalUrl,
+    title: item.title,
+    excerpt: item.excerpt,
+    author: item.author,
+    publishedAtMs: item.publishedAtMs,
+    fetchedAtMs: NOW,
+    contentHash: item.contentHash,
+    rawJson: JSON.stringify(item.rawJson),
+  };
+}
+
+/** Planner options mirroring the owned commit's EXACT shared guard binds. */
+function ownedPlanOptions(hold: number) {
+  const input = {
+    sourceId: SOURCE,
+    jobId: JOB_ID,
+    generation: GENERATION,
+    observedHoldUntilMs: hold,
+  } as OwnedCommitInput;
+  return {
+    sharedBinds: ownedSharedGuardBinds(input),
+    buildSql: buildOwnedMultiRowInsertSql,
+  };
 }
 
 function makeState(nextPollAtMs: number): PollTerminalState {
@@ -324,7 +399,7 @@ describe('R1.10.3 design lab — schema 3 legacy candidate parity (real workerd 
     expect(candidate.stateWriteWon).toBe(accepted.stateWriteWon);
     expect(candidateDurable.items).toEqual(acceptedDurable.items);
     expect(candidateDurable.state).toEqual(acceptedDurable.state);
-    console.log(
+    labLog(
       'LAB[L-10]',
       JSON.stringify({
         schema: 3,
@@ -367,7 +442,7 @@ describe('R1.10.3 design lab — schema 3 legacy candidate parity (real workerd 
     expect(candidate.stateWriteWon).toBe(false);
     expect(candidateDurable.items).toEqual(acceptedDurable.items);
     expect(candidateDurable.state).toEqual(acceptedDurable.state);
-    console.log(
+    labLog(
       'LAB[L-11]',
       JSON.stringify({
         legacyLostFence: 'items persist, stateWriteWon=false — accepted semantics preserved',
@@ -409,7 +484,7 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
     expect(candidate.durable.items).toEqual(accepted.durable.items);
     expect(candidate.durable.state).toEqual(accepted.durable.state);
     expect(candidate.durable.items.length).toBe(100);
-    console.log(
+    labLog(
       'LAB[L-01]',
       JSON.stringify({
         items: 100,
@@ -424,25 +499,63 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
   it('L-02 duplicate-heavy mix (external dups + url dups + own hits + quirk + null keys): parity', async () => {
     const hold = await freshOwnedFixture();
     // Seeded durable state shaping the outcomes:
-    await seedExistingItem({ id: 'lab-item-0005', sourceId: SOURCE, externalId: 'lab-ext-5', canonicalUrl: 'https://lab.example/5' }); // own hit after insert attempt? id collides → PK collision path
+    await seedExistingItem({
+      id: 'lab-item-0005',
+      sourceId: SOURCE,
+      externalId: 'lab-ext-5',
+      canonicalUrl: 'https://lab.example/5',
+    }); // own hit after insert attempt? id collides → PK collision path
     // Careful: a seeded row with an ATTEMPTED id is the PK-collision case (L-07).
     // For THIS scenario seed foreign keys only:
     await rawDb().prepare('DELETE FROM source_items WHERE id = ?').bind('lab-item-0005').run();
-    await seedExistingItem({ id: 'seed-ext-1', sourceId: SOURCE, externalId: 'lab-ext-10', canonicalUrl: null }); // external dup target
-    await seedExistingItem({ id: 'seed-url-1', sourceId: SOURCE, externalId: 'seed-url-1-ext', canonicalUrl: 'https://lab.example/20' }); // url dup target
+    await seedExistingItem({
+      id: 'seed-ext-1',
+      sourceId: SOURCE,
+      externalId: 'lab-ext-10',
+      canonicalUrl: null,
+    }); // external dup target
+    await seedExistingItem({
+      id: 'seed-url-1',
+      sourceId: SOURCE,
+      externalId: 'seed-url-1-ext',
+      canonicalUrl: 'https://lab.example/20',
+    }); // url dup target
     const items: CandidateItemRow[] = [
       ...makeItems(9), // fresh inserts
       { ...makeItems(1, { id: 'dup-ext-a' })[0], externalId: 'lab-ext-10' }, // external dup
-      { ...makeItems(1, { id: 'dup-url-a' })[0], externalId: 'brand-new-ext', canonicalUrl: 'https://lab.example/20' }, // url dup
-      { ...makeItems(1, { id: 'quirk-a' })[0], externalId: 'brand-new-ext-2', canonicalUrl: 'https://nowhere.example/q' }, // quirk → duplicateExternal
-      { ...makeItems(1, { id: 'null-keys-a' })[0], externalId: 'x', canonicalUrl: null, title: 'has ext' }, // own insert
+      {
+        ...makeItems(1, { id: 'dup-url-a' })[0],
+        externalId: 'brand-new-ext',
+        canonicalUrl: 'https://lab.example/20',
+      }, // url dup
+      {
+        ...makeItems(1, { id: 'quirk-a' })[0],
+        externalId: 'brand-new-ext-2',
+        canonicalUrl: 'https://nowhere.example/q',
+      }, // quirk → duplicateExternal
+      {
+        ...makeItems(1, { id: 'null-keys-a' })[0],
+        externalId: 'x',
+        canonicalUrl: null,
+        title: 'has ext',
+      }, // own insert
     ];
     const accepted = await runOwnedAccepted(items, hold);
     expect(accepted.threw).toBeNull();
     const hold2 = await freshOwnedFixture();
     // Re-seed the SAME durable shaping for the candidate run.
-    await seedExistingItem({ id: 'seed-ext-1', sourceId: SOURCE, externalId: 'lab-ext-10', canonicalUrl: null });
-    await seedExistingItem({ id: 'seed-url-1', sourceId: SOURCE, externalId: 'seed-url-1-ext', canonicalUrl: 'https://lab.example/20' });
+    await seedExistingItem({
+      id: 'seed-ext-1',
+      sourceId: SOURCE,
+      externalId: 'lab-ext-10',
+      canonicalUrl: null,
+    });
+    await seedExistingItem({
+      id: 'seed-url-1',
+      sourceId: SOURCE,
+      externalId: 'seed-url-1-ext',
+      canonicalUrl: 'https://lab.example/20',
+    });
     const candidate = await runOwnedCandidate(items, hold2);
     expect(candidate.threw).toBeNull();
     expect(candidate.inserted).toBe(accepted.inserted);
@@ -450,7 +563,7 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
     expect(candidate.duplicateUrl).toBe(accepted.duplicateUrl);
     expect(candidate.durable.items).toEqual(accepted.durable.items);
     expect(candidate.durable.state).toEqual(accepted.durable.state);
-    console.log(
+    labLog(
       'LAB[L-02]',
       JSON.stringify({
         accepted: {
@@ -478,7 +591,7 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
     expect(candidate.durable.items).toEqual(accepted.durable.items);
     expect(candidate.durable.items.length).toBe(0);
     expect(candidate.durable.state).toEqual(accepted.durable.state);
-    console.log('LAB[L-03]', JSON.stringify({ staleOwner: 'zero items, zero state, parity' }));
+    labLog('LAB[L-03]', JSON.stringify({ staleOwner: 'zero items, zero state, parity' }));
   });
 
   it('L-04 stale generation (job attempts moved on): zero items, zero state — parity', async () => {
@@ -494,7 +607,7 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
     expect(candidate.inserted).toBe(0);
     expect(candidate.durable.items.length).toBe(0);
     expect(candidate.durable.state).toEqual(accepted.durable.state);
-    console.log('LAB[L-04]', JSON.stringify({ staleGeneration: 'zero items, zero state, parity' }));
+    labLog('LAB[L-04]', JSON.stringify({ staleGeneration: 'zero items, zero state, parity' }));
   });
 
   it('L-05 mixed-source rejection: BOTH implementations reject BEFORE any statement; durable state untouched', async () => {
@@ -508,7 +621,7 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
     expect((accepted.threw as { code?: string }).code).toBe('item_source_mismatch');
     expect(candidate.durable.items.length).toBe(0);
     expect(candidate.durable.state?.poll_owner_job_id).toBe(JOB_ID); // ownership NOT released
-    console.log(
+    labLog(
       'LAB[L-05]',
       JSON.stringify({
         acceptedCode: (accepted.threw as { code?: string }).code,
@@ -520,19 +633,29 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
 
   it('L-06 PRIMARY-KEY collision: BOTH throw, whole batch rolls back (zero items, state unchanged) — semantics NOT reinterpreted', async () => {
     const hold = await freshOwnedFixture();
-    await seedExistingItem({ id: 'lab-item-0003', sourceId: SOURCE, externalId: 'pre-existing', canonicalUrl: null });
+    await seedExistingItem({
+      id: 'lab-item-0003',
+      sourceId: SOURCE,
+      externalId: 'pre-existing',
+      canonicalUrl: null,
+    });
     const items = makeItems(10);
     const accepted = await runOwnedAccepted(items, hold);
     expect(accepted.threw).toBeTruthy();
     expect(accepted.durable.items.length).toBe(1); // only the seed row survived
     // Fresh fixture for the candidate (same seed).
     await freshOwnedFixture();
-    await seedExistingItem({ id: 'lab-item-0003', sourceId: SOURCE, externalId: 'pre-existing', canonicalUrl: null });
+    await seedExistingItem({
+      id: 'lab-item-0003',
+      sourceId: SOURCE,
+      externalId: 'pre-existing',
+      canonicalUrl: null,
+    });
     const candidate = await runOwnedCandidate(items, hold);
     expect(candidate.threw).toBeTruthy();
     expect(candidate.durable.items.length).toBe(1);
     expect(candidate.durable.state).toEqual(accepted.durable.state);
-    console.log(
+    labLog(
       'LAB[L-06]',
       JSON.stringify({
         acceptedThrew: accepted.threw !== null,
@@ -564,7 +687,7 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
     expect(accepted.inserted).toBe(4);
     expect(accepted.duplicateExternal).toBe(1);
     expect(candidate.durable.items).toEqual(accepted.durable.items);
-    console.log(
+    labLog(
       'LAB[L-07]',
       JSON.stringify({
         candidate: { inserted: candidate.inserted, duplicateExternal: candidate.duplicateExternal },
@@ -573,7 +696,7 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
     );
   });
 
-  it('L-08 byte-bound chunking at max-volume content shape: rows/statement shrink, ALL rows land, budget audited', async () => {
+  it('L-08 byte-bound chunking at max-volume content shape: rows/statement shrink, ALL rows land, EVERY chunk audited', async () => {
     const hold = await freshOwnedFixture();
     const big = (n: number, ch: string) => ch.repeat(n);
     const items: CandidateItemRow[] = Array.from({ length: 100 }, (_, i) => ({
@@ -589,7 +712,7 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
       contentHash: big(64, 'h'),
       rawJson: JSON.stringify({ blob: big(8 * 1024 - 40, 'r') }), // ≈ 8 KiB raw cap
     }));
-    const plan = planInsertChunks(items, 7);
+    const plan = planInsertChunks(items, ownedPlanOptions(hold));
     const candidate = await commitOwnedPollResultsCandidate(rawDb() as never, {
       sourceId: SOURCE,
       jobId: JOB_ID,
@@ -601,27 +724,57 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
     });
     expect(candidate.inserted).toBe(100);
     expect(candidate.stateWriteWon).toBe(true);
-    // Byte audit of the LARGEST statement stays under the documented budget.
-    const largest = buildOwnedMultiRowInsertSql(plan.rowsPerStatement);
-    const largestBinds: unknown[] = [];
+    // R1.10.3.1: EVERY chunk is audited independently with its ACTUAL SQL
+    // text + row binds + shared guard binds — no prefix-derived blanket
+    // size. The returned plan must equal the standalone plan.
+    expect(candidate.plan).toEqual(plan);
+    expect(plan.rowsPerStatement).toEqual([...Array<number>(12).fill(8), 4]);
+    expect(plan.limitedBy).toBe('binds'); // 8×11 + 7 = 95 ≤ 100 binds
+    for (const audit of plan.statementAudits) {
+      expect(audit.rows).toBeLessThanOrEqual(8);
+      expect(audit.rows * 11 + 7).toBeLessThanOrEqual(100);
+      expect(audit.totalBytes).toBeLessThanOrEqual(MAX_SQL_STATEMENT_BYTES);
+    }
+    // Cross-check chunk 0 with the independent statementByteAudit helper.
+    const chunk0Sql = buildOwnedMultiRowInsertSql(plan.chunks[0]!.length);
+    const chunk0Binds: unknown[] = [];
     for (const item of plan.chunks[0] ?? []) {
-      largestBinds.push(
-        item.id, item.sourceId, item.externalId, item.canonicalUrl, item.title,
-        item.excerpt, item.author, item.publishedAtMs, item.fetchedAtMs,
-        item.contentHash, item.rawJson,
+      chunk0Binds.push(
+        item.id,
+        item.sourceId,
+        item.externalId,
+        item.canonicalUrl,
+        item.title,
+        item.excerpt,
+        item.author,
+        item.publishedAtMs,
+        item.fetchedAtMs,
+        item.contentHash,
+        item.rawJson,
       );
     }
-    const audit = statementByteAudit(largest, largestBinds);
-    expect(audit.totalBytes).toBeLessThanOrEqual(100 * 1024);
-    const count = await rawDb().prepare('SELECT COUNT(*) AS n FROM source_items').first<{ n: number }>();
+    const audit0 = statementByteAudit(chunk0Sql, [
+      ...chunk0Binds,
+      ...ownedSharedGuardBinds({
+        sourceId: SOURCE,
+        jobId: JOB_ID,
+        generation: GENERATION,
+        observedHoldUntilMs: hold,
+      } as OwnedCommitInput),
+    ]);
+    expect(audit0.totalBytes).toBeLessThanOrEqual(MAX_SQL_STATEMENT_BYTES);
+    expect(audit0.totalBytes).toBe(plan.statementAudits[0]!.totalBytes);
+    const count = await rawDb()
+      .prepare('SELECT COUNT(*) AS n FROM source_items')
+      .first<{ n: number }>();
     expect(count?.n).toBe(100);
-    console.log(
+    labLog(
       'LAB[L-08]',
       JSON.stringify({
-        rowsPerStatement: plan.rowsPerStatement,
+        chunks: plan.chunks.length,
+        maxRowsPerStatement: plan.maxRowsPerStatement,
         limitedBy: plan.limitedBy,
-        insertStatements: plan.chunks.length,
-        largestStatementBytes: audit.totalBytes,
+        largestStatementBytes: Math.max(...plan.statementAudits.map((a) => a.totalBytes)),
         inserted: candidate.inserted,
       }),
     );
@@ -638,7 +791,7 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
     } catch {
       reusable = false;
     }
-    console.log(
+    labLog(
       'LAB[L-09]',
       JSON.stringify({
         numberedParamReuseWorks: reusable,
@@ -647,5 +800,134 @@ describe('R1.10.3 design lab — schema 4 owned candidate parity (real workerd D
     );
     expect(typeof reusable).toBe('boolean');
   });
-});
 
+  /* -------------------------------------------------------------- */
+  /* R1.10.3.1 regressions (manager counterexample + envelope facts) */
+  /* -------------------------------------------------------------- */
+
+  it('L-12 heterogeneous chunking (R1.10.3.1 counterexample): 8 short + 92 CJK≈45 KB — EVERY chunk built and validated independently', async () => {
+    const hold = await freshOwnedFixture();
+    // makeItems(8): unique SHORT URLs (binds-limited prefix chunk).
+    const items: CandidateItemRow[] = [...makeItems(8)];
+    for (let i = 0; i < 92; i += 1) items.push(await normalizedCjkItem(i, 5000));
+    // Envelope precondition of the counterexample: the equivalent RSS XML
+    // (raw UTF-8 CJK in <link>) stays BELOW the 2 MiB feed limit.
+    const encoder = new TextEncoder();
+    const itemXml = (link: string): string =>
+      `<item><guid>g</guid><link>${link}</link><title>t</title></item>`;
+    const feedBytes =
+      encoder.encode(itemXml(cjkRawLink(5000, 0))).length * 92 + // raw CJK = 3 B/char in XML
+      encoder.encode(itemXml(items[0]!.canonicalUrl!)).length * 8 +
+      256; // envelope
+    expect(feedBytes).toBeLessThan(INGESTION_LIMITS.maxFeedBytes);
+    // The accepted normalizer persists ≈45 KB canonical URLs (NO length cap);
+    // each item's URL stays DISTINCT (see fixtures.ts).
+    expect(encoder.encode(items[8]!.canonicalUrl!).length).toBe(CJK_CANONICAL_URL_BYTES);
+    expect(new Set(items.slice(8).map((it) => it.canonicalUrl)).size).toBe(92);
+
+    const plan = planInsertChunks(items, ownedPlanOptions(hold));
+    // Chunk sizes are decided per chunk: the short prefix fills to the
+    // bind limit; every later CJK chunk is byte-limited to 2 rows. The old
+    // prefix-derived planner applied 8 rows everywhere and overflowed its
+    // later statements to ≈375,637 bytes — this regression pins the fix.
+    expect(plan.rowsPerStatement[0]).toBe(8);
+    expect(plan.rowsPerStatement.slice(1)).toEqual(
+      Array.from({ length: plan.rowsPerStatement.length - 1 }, () => 2),
+    );
+    expect(plan.chunks.length).toBe(47); // 1×8 + 46×2
+    expect(plan.limitedBy).toBe('mixed');
+    for (const audit of plan.statementAudits) {
+      expect(audit.totalBytes).toBeLessThanOrEqual(MAX_SQL_STATEMENT_BYTES);
+    }
+    const candidate = await runOwnedCandidate(items, hold);
+    expect(candidate.threw).toBeNull();
+    expect(candidate.inserted).toBe(100);
+    expect(candidate.stateWriteWon).toBe(true);
+    // Durable: every CJK row keeps its FULL ≈45 KB canonical URL (no
+    // truncation, no silent drop).
+    const stored = await rawDb()
+      .prepare('SELECT canonical_url FROM source_items WHERE canonical_url IS NOT NULL')
+      .all<{ canonical_url: string }>();
+    expect(stored.results).toHaveLength(100);
+    const maxUrlBytes = Math.max(
+      ...stored.results.map((r) => encoder.encode(r.canonical_url).length),
+    );
+    expect(maxUrlBytes).toBe(CJK_CANONICAL_URL_BYTES);
+    labLog(
+      'LAB[L-12]',
+      JSON.stringify({
+        chunks: plan.chunks.length,
+        rowsPerStatementHead: plan.rowsPerStatement.slice(0, 3),
+        limitedBy: plan.limitedBy,
+        largestStatementBytes: Math.max(...plan.statementAudits.map((a) => a.totalBytes)),
+        feedBytes,
+        feedLimit: INGESTION_LIMITS.maxFeedBytes,
+        inserted: candidate.inserted,
+      }),
+    );
+  });
+
+  it('L-13 a single oversized row is rejected EXPLICITLY before any statement (atomic, zero effects, no truncation)', async () => {
+    const hold = await freshOwnedFixture();
+    const items: CandidateItemRow[] = [
+      makeItems(1, { id: 'lab-ok-1', externalId: 'ok-1' })[0]!,
+      await normalizedCjkItem(0, 12_000), // canonical ≈ 108 KB → over budget ALONE
+      makeItems(1, { id: 'lab-ok-2', externalId: 'ok-2' })[0]!,
+    ];
+    const before = await captureDurable();
+    const candidate = await runOwnedCandidate(items, hold);
+    expect(candidate.threw).toBeInstanceOf(OversizedRowPlanError);
+    const error = candidate.threw as OversizedRowPlanError;
+    expect(error.code).toBe('row_exceeds_statement_budget');
+    expect(error.itemIndex).toBe(1);
+    expect(error.itemId).toBe('lab-cjk-0000');
+    expect(error.totalBytes).toBeGreaterThan(MAX_SQL_STATEMENT_BYTES);
+    // Plan-time rejection: ZERO statements, ZERO durable effects.
+    expect(await captureDurable()).toEqual(before);
+    expect(before.items).toHaveLength(0);
+    labLog(
+      'LAB[L-13]',
+      JSON.stringify({
+        code: error.code,
+        itemIndex: error.itemIndex,
+        totalBytes: error.totalBytes,
+        budgetBytes: error.budgetBytes,
+        zeroDurableEffects: true,
+      }),
+    );
+  });
+
+  it('L-14 Unicode/URL-expansion envelope: 100 uniform 5000-char CJK paths → canonical ≈45,023 B, 2 rows/statement, 50 INSERT statements, every chunk within budget', async () => {
+    const hold = await freshOwnedFixture();
+    const items: CandidateItemRow[] = [];
+    for (let i = 0; i < 100; i += 1) items.push(await normalizedCjkItem(i, 5000));
+    const encoder = new TextEncoder();
+    for (const item of items) {
+      expect(encoder.encode(item.canonicalUrl!).length).toBe(CJK_CANONICAL_URL_BYTES);
+      expect(item.canonicalUrl).toBe(cjkCanonicalUrl(5000, items.indexOf(item)));
+    }
+    expect(new Set(items.map((it) => it.canonicalUrl)).size).toBe(100);
+    const plan = planInsertChunks(items, ownedPlanOptions(hold));
+    expect(plan.chunks.length).toBe(50); // "50 INSERT statements ALONE"
+    expect(plan.maxRowsPerStatement).toBe(2);
+    expect(plan.limitedBy).toBe('bytes');
+    for (const audit of plan.statementAudits) {
+      expect(audit.totalBytes).toBeLessThanOrEqual(MAX_SQL_STATEMENT_BYTES);
+    }
+    const candidate = await runOwnedCandidate(items, hold);
+    expect(candidate.threw).toBeNull();
+    expect(candidate.inserted).toBe(100); // correctness holds — the ≤40 STMT target does NOT
+    labLog(
+      'LAB[L-14]',
+      JSON.stringify({
+        canonicalUrlBytes: CJK_CANONICAL_URL_BYTES,
+        insertStatements: plan.chunks.length,
+        rowsPerStatement: plan.maxRowsPerStatement,
+        limitedBy: plan.limitedBy,
+        largestStatementBytes: Math.max(...plan.statementAudits.map((a) => a.totalBytes)),
+        inserted: candidate.inserted,
+        note: 'NOT_READY evidence for a universal <=40 bound — see free-plan/FREE_SAFE_EXECUTION_DESIGN.md §9',
+      }),
+    );
+  });
+});

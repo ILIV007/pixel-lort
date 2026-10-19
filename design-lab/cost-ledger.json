@@ -38,7 +38,9 @@
       },
       "insertStatementsPlanned": 0,
       "rowsPerInsertStatement": 0,
-      "chunkLimitedBy": "single",
+      "chunkRows": "n/a",
+      "chunkLimitedBy": "none",
+      "maxStatementTotalBytes": null,
       "stages": [
         {
           "stage": "engine-claim",
@@ -122,7 +124,9 @@
       },
       "insertStatementsPlanned": 12,
       "rowsPerInsertStatement": 9,
+      "chunkRows": "11×9;1×1",
       "chunkLimitedBy": "binds",
+      "maxStatementTotalBytes": 2839,
       "stages": [
         {
           "stage": "engine-claim",
@@ -206,7 +210,9 @@
       },
       "insertStatementsPlanned": 12,
       "rowsPerInsertStatement": 9,
+      "chunkRows": "11×9;1×1",
       "chunkLimitedBy": "binds",
+      "maxStatementTotalBytes": 2839,
       "stages": [
         {
           "stage": "engine-claim",
@@ -290,7 +296,9 @@
       },
       "insertStatementsPlanned": 12,
       "rowsPerInsertStatement": 9,
+      "chunkRows": "11×9;1×1",
       "chunkLimitedBy": "binds",
+      "maxStatementTotalBytes": 2839,
       "stages": [
         {
           "stage": "engine-claim",
@@ -343,6 +351,92 @@
       }
     },
     {
+      "id": "C-16-legacy-100-cjk-45kb-1hop",
+      "schema": 3,
+      "path": "legacy-candidate",
+      "items": 100,
+      "itemShape": "cjk",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 14,
+      "executionApiCallsCompleted": 14,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 65,
+      "statementsCompleted": 65,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 65,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 0,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 50,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 50,
+      "rowsPerInsertStatement": 2,
+      "chunkRows": "50×2",
+      "chunkLimitedBy": "bytes",
+      "maxStatementTotalBytes": 90989,
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 57,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 100,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
       "id": "C-01-owned-zero-not-modified",
       "schema": 4,
       "path": "owned-candidate",
@@ -374,7 +468,9 @@
       },
       "insertStatementsPlanned": 0,
       "rowsPerInsertStatement": 0,
-      "chunkLimitedBy": "single",
+      "chunkRows": "n/a",
+      "chunkLimitedBy": "none",
+      "maxStatementTotalBytes": null,
       "stages": [
         {
           "stage": "engine-claim",
@@ -464,7 +560,9 @@
       },
       "insertStatementsPlanned": 13,
       "rowsPerInsertStatement": 8,
+      "chunkRows": "12×8;1×4",
       "chunkLimitedBy": "binds",
+      "maxStatementTotalBytes": 3316,
       "stages": [
         {
           "stage": "engine-claim",
@@ -554,7 +652,9 @@
       },
       "insertStatementsPlanned": 13,
       "rowsPerInsertStatement": 8,
+      "chunkRows": "12×8;1×4",
       "chunkLimitedBy": "binds",
+      "maxStatementTotalBytes": 3316,
       "stages": [
         {
           "stage": "engine-claim",
@@ -644,7 +744,9 @@
       },
       "insertStatementsPlanned": 13,
       "rowsPerInsertStatement": 8,
+      "chunkRows": "12×8;1×4",
       "chunkLimitedBy": "binds",
+      "maxStatementTotalBytes": 3316,
       "stages": [
         {
           "stage": "engine-claim",
@@ -734,7 +836,9 @@
       },
       "insertStatementsPlanned": 13,
       "rowsPerInsertStatement": 8,
+      "chunkRows": "12×8;1×4",
       "chunkLimitedBy": "binds",
+      "maxStatementTotalBytes": 3316,
       "stages": [
         {
           "stage": "engine-claim",
@@ -824,7 +928,9 @@
       },
       "insertStatementsPlanned": 13,
       "rowsPerInsertStatement": 8,
+      "chunkRows": "12×8;1×4",
       "chunkLimitedBy": "binds",
+      "maxStatementTotalBytes": 94356,
       "stages": [
         {
           "stage": "engine-claim",
@@ -914,7 +1020,9 @@
       },
       "insertStatementsPlanned": 13,
       "rowsPerInsertStatement": 8,
+      "chunkRows": "12×8;1×4",
       "chunkLimitedBy": "binds",
+      "maxStatementTotalBytes": 3316,
       "stages": [
         {
           "stage": "engine-claim",
@@ -1004,7 +1112,9 @@
       },
       "insertStatementsPlanned": 0,
       "rowsPerInsertStatement": 0,
-      "chunkLimitedBy": "single",
+      "chunkRows": "n/a",
+      "chunkLimitedBy": "none",
+      "maxStatementTotalBytes": null,
       "stages": [
         {
           "stage": "engine-claim",
@@ -1094,7 +1204,9 @@
       },
       "insertStatementsPlanned": 0,
       "rowsPerInsertStatement": 0,
+      "chunkRows": "n/a",
       "chunkLimitedBy": "n/a",
+      "maxStatementTotalBytes": null,
       "stages": [
         {
           "stage": "engine-claim",
@@ -1170,7 +1282,9 @@
       },
       "insertStatementsPlanned": 100,
       "rowsPerInsertStatement": 1,
+      "chunkRows": "1×100",
       "chunkLimitedBy": "per-item (accepted shape)",
+      "maxStatementTotalBytes": null,
       "stages": [
         {
           "stage": "engine-claim",
@@ -1213,6 +1327,98 @@
           "api": 101,
           "stmt": 201,
           "note": "ACCEPTED baseline: per-item INSERT batch + fenced state write + per-item probes"
+        },
+        {
+          "stage": "job-terminal",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted completeJob"
+        }
+      ],
+      "outcome": {
+        "inserted": 100,
+        "duplicateExternal": 0,
+        "duplicateUrl": 0,
+        "stateWriteWon": true
+      }
+    },
+    {
+      "id": "C-15-owned-100-cjk-45kb-1hop",
+      "schema": 4,
+      "path": "owned-candidate",
+      "items": 100,
+      "itemShape": "cjk",
+      "hops": 1,
+      "dailyRequestBudget": 100,
+      "authority": "granted",
+      "executionApiCallAttempts": 15,
+      "executionApiCallsCompleted": 15,
+      "executionApiCallsFailed": 0,
+      "statementsAttempted": 66,
+      "statementsCompleted": 66,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRecordsAvailable": 66,
+      "metaRecordsUnavailable": 0,
+      "statementKinds": {
+        "engineClaimReads": 1,
+        "engineClaimCas": 1,
+        "sourceSelects": 1,
+        "capabilityReads": 1,
+        "ownershipAcquires": 1,
+        "authorizations": 1,
+        "budgetReadbacks": 1,
+        "multiRowInserts": 50,
+        "stateWrites": 1,
+        "classificationLookups": 0,
+        "jobTerminals": 1
+      },
+      "insertStatementsPlanned": 50,
+      "rowsPerInsertStatement": 2,
+      "chunkRows": "50×2",
+      "chunkLimitedBy": "bytes",
+      "maxStatementTotalBytes": 91728,
+      "stages": [
+        {
+          "stage": "engine-claim",
+          "api": 2,
+          "stmt": 2,
+          "note": "accepted claimJob: row read + CAS claim"
+        },
+        {
+          "stage": "source-select",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted SOURCE_SELECT_SQL"
+        },
+        {
+          "stage": "capability",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted resolveSchemaCapability"
+        },
+        {
+          "stage": "ownership-acquire",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted acquirePollOwnership"
+        },
+        {
+          "stage": "authorization",
+          "api": 1,
+          "stmt": 2,
+          "note": "accepted authorizeIngestionUnit × hops (1)"
+        },
+        {
+          "stage": "budget-readback",
+          "api": 1,
+          "stmt": 1,
+          "note": "accepted readIngestionBudget"
+        },
+        {
+          "stage": "commit-batch+classification",
+          "api": 7,
+          "stmt": 57,
+          "note": "CANDIDATE: multi-row INSERT batch + fenced state write + grouped source-bound probes"
         },
         {
           "stage": "job-terminal",

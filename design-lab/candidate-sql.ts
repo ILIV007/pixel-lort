@@ -45,11 +45,25 @@
  *  - processing_status stays the literal 'new' (no bind needed).
  */
 
-import { classifyGrouped, type ClassifiedItem, type ExecutorLike } from '../audit-tools/trace/candidate-classification';
+import {
+  classifyGrouped,
+  type ClassifiedItem,
+  type ExecutorLike,
+} from '../audit-tools/trace/candidate-classification';
 
 /** Documented D1 limit: "Maximum bound parameters per query | 100". */
 export const MAX_BOUND_PARAMS = 100;
-/** Documented D1 limit: "Maximum SQL statement length | 100 KB". */
+/**
+ * Documented D1 limit: "Maximum SQL statement length | 100,000 bytes
+ * (100 KB)". The retrieved official excerpt (manager-evidence provenance;
+ * see free-plan/FREE_PLAN_OFFICIAL_SOURCES.md) applies this row to EACH
+ * statement inside a batch, and it constrains the SQL TEXT — NOT the
+ * separately transmitted bound values. The budget below is therefore an
+ * INTERNAL CONSERVATIVE POLICY (SQL text + ALL bound values ≤ 100 KB),
+ * strictly stronger than the documented row; see
+ * free-plan/FREE_SAFE_EXECUTION_DESIGN.md §9 for the justification and
+ * the remaining payload/CPU risks of that choice.
+ */
 export const MAX_SQL_STATEMENT_BYTES = 100 * 1024;
 
 /** Columns explicitly bound per item row (processing_status is a literal). */
@@ -69,17 +83,33 @@ export const ITEM_VALUE_COLUMNS = [
 
 export const ITEM_VALUE_COUNT = ITEM_VALUE_COLUMNS.length; // 11
 
-/** Shared binds in the OWNED multi-row statement (P + B1). */
-export const OWNED_SHARED_BINDS = 7; // st.source_id, st.next_poll_at, st.poll_owner_job_id, j.id, j.aggregate_id, j.attempts, column2(=source)
+/**
+ * Shared binds in the OWNED multi-row statement (P + B1): st.source_id,
+ * st.next_poll_at, st.poll_owner_job_id, j.id, j.aggregate_id, j.attempts,
+ * column2(=source). Count constant kept for documentation; the planner
+ * audits the ACTUAL values (see `ownedSharedGuardBinds`).
+ */
+export const OWNED_SHARED_BINDS = 7;
 /** Shared binds in the LEGACY multi-row statement (none — per-row values only). */
 export const LEGACY_SHARED_BINDS = 0;
 
 /**
- * Conservative scaffold overhead per statement (placeholders, keywords,
- * VALUES syntax, conflict clauses) measured from the builder output and
- * padded. The byte budget = MAX_SQL_STATEMENT_BYTES − scaffold − Σ binds.
+ * R1.10.3.1: the byte budget is no longer a fixed scaffold estimate. Every
+ * chunk is validated against its ACTUAL built SQL text plus the ACTUAL
+ * shared guard bind bytes (see planInsertChunks).
  */
-export const SCAFFOLD_BYTES = 2048;
+export interface StatementByteAudit {
+  /** Rows in the audited chunk. */
+  readonly rows: number;
+  /** UTF-8 bytes of the EXACT SQL text for this chunk size. */
+  readonly sqlBytes: number;
+  /** UTF-8 bytes of the chunk's own row binds. */
+  readonly rowBindBytes: number;
+  /** UTF-8 bytes of the shared guard binds (0 for the legacy form). */
+  readonly sharedBindBytes: number;
+  /** sqlBytes + rowBindBytes + sharedBindBytes — the audited total. */
+  readonly totalBytes: number;
+}
 
 export interface CandidateItemRow {
   readonly id: string;
@@ -119,43 +149,151 @@ function bindBytes(value: unknown): number {
 }
 
 export interface InsertChunkPlan {
-  /** Rows in this chunk (last chunk may be smaller). */
-  readonly chunks: readonly CandidateItemRow[][];
-  /** Rows per statement used by the plan (diagnostic; last chunk may differ). */
-  readonly rowsPerStatement: number;
-  readonly limitedBy: 'binds' | 'bytes' | 'single';
+  /** Rows in each chunk, in order. Chunk sizes VARY (per-chunk validated). */
+  readonly chunks: readonly (readonly CandidateItemRow[])[];
+  /** Row count of each chunk, in order (diagnostic mirror of `chunks`). */
+  readonly rowsPerStatement: readonly number[];
+  /** Largest chunk row count (diagnostic). */
+  readonly maxRowsPerStatement: number;
+  /**
+   * What ended the chunking decisions: 'binds' (parameter count), 'bytes'
+   * (combined byte budget), 'mixed' (both across chunks), 'none' (every
+   * remaining row fit without hitting a limit).
+   */
+  readonly limitedBy: 'binds' | 'bytes' | 'mixed' | 'none';
+  /** ACTUAL per-chunk audits (SQL text + row binds + shared guard binds). */
+  readonly statementAudits: readonly StatementByteAudit[];
 }
 
 /**
- * Chunk items into multi-row INSERT statements under BOTH documented
- * limits. At least one row per statement (a single oversized item is still
- * attempted — the statement-length row documents the actual size).
+ * Raised BEFORE any statement is built or executed when ONE row cannot fit
+ * into a statement by itself under the conservative combined-byte policy.
+ * This is the explicit single-oversized-row handling: the WHOLE commit is
+ * rejected at plan time (zero statements, zero durable effects — atomic),
+ * the row is never truncated, dropped, or silently skipped, and the typed
+ * error carries the row identity plus measured bytes for operator-facing
+ * failure persistence (future implementation round maps it to the accepted
+ * failure-class surface).
+ */
+export class OversizedRowPlanError extends Error {
+  readonly code = 'row_exceeds_statement_budget';
+  constructor(
+    readonly itemIndex: number,
+    readonly itemId: string,
+    readonly totalBytes: number,
+    readonly budgetBytes: number,
+  ) {
+    super(
+      `item "${itemId}" (index ${itemIndex}) needs ${totalBytes} bytes of SQL text + binds in a single-row statement, exceeding the ${budgetBytes}-byte conservative budget; the whole commit is rejected atomically (no truncation, no silent drop)`,
+    );
+    this.name = 'OversizedRowPlanError';
+  }
+}
+
+export interface PlanInsertOptions {
+  /**
+   * ACTUAL shared guard bind VALUES appended after the row binds (owned
+   * form: P + B1 — see ownedSharedGuardBinds). Their bytes are part of
+   * every chunk's audit.
+   */
+  readonly sharedBinds?: readonly unknown[];
+  /** Builds the EXACT SQL text for a k-row chunk. */
+  readonly buildSql: (k: number) => string;
+}
+
+/**
+ * R1.10.3.1 CORRECTION (manager counterexample): chunk sizes are decided
+ * INDEPENDENTLY for EVERY chunk — a single rows-per-statement value derived
+ * from the input prefix is NOT applied blindly to later chunks. Each chunk
+ * is built greedily and audited against BOTH limits using its ACTUAL SQL
+ * text (built by `options.buildSql(k)`) plus the ACTUAL bind bytes (the
+ * chunk's own row binds AND the shared guard binds), so heterogeneous item
+ * sizes (e.g. a short-URL prefix followed by percent-encoded CJK URL rows)
+ * can never overflow a later statement.
+ *
+ * Atomicity/fences are untouched: planning happens before any statement is
+ * prepared, so a rejection (oversized single row) leaves zero effects.
  */
 export function planInsertChunks(
   items: readonly CandidateItemRow[],
-  sharedBinds: number,
+  options: PlanInsertOptions,
 ): InsertChunkPlan {
-  if (items.length === 0) return { chunks: [], rowsPerStatement: 0, limitedBy: 'single' };
-  const maxByBinds = Math.max(1, Math.floor((MAX_BOUND_PARAMS - sharedBinds) / ITEM_VALUE_COUNT));
-  // Byte-bound rows: measure cumulatively with the shared scaffold once.
-  let maxByBytes = 0;
-  {
-    let total = SCAFFOLD_BYTES;
-    for (const item of items) {
-      const rowBytes = rowValues(item).reduce((acc, v) => acc + bindBytes(v), 0);
-      if (total + rowBytes > MAX_SQL_STATEMENT_BYTES) break;
-      total += rowBytes;
-      maxByBytes += 1;
-    }
-    if (maxByBytes === 0) maxByBytes = 1; // oversized single row still attempted
+  const shared = options.sharedBinds ?? [];
+  const sharedBindBytes = shared.reduce((acc, v) => acc + bindBytes(v), 0);
+  if (items.length === 0) {
+    return {
+      chunks: [],
+      rowsPerStatement: [],
+      maxRowsPerStatement: 0,
+      limitedBy: 'none',
+      statementAudits: [],
+    };
   }
-  const rowsPerStatement = Math.min(maxByBinds, maxByBytes);
-  const limitedBy = maxByBytes < maxByBinds ? 'bytes' : 'binds';
+  const auditChunk = (rows: readonly CandidateItemRow[]): StatementByteAudit => {
+    const sqlBytes = TEXT_ENCODER.encode(options.buildSql(rows.length)).length;
+    const rowBindBytes = rows.reduce(
+      (acc, item) => acc + rowValues(item).reduce((a, v) => a + bindBytes(v), 0),
+      0,
+    );
+    return {
+      rows: rows.length,
+      sqlBytes,
+      rowBindBytes,
+      sharedBindBytes,
+      totalBytes: sqlBytes + rowBindBytes + sharedBindBytes,
+    };
+  };
+  const maxRowsByBinds = Math.max(
+    1,
+    Math.floor((MAX_BOUND_PARAMS - shared.length) / ITEM_VALUE_COUNT),
+  );
+
   const chunks: CandidateItemRow[][] = [];
-  for (let i = 0; i < items.length; i += rowsPerStatement) {
-    chunks.push(items.slice(i, i + rowsPerStatement));
+  const rowsPerStatement: number[] = [];
+  const audits: StatementByteAudit[] = [];
+  const endedBy: Array<'binds' | 'bytes'> = [];
+  let i = 0;
+  while (i < items.length) {
+    // The chunk's FIRST row must fit ALONE — else explicit rejection.
+    let k = 1;
+    let audit = auditChunk(items.slice(i, i + k));
+    if (audit.totalBytes > MAX_SQL_STATEMENT_BYTES) {
+      throw new OversizedRowPlanError(i, items[i].id, audit.totalBytes, MAX_SQL_STATEMENT_BYTES);
+    }
+    // Greedily extend THIS chunk while BOTH documented limits hold for it.
+    while (i + k < items.length) {
+      if (k + 1 > maxRowsByBinds) {
+        endedBy.push('binds');
+        break;
+      }
+      const nextAudit = auditChunk(items.slice(i, i + k + 1));
+      if (nextAudit.totalBytes > MAX_SQL_STATEMENT_BYTES) {
+        endedBy.push('bytes');
+        break;
+      }
+      k += 1;
+      audit = nextAudit;
+    }
+    chunks.push(items.slice(i, i + k));
+    rowsPerStatement.push(k);
+    audits.push(audit);
+    i += k;
   }
-  return { chunks, rowsPerStatement, limitedBy };
+  const limitedBy: InsertChunkPlan['limitedBy'] =
+    endedBy.length === 0
+      ? 'none'
+      : endedBy.every((v) => v === 'binds')
+        ? 'binds'
+        : endedBy.every((v) => v === 'bytes')
+          ? 'bytes'
+          : 'mixed';
+  return {
+    chunks,
+    rowsPerStatement,
+    maxRowsPerStatement: Math.max(...rowsPerStatement),
+    limitedBy,
+    statementAudits: audits,
+  };
 }
 
 /** VALUES clause rows: (?, ?, ..., ?) repeated k times. */
@@ -298,6 +436,46 @@ export class CandidateOwnedRejectionError extends Error {
   }
 }
 
+/**
+ * The ACTUAL shared guard bind values (P + B1) appended after every chunk's
+ * row binds, in the order the owned statement's guard placeholders appear.
+ * The planner audits these BYTES together with each chunk's row binds.
+ */
+export function ownedSharedGuardBinds(input: OwnedCommitInput): unknown[] {
+  return [
+    input.sourceId,
+    input.observedHoldUntilMs,
+    input.jobId,
+    input.jobId,
+    input.sourceId,
+    input.generation,
+    // B1 (multi-row form): every row's own source value = authoritative.
+    input.sourceId,
+  ];
+}
+
+/**
+ * R1.10.3.1 defense-in-depth: re-audit ONE fully built statement (exact SQL
+ * text + the EXACT binds that will be sent, including shared guards) so a
+ * planner/builder drift can never reach the engine. Runs before prepare().
+ */
+function assertStatementWithinBudget(sql: string, binds: readonly unknown[]): void {
+  const audit = statementByteAudit(sql, binds);
+  if (audit.totalBytes > MAX_SQL_STATEMENT_BYTES) {
+    throw new OversizedRowPlanError(
+      -1,
+      '(built statement)',
+      audit.totalBytes,
+      MAX_SQL_STATEMENT_BYTES,
+    );
+  }
+  if (binds.length > MAX_BOUND_PARAMS) {
+    throw new Error(
+      `statement binds ${binds.length} exceed the documented ${MAX_BOUND_PARAMS}-parameter limit`,
+    );
+  }
+}
+
 function ownedStateBinds(input: OwnedCommitInput): unknown[] {
   const s = input.state as Record<string, unknown>;
   return [
@@ -349,22 +527,18 @@ export async function commitOwnedPollResultsCandidate(
     }
   }
 
-  const plan = planInsertChunks(input.items, OWNED_SHARED_BINDS);
+  const plan = planInsertChunks(input.items, {
+    sharedBinds: ownedSharedGuardBinds(input),
+    buildSql: buildOwnedMultiRowInsertSql,
+  });
   const statements: unknown[] = [];
   for (const chunk of plan.chunks) {
     const sql = buildOwnedMultiRowInsertSql(chunk.length);
     const binds: unknown[] = [];
     for (const item of chunk) binds.push(...rowValues(item));
-    binds.push(
-      input.sourceId,
-      input.observedHoldUntilMs,
-      input.jobId,
-      input.jobId,
-      input.sourceId,
-      input.generation,
-      // B1 (multi-row form): every row's own source value = authoritative.
-      input.sourceId,
-    );
+    binds.push(...ownedSharedGuardBinds(input));
+    // R1.10.3.1: every built statement is re-audited before prepare().
+    assertStatementWithinBudget(sql, binds);
     statements.push(executor.prepare(sql).bind(...binds));
   }
   statements.push(executor.prepare(C_OWNED_STATE_WRITE).bind(...ownedStateBinds(input)));
@@ -373,8 +547,7 @@ export async function commitOwnedPollResultsCandidate(
   // RAW D1 batch results expose `meta.changes` (the accepted DbExecutor
   // normalizes this; the candidate reads the raw shape directly).
   const stateMeta = metas[metas.length - 1] as
-    | { changes?: number; meta?: { changes?: number } }
-    | undefined;
+    { changes?: number; meta?: { changes?: number } } | undefined;
   const stateWriteWon = (stateMeta?.changes ?? stateMeta?.meta?.changes ?? 0) > 0;
 
   const classified = await classifyGrouped(executor as unknown as ExecutorLike, input.items);
@@ -431,12 +604,17 @@ export async function commitPollResultsCandidate(
   plan: InsertChunkPlan;
   classified: readonly ClassifiedItem[];
 }> {
-  const plan = planInsertChunks(input.items, LEGACY_SHARED_BINDS);
+  const plan = planInsertChunks(input.items, {
+    sharedBinds: [],
+    buildSql: buildLegacyMultiRowInsertSql,
+  });
   const statements: unknown[] = [];
   for (const chunk of plan.chunks) {
     const sql = buildLegacyMultiRowInsertSql(chunk.length);
     const binds: unknown[] = [];
     for (const item of chunk) binds.push(...rowValues(item));
+    // R1.10.3.1: every built statement is re-audited before prepare().
+    assertStatementWithinBudget(sql, binds);
     statements.push(executor.prepare(sql).bind(...binds));
   }
   statements.push(executor.prepare(LEGACY_STATE_WRITE).bind(...legacyStateBinds(input)));
@@ -444,8 +622,7 @@ export async function commitPollResultsCandidate(
   const metas = await executor.batch(statements);
   // RAW D1 batch results expose `meta.changes` (see the owned commit note).
   const stateMeta = metas[metas.length - 1] as
-    | { changes?: number; meta?: { changes?: number } }
-    | undefined;
+    { changes?: number; meta?: { changes?: number } } | undefined;
   const stateWriteWon = (stateMeta?.changes ?? stateMeta?.meta?.changes ?? 0) > 0;
 
   const classified = await classifyGrouped(executor as unknown as ExecutorLike, input.items);
