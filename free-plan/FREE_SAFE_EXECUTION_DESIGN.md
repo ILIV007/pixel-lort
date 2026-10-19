@@ -1,4 +1,4 @@
-# PIXEL — Free-Safe Execution Design v3 (DESIGN REVIEW — R1.10.3 + R1.10.3.1 corrections)
+# PIXEL — Free-Safe Execution Design v3 (DESIGN REVIEW — R1.10.3 + R1.10.3.1 + R1.10.4 corrections)
 
 **Status: DESIGN REVIEW — lab-evidenced candidate, NOTHING implemented in the
 product, nothing authorized for product use.** This is the R1.10.3 revision
@@ -9,11 +9,21 @@ parity and measured costs are proven in the DESIGN LAB on real disposable
 workerd D1 (`design-lab/`). R1.10.3.1 (manager verdict CHANGES REQUIRED)
 adds: per-chunk byte accounting (§9.1), the RETRACTION of the universal
 18 xAPI / 34 STMT ceiling as a CONDITIONAL measured scenario (§9.2), the
-NOT_READY verdict for the unchanged supported RSS envelope, and a durable
-continuation design (§9.4). Product source stays
+NOT_READY verdict for the unchanged supported RSS envelope, and a
+continuation options/measurement outline (§9.4 — relabeled R1.10.4; NOT
+an implementation-ready durable continuation design). R1.10.4 (Posidon
+accepts the R1.10.3.1 planner/tooling corrections; the Free-safe
+implementation design is still NOT accepted; NOT_READY remains) corrects
+the stale universal-fit claim in §6 — the ≤40 execution-API-call target
+PASSES and the ≤40 SQL-statement target FAILS for the unchanged supported
+RSS envelope — relabels §9.4 as that outline, and adds the
+authorization-gated preview resource probe PLAN
+`audit/PREVIEW_RESOURCE_PROBE_PLAN.md` (PLAN ONLY: zero
+Cloudflare/account operations, including reads, were performed in
+R1.10.4). Product source stays
 `f70205648922d0f8e60619e45e5d54e6e87b8f1b` (297 files, byte-identical);
 no product patch, no migration, no config change, no Cloudflare operation,
-no paid upgrade in R1.10.3 / R1.10.3.1.
+no paid upgrade in R1.10.3 / R1.10.3.1 / R1.10.4.
 
 ## 1. The measured problem (unchanged, verified)
 
@@ -178,7 +188,7 @@ question (both interpretations carried in free-plan/ documents).
   (persisted work, ownership, crash windows, lossless in-window
   processing) BEFORE implementation — none is proposed here.
 
-## 6. What would still gate activation (unchanged truths)
+## 6. What still gates activation (R1.10.4-corrected)
 
 - Per-connector capacity: T-17…T-21 are REPRESENTATIVE multi-request
   traces, NOT supported-max proofs (Steam ≤25 apps × ≤10 items; YouTube
@@ -186,10 +196,22 @@ question (both interpretations carried in free-plan/ documents).
   token; RSS ≤4 feeds × 100). The FIRST profile deliberately excludes
   them; their budgets must be measured separately before any broadening.
 - D1 daily rows, queue operations/day, workers requests/day, CPU: UNKNOWN
-  (formula margins only; no cloud observation this round).
+  (formula margins only; no cloud observation in any round to date).
 - The Free row's official unit ("queries per Worker invocation") remains
-  unsettled; BOTH interpretations are carried and both fit the ≤40/≤40
-  target for the FIRST profile with ≥10 headroom.
+  unsettled; BOTH interpretations are carried.
+  **UNIVERSAL-FIT CORRECTION (R1.10.4 — supersedes the earlier "both fit
+  the ≤40/≤40 target for the FIRST profile with ≥10 headroom" claim):**
+  that fit held ONLY for the cost-ledger FIXTURE URL shapes at the ~2 KiB
+  canonical-URL assumption. After the R1.10.3.1 envelope re-measure
+  (C-15/C-16; §4/§9.2): **the ≤40 execution-API-call target PASSES for
+  the unchanged supported RSS envelope (≈15–16 xAPI incl. the residual);
+  the ≤40 SQL-statement target FAILS** (≈66–67 STMT for the 100-item CJK
+  shape under the unchanged conservative combined-byte policy) — the
+  envelope verdict is **NOT_READY** (§9.2). The ≤40/≤40 dual fit exists
+  ONLY for the conditional measured scenario (§4), never as a universal
+  bound. The authorization-gated measurement path for the remaining
+  cloud unknowns is the probe PLAN `audit/PREVIEW_RESOURCE_PROBE_PLAN.md`
+  (R1.10.4; PLAN ONLY — unexecuted).
 
 ## 7. Scope and approval boundaries
 
@@ -280,7 +302,8 @@ Verdict: the previous "18 xAPI / 34 STMT derived ceiling" is RETRACTED as
 a universal bound and RELABELED a **conditional measured scenario**
 (valid only for fixture URL shapes at the ~2 KiB assumption; §4). For the
 UNCHANGED supported RSS envelope the candidate is **NOT_READY** against
-BOTH ≤40 targets. Exact blocker: canonical-URL byte expansion is uncapped
+the BOTH-targets requirement (the ≤40 xAPI target PASSES; the ≤40 STMT
+target FAILS — see the §6 universal-fit correction, R1.10.4). Exact blocker: canonical-URL byte expansion is uncapped
 by the accepted normalizer, and the conservative combined
 SQL-text-plus-binds budget then caps such rows at 2/statement, so a
 100-item CJK-shaped poll cannot meet ≤40 STMT regardless of planner
@@ -321,10 +344,25 @@ that any policy revision must first measure):
 - **Quota risk:** rows read/written daily allowances (documented rows)
   are formula-margined only; no cloud observation exists.
 
-### 9.4 Durable continuation design (submitted for review — nothing executed)
+### 9.4 Continuation options and measurement OUTLINE (RELABELED R1.10.4 — NOT an implementation-ready durable continuation design)
 
-To lift NOT_READY honestly, a future round (R1.10.3.2 proposal, NOT
-authorized by this round) must deliver, in this order:
+**R1.10.4 relabel (Posidon verdict carried: the R1.10.3.1 planner/tooling
+corrections are accepted; the Free-safe implementation design is NOT
+accepted; NOT_READY remains).** What follows is an OPTIONS/MEASUREMENT
+OUTLINE — a survey of the candidate paths and the measurements each would
+need — NOT the implementation-ready durable continuation design that §5
+requires (persisted work, cross-window ownership/fencing, crash windows,
+lossless in-window processing are designed NOWHERE; nothing in this
+section is executable as written). Stated plainly: **the ≤40
+execution-API-call target PASSES for the unchanged supported RSS
+envelope; the ≤40 SQL-statement target FAILS** (§6/§9.2). The concrete,
+authorization-gated measurement gate for item 1 below is the R1.10.4
+probe PLAN `audit/PREVIEW_RESOURCE_PROBE_PLAN.md` — PLAN ONLY, zero
+Cloudflare/account operations performed in R1.10.4, unexecuted until its
+own separate authorization checkpoints pass.
+
+To lift NOT_READY honestly, a future round (NOT authorized by this
+round) must deliver, in this order:
 
 1. **Measurement gate (requires authorized Cloudflare operations on the
    PREVIEW database — none performed in R1.10.3/R1.10.3.1):** a scripted,
@@ -334,6 +372,10 @@ authorized by this round) must deliver, in this order:
    (c) Worker CPU for the same poll. Probes run only with explicit owner
    authorization; results are bound to logs and only then may the
    internal combined-byte policy be JUSTIFIABLY revised (or kept).
+   **R1.10.4: this plan now EXISTS as
+   `audit/PREVIEW_RESOURCE_PROBE_PLAN.md` (PLAN ONLY — it has NOT been
+   executed, performs zero account operations itself, and execution
+   requires its own separate authorization checkpoints).**
 2. **Policy decision rule (pre-committed):** if measured evidence shows
    the documented SQL-TEXT limit (≤ 100 KB text, ≤ 100 params) alone is
    safe for the envelope, the planner switches to documented-limits
@@ -374,3 +416,42 @@ authorized by this round) must deliver, in this order:
   historical red. No ignore lists, no disabled CI, no weakened
   assertions; historical evidence bytes and the frozen-probe expectations
   are untouched.
+
+## 10. R1.10.4 corrections (LOCAL docs ONLY — PLAN, no operations)
+
+Posidon independently ACCEPTS the R1.10.3.1 planner/tooling corrections.
+This does NOT accept a Free-safe implementation design; **NOT_READY
+remains** for the unchanged supported RSS envelope.
+
+- **§6 universal-fit claim corrected (stale):** the earlier "both
+  interpretations fit the ≤40/≤40 target for the FIRST profile with ≥10
+  headroom" held ONLY for the fixture URL shapes at the ~2 KiB
+  canonical-URL assumption. Stated plainly: **the ≤40 execution-API-call
+  target PASSES for the unchanged envelope (≈15–16 xAPI incl. the
+  residual); the ≤40 SQL-statement target FAILS** (≈66–67 STMT for the
+  CJK shape; C-15/C-16, §4/§9.2) → NOT_READY.
+- **§9.4 relabeled** a continuation options/measurement OUTLINE — NOT an
+  implementation-ready durable continuation design; the §5-required
+  durable continuation spec (persisted work, ownership/fencing, crash
+  windows, lossless in-window processing) still does not exist.
+- **NEW `audit/PREVIEW_RESOURCE_PROBE_PLAN.md`** — the
+  authorization-gated preview resource probe PLAN: official-limit
+  re-verification with URLs, page dates and exact units (retrieved
+  2026-10-19; no page change affecting the carried rows); isolated
+  disposable preview resources; synthetic fixtures; quota / SQL
+  statements / bind payloads / row usage / REAL Worker CPU measurement
+  definitions (documented CPU surfaces: Workers Logs invocation logs and
+  the Workers Trace Events `CPUTimeMs` field; wall time is NEVER CPU);
+  normal, heterogeneous-size, Unicode/CJK and oversized-row cases; exact
+  bounded invocation/data totals; prerequisites; abort criteria;
+  cleanup; evidence collection; pre-committed decision rules; the
+  internal combined-byte policy kept strictly distinct from official
+  SQL-text limits; and a separate authorization checkpoint before ANY
+  account operation.
+- **Compliance record:** R1.10.4 performs ZERO Cloudflare/account
+  operations (including reads); no product implementation, no resource
+  creation, no deployment, no real D1 writes, no migration, no
+  activation, no billing upgrade, no merge. The 297 product files stay
+  byte-identical to `f70205648922d0f8e60619e45e5d54e6e87b8f1b`; ordinary
+  commits on the same branch; no force push. Details:
+  `audit/CORRECTIONS_R1_10_4.md`. **STOP for Posidon review.**
