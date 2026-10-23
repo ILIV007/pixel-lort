@@ -1,0 +1,3 @@
+SUPPLIED_37_EXIT=0
+COUNTEREXAMPLE_EXIT=1 (expected1:3F/1P)
+REPRODUCTION_OK; accepted tracked diff0
