@@ -1,514 +1,726 @@
-# PIXEL — Preview Resource Probe Plan (R1.10.4 — PLAN ONLY, NOTHING EXECUTED)
+# PIXEL — Preview Resource Probe Plan (R1.10.4.1 — REVISED, PLAN ONLY, NOTHING EXECUTED)
 
-**Status: AUTHORIZATION-GATED MEASUREMENT PLAN — submitted for independent
-review. NOTHING in this document has been executed.** Round R1.10.4
-performed **ZERO Cloudflare/account operations, including reads**: no
-resource creation, no deployment, no real D1 writes, no migration, no
-activation, no billing upgrade, no merge, and no account read of any
-kind. This document only (a) re-verifies the CURRENT official limits
-from public documentation (public docs are not account operations), and
-(b) pre-registers how FUTURE authorized probes would measure real quota
-outcomes, SQL statements, bind payloads, row usage and real Worker CPU
-on isolated disposable preview resources. Every future operation below
-requires its own separate owner authorization checkpoint (§11). The
-unchanged supported RSS envelope verdict remains **NOT_READY**; the ≤40
-execution-API-call target PASSES and the ≤40 SQL-statement target FAILS
-(`free-plan/FREE_SAFE_EXECUTION_DESIGN.md` §6/§9.2 — R1.10.4-corrected).
+**Status: AUTHORIZATION-GATED MEASUREMENT PLAN — revised after the R1.10.4 G0
+review returned CHANGES REQUIRED (R114-01…R114-05).** Round R1.10.4.1 is
+**LOCAL probe-plan feasibility corrections ONLY**: zero Cloudflare/account
+operations (including reads), no resource creation, no deployment, no real D1
+writes, no migration, no activation, no billing upgrade, no merge, no product
+implementation. The only new activity this round is the **LOCAL feasibility
+validator** (`audit-tools/probe-plan/validate-probe-plan.mjs`) running against
+node:sqlite and the repository tree (§16) — no network of any kind. Every
+future operation below requires its own explicit owner authorization
+checkpoint (§11). The unchanged supported RSS envelope verdict remains
+**NOT_READY** — the ≤40 execution-API-call target PASSES and the ≤40
+SQL-statement target FAILS (`free-plan/FREE_SAFE_EXECUTION_DESIGN.md` §6/§9.2,
+R1.10.4-corrected). **The machine-readable source of truth for every number in
+this plan is `audit/PROBE_CASE_SCHEDULE.json`; the validator reconciles this
+document against it (check V-15).**
 
 ## 0. Compliance summary (this round, verifiable)
 
-| Item                          | R1.10.4 outcome                                                         |
-| ----------------------------- | ----------------------------------------------------------------------- |
-| Cloudflare/account operations | **0** (including reads; nothing was probed, listed, or logged remotely) |
-| Resource creation             | **0**                                                                   |
-| Product files touched         | **0** (297 files stay byte-identical to `f7020564…`)                    |
-| What this file is             | PLAN ONLY — pre-registered probes, pre-committed decision rules         |
-| Official-limit verification   | DONE against public docs (§2) — the only external access this round     |
-| Probes executed               | **NONE** — all probe activity is future work behind §11 checkpoints     |
+| Item                          | R1.10.4.1 outcome                                                        |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| Cloudflare/account operations | **0** (including reads; public docs were NOT re-fetched this round — §2) |
+| Resource creation             | **0**                                                                    |
+| Product files touched         | **0** (297 files stay byte-identical to `f7020564…`)                     |
+| Product migrations touched    | **0** (0001–0004 are used READ-ONLY as disposable-setup inputs, §6)      |
+| What this file is             | PLAN ONLY — pre-registered cases, pre-committed decision rules           |
+| Local validation              | DONE — 19-check validator, 18 PASS + this document's anchors (§16)       |
+| Probes executed               | **NONE** — all probe activity is future work behind §11 checkpoints      |
 
-## 1. Purpose, scope and non-goals
+## 1. Purpose, scope, and the EXACT coverage claim
 
-**Purpose.** The R1.10.3.1 retraction (design §9.2) left the unchanged
-supported RSS envelope NOT_READY with the exact blocker: the accepted
-normalizer uncaps canonical-URL byte expansion, and the INTERNAL
-conservative combined-byte policy then caps ≈45 KB CJK rows at 2 per
-statement, so a 100-item CJK-shaped poll cannot meet ≤40 submitted
-statements regardless of planner correctness. Lifting that honestly
-requires MEASURED evidence about real platform behavior that local
-workerd proxies cannot provide:
+**Purpose.** The R1.10.3.1 retraction left the unchanged supported RSS
+envelope NOT_READY with the exact blocker: the accepted normalizer uncaps
+canonical-URL byte expansion, and the INTERNAL conservative combined-byte
+policy caps ≈45 KB CJK rows at 2 per statement, so a 100-item CJK-shaped poll
+cannot meet ≤40 submitted statements regardless of planner correctness.
+Lifting that honestly requires MEASURED evidence about real platform
+behavior (largest accepted bind payload; end-to-end commit cost; REAL Worker
+CPU; actual daily-quota deltas). This revision exists because the R1.10.4 G0
+review proved — with LOCAL counterexamples (3 failures / exit 1) — that the
+original plan's payload gate was unreachable, its schema setup could not run
+the owned cases, its authorization machine was circular, its budgets were not
+feasible, and its conclusions were broader than its evidence.
 
-- (a) the largest bind payload the platform actually ACCEPTS under the
-  documented-limits-only accounting;
-- (b) end-to-end commit cost (execution-API calls, submitted statements,
-  rows written) for the CJK shape under that accounting on REAL preview
-  D1;
-- (c) REAL Worker CPU for the same poll (Workers Free CPU limit: 10 ms —
-  a shape that cannot fit 10 ms is NOT_READY on Free under ANY byte
-  policy);
-- (d) actual daily-quota deltas (rows read/written) as observed by the
-  platform, vs formula margins.
+**Scope.** Only the FIRST supported single-feed RSS profile shape and its
+synthetic fixtures (§7). Only isolated disposable preview resources (§4).
 
-**Scope.** Only the FIRST supported single-feed RSS profile shape and
-its synthetic fixtures (§5). Only isolated disposable preview resources
-(§4). Nothing binds to, reads, or writes any product resource.
+**EXACT coverage claim (pre-committed; R114-05).** The fixtures cover
+EXACTLY: uniform ~2 KiB canonical URLs (100-item slices of a 300-item
+fixture); mixed 8 short + 92 × 45,023 B; uniform 45,023 B × 100 (slices of a
+400-item fixture); one 102,500 B row (internal-budget rejection); one
+1,899,995 B row (documented row-limit boundary); and the ladder's 516
+distinct ~45 KB rows (slices of a 538-item fixture). Nothing else.
+**Unmeasured input sizes and shapes stay NOT_READY.** The static boundary that
+makes this restriction necessary (registered, computed by the validator —
+V-14): a VALID RSS document of 1,800,116 bytes (< the 2,097,152-byte feed
+bound) containing one item whose 600,000-CJK-character path expands — via the
+accepted normalizer's percent-encoding, 9 URL bytes per 3-byte character — to
+a 5,400,023-byte canonical URL, ABOVE the documented 2,000,000-byte row
+limit. **Feed-bound compliance does NOT imply row-size compliance.** No
+fixture in this plan claims coverage above its registered shape; no global
+envelope-READY inference may be drawn from these fixtures (decision rule D7).
 
-**Non-goals (pre-committed, unchanged).** No URL/item truncation, no
-lowering of supported caps, no silent drops, no weakening of ownership
-fences or conflict clauses, no paid plan, no schema/migration change, no
-product config change, no product deployment, no provider fetches (all
-fixtures are synthetic), and no Cloudflare operation without §11
-authorization. Wall time is never reported as CPU (§7). Unknown
-measurements remain UNKNOWN (§7) — never "fit by assumption".
+**Non-goals (pre-committed, unchanged).** No URL/item truncation, no lowering
+of supported caps, no silent drops, no weakening of ownership fences or
+conflict clauses, no paid plan, no schema/migration change, no product config
+change, no product deployment, no provider fetches (all fixtures are
+synthetic), and no Cloudflare operation without §11 authorization. Wall time
+is never reported as CPU (§9). Unknown measurements remain UNKNOWN (§15).
 
-## 2. Official limits — current verification (retrieved 2026-10-19)
+## 2. Official limits — verification basis
 
-Method: this round fetched the PUBLIC documentation pages below (public
-web access only; not an account operation; no credentials, no API, no
-dashboard). Retrieval timestamp: **2026-10-19 (UTC); 2026-10-19
-Asia/Tehran**. Each page carries its own "Last updated" date, quoted
-below; limits are mutable — the future probe round MUST re-verify all
-rows at execution time and record any drift before running anything.
+R1.10.4 verified these rows from the PUBLIC documentation pages (fetched
+2026-10-19 UTC; not account operations). **R1.10.4.1 did NOT re-fetch them**
+— the independently bound copies in the R1.10.4 G0 review evidence
+(`independent-review/d1-limits.md`, `workers-limits.md`, `workers-logs.md`,
+re-fetched by the manager 2026-10-19/23) confirm the same rows, and the
+execution round MUST re-verify every row at execution time (P0-4, D6)
+before running anything. Limits are mutable; this section is a snapshot.
 
 ### 2.1 D1 — platform limits
 
-Source: https://developers.cloudflare.com/d1/platform/limits/ — page
-states "Last updated Apr 21, 2026" (page metadata `dateModified:
-2026-04-21`). Verbatim rows relevant to this plan:
+Source: https://developers.cloudflare.com/d1/platform/limits/ — "Last updated
+Apr 21, 2026" (`dateModified: 2026-04-21`). Verbatim rows this plan relies on:
 
-| Row (verbatim)                                                                              | Exact unit           | Relevance                                                              |
-| ------------------------------------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------- |
-| "Queries per Worker invocation (read subrequest limits) \| 1000 (Workers Paid) / 50 (Free)" | queries/invocation   | The Free-plan 50-row (unit ambiguity carried, TR-01 — still undefined) |
-| "Maximum SQL statement length \| 100,000 bytes (100 KB)"                                    | bytes (SQL TEXT)     | Official SQL-TEXT limit (see §3 — distinct from the internal policy)   |
-| "Maximum bound parameters per query \| 100"                                                 | count/query          | Bind-COUNT limit                                                       |
-| "Maximum string, `BLOB` or table row size \| 2,000,000 bytes (2 MB)"                        | bytes/row            | ≈45 KB canonical URLs are far below                                    |
-| "Maximum database size \| 10 GB (Workers Paid) / 500 MB (Free)"                             | bytes (Free: 500 MB) | Disposable DB sizing ceiling (§8)                                      |
-| "Maximum storage per account \| 1 TB (Workers Paid) / 5 GB (Free)"                          | bytes (Free: 5 GB)   | Account-side storage ceiling                                           |
-| "Databases per account \| 50,000 (Workers Paid) / 10 (Free)"                                | count (Free: 10)     | Headroom for one disposable DB must be owner-confirmed (§4, §9)        |
-| "Time Travel duration … \| 30 days (Workers Paid) / 7 days (Free)"                          | days (Free: 7)       | Cleanup semantics (§10)                                                |
-| "Maximum SQL query duration \| 30 seconds"                                                  | seconds              | Also bounds the entire batch call (footnote 4)                         |
-| "Maximum bindings per Workers script \| Approximately 5,000"                                | count (approx.)      | Not load-bearing for this plan                                         |
+| Row (verbatim)                                                                              | Exact unit           | Use in this plan                                                   |
+| ------------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------ |
+| "Queries per Worker invocation (read subrequest limits) \| 1000 (Workers Paid) / 50 (Free)" | queries/invocation   | The Free 50-row; unit ambiguity retained (TR-01) and probed (P-QU) |
+| "Maximum SQL statement length \| 100,000 bytes (100 KB)"                                    | bytes (SQL TEXT)     | Per-statement SQL-TEXT limit (§3)                                  |
+| "Maximum bound parameters per query \| 100"                                                 | count/query          | THE per-statement admissibility limit (11·rows+7 ≤ 100, §8)        |
+| "Maximum string, `BLOB` or table row size \| 2,000,000 bytes (2 MB)"                        | bytes/row            | The F-ROWSIZE boundary (§7) and the coverage claim (§1)            |
+| "Maximum database size \| 10 GB (Workers Paid) / 500 MB (Free)"                             | bytes (Free: 500 MB) | Storage cap reconciliation (§10)                                   |
+| "Maximum storage per account \| 1 TB (Workers Paid) / 5 GB (Free)"                          | bytes (Free: 5 GB)   | Account-side ceiling (§10)                                         |
+| "Databases per account \| 50,000 (Workers Paid) / 10 (Free)"                                | count (Free: 10)     | Owner-confirmed headroom prerequisite (P0-2)                       |
+| "Time Travel duration … \| 30 days (Workers Paid) / 7 days (Free)"                          | days (Free: 7)       | Cleanup semantics (§13)                                            |
+| "Maximum SQL query duration \| 30 seconds"                                                  | seconds              | Bounds each whole `db.batch()` call (P-01b expected class)         |
 
-Batch note (verbatim, same page): "Limits for individual queries (listed
-above) apply to each individual statement contained within a batch
-statement. For example, the maximum SQL statement length of 100 KB
-applies to each statement inside a `db.batch()`."
-
-Throughput note (verbatim): "To get more throughput from a single
-database, reduce the number of requests rather than only the duration of
-each query. For example, use `batch()` to send multiple statements in a
-single request, so that the per-request overhead is paid once for the
-whole batch."
-
-Also same page: up to **six** simultaneous connections to D1 per Worker
-invocation; D1 operations run within Workers platform CPU/memory limits.
-
-**Unit ambiguity preserved (TR-01, unchanged):** the docs still do NOT
-define whether the "50 queries per Worker invocation" row counts
-execution-API calls, `batch()` calls, or individual SQL statements
-inside batches. Both interpretations remain carried
-(`free-plan/FREE_PLAN_COMPATIBILITY.md` §1/§4); probes measure BOTH
-(§7).
-
-**Cross-check row (Workers limits, §2.3):** D1 queries are subrequests
-("A subrequest is any request a Worker makes using the Fetch API or to
-Cloudflare services like R2, KV, or D1"), and Workers Free allows 50
-subrequests/request — a second documented ceiling any probe must respect
-and record.
+Batch note (verbatim): "Limits for individual queries (listed above) apply to
+each individual statement contained within a batch statement. For example,
+the maximum SQL statement length of 100 KB applies to each statement inside a
+`db.batch()`." — the per-statement rows bind EVERY constituent of a batch;
+the docs contain **no** row for a total batch payload (that aggregate
+acceptance is exactly the UNKNOWN P-01b measures).
 
 ### 2.2 D1 — pricing / daily allowances
 
-Source: https://developers.cloudflare.com/d1/platform/pricing/ — page
-states "Last updated Apr 21, 2026" (`dateModified: 2026-04-21`). Verbatim:
+Source: https://developers.cloudflare.com/d1/platform/pricing/ — "Last
+updated Apr 21, 2026". Verbatim: "Rows read \| 5 million / day" (Free);
+"Rows written \| 100,000 / day" (Free); "Storage (per GB stored) \| 5 GB
+(total)" (Free); footnote 8: "Free limits reset daily at 00:00 UTC";
+exhaustion returns errors to the client; per-query `meta` carries
+`rows_read`/`rows_written`; footnote 6: "Indexes will add an additional
+written row when writes include the indexed column" — the §10 arithmetic
+accounts for the accepted schema's five source_items indexes; "An empty
+database consumes approximately 12 KB of storage" (the EMPTY-DB figure — the
+schema'd baseline is NOT 12 KB; locally it measured 413,696 bytes, §10).
 
-- "Rows read \| 5 million / day" (Workers Free) — unit: rows/day.
-- "Rows written \| 100,000 / day" (Workers Free) — unit: rows/day.
-- "Storage (per GB stored) \| 5 GB (total)" (Workers Free).
-- Footnote 8 (verbatim): "Free limits reset daily at 00:00 UTC." — this
-  CONFIRMS the UTC reset boundary for D1 daily allowances on the current
-  page (previously carried from R1.10.1 citations; now re-verified on
-  the page itself).
-- Exhaustion behavior (verbatim): "When your account hits the daily read
-  and/or write limits, you will not be able to run queries against D1.
-  D1 API will return errors to your client indicating that your daily
-  limits have been exceeded." Storage-exhaust behavior (verbatim):
-  "Once you have reached your included storage limit, you will need to
-  delete unused databases or clean up stale data before you can insert
-  new data, create or alter tables or create indexes and triggers."
-- Per-query counters (verbatim): "Every query returns a `meta` object
-  that contains a total count of the rows read (`rows_read`) and rows
-  written (`rows_written`) by that query."
-- Index note (verbatim, footnote 6): "Indexes will add an additional
-  written row when writes include the indexed column" — the fixtures'
-  expected rows-written counts below account for the accepted schema's
-  indexes (§6).
-- Empty DB note (verbatim): "An empty database consumes approximately 12
-  KB of storage."
+### 2.3 Workers — platform limits (incl. the REAL CPU surfaces)
 
-### 2.3 Workers — platform limits (incl. the real CPU surfaces)
+Source: https://developers.cloudflare.com/workers/platform/limits/ — "Last
+updated Oct 12, 2026". Verbatim rows this plan relies on — **including the
+general vs internal-service subrequest distinction (R114-05)**:
 
-Source: https://developers.cloudflare.com/workers/platform/limits/ —
-page states "Last updated Oct 12, 2026" (`dateModified: 2026-10-12`).
-Verbatim rows relevant to this plan:
+| Row (verbatim)                                                    | Exact unit          | Use in this plan                                       |
+| ----------------------------------------------------------------- | ------------------- | ------------------------------------------------------ |
+| "CPU time \| 10 ms (Free) / 5 min (Paid)"                         | milliseconds of CPU | The Free CPU ceiling that dominates the CJK shape (D3) |
+| "Subrequests per invocation \| 50 (Free)"                         | count/request       | GENERAL subrequest row — a candidate P-QU-B boundary   |
+| "Subrequests to internal services \| 1,000"                       | count/request       | INTERNAL-SERVICE row — a candidate P-QU-B non-boundary |
+| "Requests \| 100,000/day (Free)" (reset midnight UTC, Error 1027) | requests/day        | Round invocation cap margin (§10)                      |
 
-| Row (verbatim)                                                          | Exact unit          | Relevance                                         |
-| ----------------------------------------------------------------------- | ------------------- | ------------------------------------------------- |
-| "Requests \| 100,000/day (Free)" (row: "Requests … 100,000/day")        | requests/day        | Probe totals stay ≪ this (§8)                     |
-| "CPU time \| 10 ms (Free) / 5 min (Paid)"; per Cron Trigger Free: 10 ms | milliseconds of CPU | The Free CPU ceiling that dominates the CJK shape |
-| "Subrequests \| 50/request (Free) / 10,000/request (Paid)"              | count/request       | Cross-check on the D1 "50 queries" row (§2.1)     |
-| "Simultaneous outgoing connections/request \| 6"                        | count               | Matches the D1 page                               |
+The Workers limits page defines "A subrequest is any request a Worker makes
+using the Fetch API or to Cloudflare services like R2, KV, or D1" and lists
+the two SEPARATE rows above. **This plan does NOT claim the general 50-row
+alone defines D1 enforcement** — the D1-specific "Queries per Worker
+invocation … 50 (Free)" row (§2.1) is retained as its own documented
+boundary, and the P-QU discriminator (§8) treats "which row fired" as an
+explicitly ambiguous, recorded outcome. CPU semantics (verbatim): "CPU time
+measures how long the CPU spends executing your Worker code. Waiting on
+network requests (such as `fetch()` calls, KV reads, or database queries)
+does **not** count toward CPU time." Exceeding CPU returns Error 1102
+(`exceededCpu` in analytics/Logpush).
 
-CPU semantics (verbatim): "CPU time measures how long the CPU spends
-executing your Worker code. Waiting on network requests (such as
-`fetch()` calls, KV reads, or database queries) does **not** count
-toward CPU time." Exceeding CPU returns Error 1102 ("Worker exceeded
-resource limits"); in analytics and Logpush the invocation outcome is
-`exceededCpu`.
+### 2.4 Where real CPU is observable — and what is NOT documented (R114-05)
 
-**Where real CPU is OBSERVABLE (verbatim pointers from the same page):**
-
-- "Workers Logs — CPU time and wall time appear in the invocation log"
+- The Workers limits page states: "Workers Logs — CPU time and wall time
+  appear in the invocation log"
   (https://developers.cloudflare.com/workers/observability/logs/workers-logs/#invocation-logs).
-- "Tail Workers / Logpush — CPU time and wall time appear at the top
-  level of the Workers Trace Events object"
-  (https://developers.cloudflare.com/logs/logpush/logpush-job/datasets/account/workers_trace_events/).
+- The Workers Logs page itself ("Last updated Oct 12, 2026") documents
+  invocation logs (`$cloudflare.$metadata.type = "cf-worker-event"`), Free
+  inclusion, **200,000 log events/day, 3-day retention, 256 KB per log**,
+  the `invocation_logs` toggle — but does **NOT document the invocation-log
+  CPU/wall FIELD NAMES**. `cpuFieldNamesDocumented: false`
+  (schedule `documentedLimits.workersLogs`).
+- The Workers Trace Events **Logpush dataset** documents `CPUTimeMs` (int,
+  ms) and `WallTimeMs` (wall-clock) — but Logpush is a separate surface
+  whose availability on this account is owner-side UNKNOWN and must not be
+  assumed Free-available.
+- Therefore: **the G2 smoke (X-SMOKE) must record the ACTUAL exportable
+  CPU-labeled field (exact name + type) from the Free-available Workers Logs
+  surface, or the round's CPU evidence surface is UNKNOWN** (§9, D3). The
+  Logpush `CPUTimeMs`/`WallTimeMs` names are admissible ONLY if the owner
+  establishes that surface, with its dataset field schema cited. Workers Logs
+  pricing changes December 1, 2026 — re-verify before relying on it (P0-4).
 
-Workers Trace Events dataset
-(https://developers.cloudflare.com/logs/logpush/logpush-job/datasets/account/workers_trace_events/
-— page states "Last updated Sep 14, 2026"): field **`CPUTimeMs`** —
-Type: `int` — "The amount of CPU time used by the Worker script, in
-milliseconds." Field **`WallTimeMs`** — "The elapsed time in
-milliseconds between the start of a Worker invocation, and when the
-Workers Runtime determines that no more JavaScript needs to run" —
-explicitly WALL-clock; `waitUntil()` work extends WallTime. These two
-fields are the plan's canonical CPU/WALL distinction (§7).
+### 2.5 Queues — carried for completeness only
 
-Daily requests (verbatim): "Accounts on the Workers Free plan have a
-daily request limit of 100,000 requests, resetting at midnight UTC.
-When a Worker exceeds this limit, Cloudflare returns **Error 1027**."
-
-Workers Logs availability (https://developers.cloudflare.com/workers/observability/logs/workers-logs/
-— page states "Last updated Oct 12, 2026"): "Workers Logs is included in
-both the Free and Paid Workers plans" — Workers Free: **200,000 log
-events per day**, 3-day retention; a single log is capped at 256 KB and
-truncation sets `$cloudflare.truncated = true`. **Pricing-change note
-(verbatim): "Beginning December 1, 2026, Workers Logs will use
-Cloudflare Observability pricing"** — the execution round MUST re-verify
-Workers Logs terms on/after that date before relying on it for evidence.
-
-### 2.4 Queues — pricing / Free allowance
-
-Source: https://developers.cloudflare.com/queues/platform/pricing/ —
-page states "Last updated Apr 21, 2026" (`dateModified: 2026-04-21`).
-Verbatim: "Standard operations \| 10,000 operations/day included"
-(Workers Free); "Message retention \| 24 hours (non-configurable)";
-"An operation is counted for each 64 KB of data that is written, read,
-or deleted."; "Operations are per message, not per batch."; "In most
-cases, it takes 3 operations to deliver a message". **Reset boundary
-for the Queues daily allowance is STILL not stated on the page —
-remains UNKNOWN (TR-06 discipline, worksheet §4).** This plan binds NO
-queues (§4), so queue quotas are not probed; the row is carried for
-completeness only.
-
-### 2.5 Drift vs the sealed R1.10.2/R1.10.3 manager excerpts
-
-Compared against `manager-evidence/official/d1-limits.json`,
-`d1-api.json` and the carried R1.10.1 citations
-(`free-plan/FREE_PLAN_OFFICIAL_SOURCES.md`): **no observed change** in
-any row this plan relies on (D1 limits/pricing rows, Workers CPU 10 ms
-Free, 100,000 requests/day Free, Queues 10,000 ops/day Free, 24 h
-retention). The only NEW page facts this round adds: D1 pricing footnote
-8 (UTC reset, now re-verified verbatim), Workers limits page dates
-(Oct 12, 2026), the Workers Logs pricing-change notice (Dec 1, 2026),
-and the named `CPUTimeMs`/`WallTimeMs` Trace Events fields. The account
-plan/entitlement remains owner-side UNKNOWN (no account read, ever).
+Queues Free: 10,000 operations/day, 24-hour retention (page dated Apr 21,
+2026); reset boundary STILL not stated on the page — UNKNOWN (TR-06). This
+plan binds NO queues; the row is carried for completeness only.
 
 ## 3. Internal combined-byte policy vs official SQL-text limits (DISTINCT IN KIND)
 
-Kept explicit because conflating them is the historical error this plan
-must never repeat:
+- **Official (documented):** SQL TEXT ≤ 100,000 bytes per statement (per
+  batch constituent); binds ≤ 100 per query. **No** documented row for a
+  maximum bound-parameter byte size; **no** documented row for a maximum
+  batch/total payload.
+- **Internal (conservative margin, NOT a documented limit):** the planner's
+  "SQL text + ALL bound values ≤ 102,400 bytes" policy
+  (`design-lab/candidate-sql.ts`, `MAX_SQL_STATEMENT_BYTES`) — the DIRECT
+  CAUSE of the NOT_READY blocker (2 rows/statement for ≈45 KB CJK rows).
+- The validator proves the policy boundaries locally (V-09): a 2-row CJK
+  statement audits to 91,399 bytes (fits) and a 3-row statement to 136,511
+  bytes (rejected) — P-03's 50 INSERTs are exactly right. F-OVERSIZE
+  (103,774-byte single-row audit) and F-ROWSIZE (1,901,273-byte audit) are
+  plan-time `OversizedRowPlanError` under the CURRENT policy — zero
+  statements, zero durable effects, no truncation, ever.
+- The policy may be revised ONLY on measured evidence per the pre-committed
+  rules (§14), never to make a target fit by assumption.
 
-- **Official (documented):** "Maximum SQL statement length | 100,000
-  bytes (100 KB)" — a limit on the SQL **TEXT**, applied to each
-  statement inside a batch; and "Maximum bound parameters per query |
-  100" — a COUNT limit on binds. The docs contain **NO** documented row
-  for a maximum bound-parameter BYTE size and **NO** documented row for
-  a maximum batch/total payload.
-- **Internal (conservative margin, NOT the documented limit):** the
-  planner's policy "SQL text + ALL bound values ≤ 102,400 bytes
-  (100 × 1024)" (`design-lab/candidate-sql.ts`,
-  `MAX_SQL_STATEMENT_BYTES`) is an INTERNAL POLICY that constrains
-  something the docs do not document (combined bytes). It is strictly
-  STRONGER than the documented rows for the shapes measured so far, and
-  it is the DIRECT CAUSE of the NOT_READY blocker (2 rows/statement for
-  ≈45 KB CJK rows).
-- Consequence: adopting "documented-limits-only" accounting would NOT
-  contradict any documented row — but the real platform's enforcement
-  of large bind payloads on the D1 Worker binding is UNDOCUMENTED and
-  UNKNOWN, which is exactly what probe P-01 (§6) is designed to measure
-  before any policy revision. The policy may be revised ONLY on measured
-  evidence per the pre-committed rules (§12, D1/D2), never to make a
-  target fit by assumption.
+## 4. Isolated disposable preview resources (created ONLY under G1, §11)
 
-## 4. Isolated disposable preview resources (to be created ONLY under §11 authorization)
+| Resource          | Proposed name               | Properties                                                                                                    |
+| ----------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Probe Worker      | `pixel-probe-r1104`         | Separate Worker script; NO product bindings (no queues, no product D1, no product secrets); routes OFF        |
+| Probe D1 database | `pixel-probe-db-disposable` | Brand-new empty database; schema per §6 (S3 controls, then S4 owned fixtures); probe-only latch + seed tables |
+| Queues            | **NONE bound**              | Zero queue producers/consumers; queue quotas are never probed                                                 |
+| Product resources | **FORBIDDEN**               | `pixel`, `pixel-preview`, `pixel-db-preview`, `pixel-jobs-preview`, `pixel-dlq-preview` are out of scope      |
 
-All probe resources are DISPOSABLE and share NOTHING with product
-resources. Names below are proposals; the owner approves/renames at the
-§11 checkpoint.
+- Isolation proof at execution: the probe script's binding list contains
+  exactly ONE D1 binding (the disposable DB) and nothing else; the pre-flight
+  `wrangler` dry-run printout is archived as evidence.
+- Headroom prerequisite: Free allows 10 D1 databases per account; the current
+  count is owner-side UNKNOWN; the owner confirms BEFORE creation (P0-2). If
+  insufficient: abort at the checkpoint (no workaround, no paid upgrade, no
+  deletion of product resources).
+- The probe Worker embeds the reviewed planner/classification code copied
+  from the pinned commit (P0-5); the product itself is never deployed,
+  configured, or migrated.
 
-| Resource          | Proposed name               | Properties                                                                                               |
-| ----------------- | --------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Probe Worker      | `pixel-probe-r1104`         | A separate Worker script; NO product bindings (no queues, no product D1, no secrets); routes OFF         |
-| Probe D1 database | `pixel-probe-db-disposable` | Brand-new empty database (≈12 KB initial storage); schema = the accepted migrations 0001–0003 ONLY       |
-| Queues            | **NONE bound**              | Zero queue producers/consumers; the probe never touches queue quotas                                     |
-| Product resources | **FORBIDDEN**               | `pixel`, `pixel-preview`, `pixel-db-preview`, `pixel-jobs-preview`, `pixel-dlq-preview` are out of scope |
+## 5. Protected invocation and replay limits (R114-04 — "routes OFF" is NOT access control)
 
-- Isolation proof required at execution: the probe script's binding list
-  contains exactly ONE D1 binding (the disposable DB) and nothing else;
-  a pre-flight `wrangler` dry-run printout is archived as evidence.
-- Account headroom prerequisite: Free allows **10 D1 databases per
-  account**; the current account count is owner-side UNKNOWN. The owner
-  confirms headroom BEFORE creation (§9, P0-2); if headroom is
-  insufficient, the plan aborts at the checkpoint (no workaround, no
-  paid upgrade, no deletion of product resources).
-- The probe Worker uses the SAME product SQL code paths ONLY as copied
-  into the probe script (the reviewed planner/classification from the
-  design lab, pinned by commit SHA — §9, P0-5); the product itself is
-  never deployed, configured, or migrated.
-- Workers Logs `observability.enabled = true` in the probe config so
-  invocation logs (CPU/wall) are captured (§2.3); retention 3 days on
-  Free — evidence must be exported within that window (§10).
+The probe endpoint is NOT a public unlimited surface. Five independent
+controls, all specified now and all counted in the §10 caps:
 
-## 5. Synthetic fixtures (deterministic, checksummed, no real provider data)
+1. **Routes OFF + single workers.dev URL.** No custom-domain routes; the
+   probe script is reachable only at the account's workers.dev URL for the
+   probe script (recorded at G1; the URL is not a secret, but nothing else
+   routes to it).
+2. **Probe-only bearer token (`X-Probe-Token`).** A 256-bit random token
+   generated at G1, bound to the probe Worker as a probe-only SECRET (never
+   in Git, config files, fixtures, logs, or this repository; never a product
+   secret; transmitted to the authorized caller out-of-band). Every request
+   must carry it; wrong/missing token → **404 with ZERO D1 statements
+   executed** (indistinguishable from a nonexistent route; the token value is
+   never logged).
+3. **Durable case/run gating (the latch).** `probe_run_state`
+   (`audit-tools/probe-plan/probe-ddl.sql`, applied at G1) holds ONE row per
+   registered case with the case's REGISTERED invocation and statement budgets
+   from `audit/PROBE_CASE_SCHEDULE.json`
+   (`audit-tools/probe-plan/latch-seed.sql`, generated and byte-verified by
+   the validator). The runtime gate is a single UPDATE that increments
+   `invocations_used`/`statements_used` conservatively **BEFORE any probe
+   work** (own tiny batch — a failed or replayed request still consumes its
+   slot) and refuses when the budget is consumed, the case is `closed`, or
+   the kill switch fired.
+4. **Kill switch + hard-stop.** The `__global__` latch row: when `aborted`
+   (set by the abort procedure or the owner), EVERY case refuses all further
+   work — terminal 410 responses, zero statements, zero side effects. When
+   all registered budgets are consumed the endpoint is likewise terminal.
+5. **Replay/retry bounds.** Registered invocations: **20**; transport-retry
+   allowance: **3** (ONLY for invocations that submitted NO D1 statement —
+   pre-flight/transport failures — re-executing the SAME case under the SAME
+   registered parameters, each logged); **invocations hard cap: 23.** The
+   24th authenticated request that reaches the database is, by construction,
+   a plan violation → abort + pre-authorized emergency teardown (§11).
 
-All fixtures are GENERATED deterministically by a committed generator
-script (design-lab pattern, reused verbatim); no provider is contacted
-and no real content is used. Each fixture's exact bytes are pinned by
-SHA-256 recorded in the execution round's evidence BEFORE any probe runs
-(§9, P0-6). The four required shapes:
+## 6. Schema tiers: S3 controls and S4 owned fixtures, separately (R114-02)
 
-| Fixture        | Shape                                                                                                                                            | Derived expectations (from the reviewed planner, LOCAL numbers — to be re-measured on-platform)          |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| **F-NORMAL**   | 100 items, fixture URL shape at the ~2 KiB canonical-URL assumption (the cost-ledger fixture shape)                                              | 8 rows/statement → 13 INSERTs; ≈15 xAPI / 29 STMT (ledger C-02/C-06) — the conditional scenario          |
-| **F-HETERO**   | 100 items: first 8 short URLs, remaining 92 with 5000-char CJK HTTPS paths (L-12 counterexample shape; RSS < 2 MiB)                              | 1×8 + 46×2 = 47 INSERTs under the conservative policy; every chunk audit ≤ 102,400 bytes                 |
-| **F-CJK**      | 100 items, uniform 5000-char CJK paths → canonical URLs of EXACTLY 45,023 bytes each via the accepted normalizer (L-14; raw RSS ≈1.4 MB < 2 MiB) | 2 rows/statement → 50 INSERTs alone; ≈15 xAPI / 66 STMT owned (C-15) — the NOT_READY shape               |
-| **F-OVERSIZE** | 1 item whose canonical URL alone exceeds the internal budget → planner must raise `OversizedRowPlanError` at PLAN time                           | ZERO statements submitted, ZERO durable effects (L-13 parity); the invocation still burns CPU — recorded |
+The R1.10.4 plan promised migrations 0001–0003 ONLY, then ran the owned path
+whose predicate writes require `source_state.poll_owner_job_id` — the
+reviewer proved with the actual migrations on local SQLite that the column
+does not exist under 0001–0003 (CE2). This revision specifies BOTH tiers
+explicitly. **No product migration/config is changed; migrations 0001–0004
+are consumed READ-ONLY as disposable-setup inputs (their tracked bytes are
+never edited — append-only policy, AGENTS.md §6).**
 
-Fixture discipline: UTF-8 byte counts are computed with `TextEncoder`
-(the audited definition); "45,023 bytes" is a LOCAL pinned value — the
-execution round re-derives it from the accepted normalizer and records
-any drift as evidence BEFORE probing. Fixtures include the heterogeneous
-and Unicode/CJK cases REQUIRED by this round's scope, plus the normal
-baseline and the oversized-row negative case.
+### 6.1 S3 — the control tier (runs FIRST)
 
-## 6. Pre-registered probe cases (expectations fixed BEFORE execution)
+- **DDL (exact):** `migrations/0001_initial_schema.sql` (58 statements),
+  `migrations/0002_telegram_update_lifecycle.sql` (8),
+  `migrations/0003_job_dlq_delivery.sql` (5) — **71 statements**, applied IN
+  ORDER to the disposable DB at G1 via `wrangler d1 migrations apply` (CLI).
+- **Version:** after application, `SELECT value FROM schema_metadata WHERE
+key = 'schema_version'` returns `'3'` — verified by X-SETUP-S3.
+- **Tier boundary (verified, not assumed):** X-SETUP-S3's compile probe
+  `SELECT poll_owner_job_id FROM source_state LIMIT 0` is a PREPARE-TIME
+  ERROR on S3 (prepare() is construction, never a submitted statement) — the
+  owned predicate CANNOT compile on S3. The validator reproduces this
+  exactly (V-04a).
+- **Controls that run under S3:** the legacy (schema-3 accepted path) control
+  case P-C3 only, plus the verification reads. Nothing owned runs on S3.
+- **Seeding (probe-only, at G1, CLI):** `sources-seed.sql` (one sources row
+  per probe case that needs one — 11 rows, 1 literal-VALUES statement,
+  generated from the schedule and byte-verified by the validator); P-C3's
+  queued job + baseline state row are seeded inside P-C3's own registered
+  statement list (probe prelude — the product's job/state pre-exist via
+  scheduling; the probe registers them explicitly so every statement is
+  counted).
 
-Each case: fixture, accountings, expected outcome CLASS, and what is
-recorded. If an observed outcome does not match its pre-registered class,
-the round ABORTS (§9) — outcomes are never reinterpreted post-hoc.
+### 6.2 S4 — the owned-fixture tier (applied mid-round, before X-SETUP-S4)
 
-| Case | Fixture(s)         | Accounting under test                                                                                                                        | Pre-registered expectation (class)                                                                                                                                                                                                                                                                               | Primary recorded evidence                                                                      |
-| ---- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| P-01 | F-CJK-derived rows | **Documented-limits-only** (SQL TEXT ≤ 100,000 B per statement; ≤ 100 binds; NO internal combined cap)                                       | Bind-payload ACCEPTANCE LADDER: increasing rows/statement (2 → 4 → 8 → 16 → 32 → 50), one repetition each + final repeat at the max accepted rung; expectation: acceptance OR a typed platform rejection — EITHER is a valid measured outcome; the max accepted total bind payload is **UNKNOWN until measured** | Per-statement audit bytes; per-rung accept/reject verbatim; total payload at max accepted rung |
-| P-02 | F-CJK              | Documented-limits-only **IFF P-01 reached the required payload** (≥ the full 100-row CJK batch total with ≥ 2× margin); else P-02 is NOT RUN | End-to-end CJK commit replica (owned path): statements + xAPI + rows written on real preview D1; UNKNOWN until measured                                                                                                                                                                                          | Instrument counters (v3 units); `meta.rows_read`/`rows_written` per statement; invocation logs |
-| P-03 | F-CJK              | CURRENT conservative policy (control)                                                                                                        | ≈50 INSERT statements, ≈15 xAPI / 66 STMT, every audit ≤ 102,400 bytes, ALL rows land — LOCAL parity check on-platform                                                                                                                                                                                           | Same as P-02                                                                                   |
-| P-04 | F-HETERO           | CURRENT conservative policy                                                                                                                  | ≈47 INSERT statements (1×8 + 46×2), all chunks ≤ budget, all rows land — L-12 parity on-platform                                                                                                                                                                                                                 | Same as P-02                                                                                   |
-| P-05 | F-NORMAL           | CURRENT conservative policy                                                                                                                  | ≈13 INSERT statements, ≈15 xAPI / 29 STMT — C-02/C-06 parity on-platform                                                                                                                                                                                                                                         | Same as P-02                                                                                   |
-| P-06 | F-OVERSIZE         | CURRENT conservative policy (negative)                                                                                                       | Plan-time `OversizedRowPlanError`; ZERO statements executed; ZERO durable rows; invocation completes                                                                                                                                                                                                             | Rejection record; post-probe row-count check (must equal pre-probe)                            |
-| P-07 | F-CJK, F-NORMAL    | CPU measurement (runs WITH P-02/P-03/P-05 invocations)                                                                                       | Real CPU per invocation from Workers Logs invocation logs / Trace Events `CPUTimeMs`; UNKNOWN until measured; wall time recorded as WALL ONLY                                                                                                                                                                    | `CPUTimeMs`/`WallTimeMs` per invocation; any `exceededCpu`/1102 outcome                        |
-| P-08 | all                | Quota deltas (passive)                                                                                                                       | Daily rows read/written deltas on the OWNER dashboard/analytics for the probe DB only; deltas must match `meta` sums within documented counting rules (indexes add written rows); NO exhaustion is ever deliberately triggered                                                                                   | Dashboard/analytics exports (owner-side); `meta` sums from the instrument                      |
+- **DDL (exact):** S3 **plus** `migrations/0004_source_poll_ownership.sql`
+  (5 statements: the `ALTER TABLE source_state ADD COLUMN
+poll_owner_job_id`, the partial unique index
+  `idx_jobs_source_outstanding_poll`, and the three `schema_metadata`
+  UPDATEs) — applied by CLI as the registered **X-SCHEMA4** step AFTER the
+  S3 controls complete and BEFORE X-SETUP-S4. 0004 remains the tracked
+  product migration CANDIDATE (disposable-only application; the append-only
+  product files are untouched).
+- **Version:** `schema_version` = `'4'`; `migration_id` =
+  `'0004_source_poll_ownership'` — verified by X-SETUP-S4.
+- **Ownership-fence verification (X-SETUP-S4):** (a) the compile probe now
+  PREPARES cleanly; (b) a **negative probe**: seed one claimed
+  `sources.fetch_poll` job, then submit a SECOND non-terminal job for the
+  SAME aggregate — expected class: **typed UNIQUE rejection from
+  `idx_jobs_source_outstanding_poll`** (submitted alone so nothing else
+  rolls back). The validator reproduces the rejection locally (V-10 + the
+  replay's negative-probe step).
+- **Owner/job/generation seeding (owned cases):** each owned case's
+  registered statement list carries its own prelude — `seed-job` (id
+  `job-<source>-1`, type `sources.fetch_poll`, aggregate_type `'source'`,
+  aggregate_id = the case's probe source, status `queued` for full-path
+  cases / `claimed` for payload-scope cases, attempts = the generation) and
+  `seed-source-state` (the case's `sources` row state: `next_poll_at` = the
+  registered hold; `poll_owner_job_id` = NULL for full-path cases — the
+  registered `ownership-acquire` statement then durably sets owner+hold —
+  or = the job id for payload-scope cases). Generations are pinned per case
+  in the schedule (all `1`; the fence proof uses a WRONG generation
+  deliberately and inserts ZERO rows — validator check V-10f).
+- **Reset and verification order (whole round, fixed):**
+  G1 CLI (S3 DDL → probe DDL → latch seed → sources seed) → X-SMOKE (G2) →
+  X-SETUP-S3 → P-C3 → **X-SCHEMA4 (CLI: apply 0004)** → X-SETUP-S4 →
+  P-01a → P-01b-r1 → P-01b-r2 → P-01b-r3 → P-02 → P-03 → P-04 → P-05 →
+  P-06 → P-06b → P-QU-A → P-QU-B → P-07a-1 → P-07a-2 → P-07a-3 →
+  X-VERIFY-FINAL (G4). Cross-case interference is impossible by
+  construction: every fixture-writing case uses its OWN `source_id` and its
+  OWN fixture slice (§7), so the UNIQUE constraints never absorb probe rows
+  and NO cross-case deletes/resets are needed; the only "reset" semantics in
+  the round are the per-case prelude seeds (INSERT OR REPLACE over the
+  case's own rows) — all registered and counted.
 
-P-01 details (the decisive probe): the ladder submits single
-multi-row-INSERT statements (placeholder-heavy SQL TEXT, ≈45 KB CJK
-binds per row) with steps 2/4/8/16/32/50 rows — total bind payloads
-≈0.09/0.18/0.36/0.72/1.44/2.25 MB — under documented-limits-only
-accounting (each statement's SQL TEXT stays ≤ 100,000 bytes; binds ≤
-100/query is satisfied by the ≤ 99-row-binds + shared guards bound
-per the reviewed planner ONLY IF the bind-count row still permits the
-rung; a rung that would exceed 100 binds is NOT SUBMITTED and recorded
-as bind-COUNT-blocked). A rung is "accepted" iff the platform returns
-success with `meta.changes` matching the rung's row count. The ladder
-STOPS at the first rejection (the rejection itself is evidence);
-"required payload" = the total binds of one full 100-item F-CJK commit
-under documented-limits-only accounting (≈ 4.5 MB — recorded exactly by
-the instrument), plus the pre-committed ≥ 2× margin rule (§12, D1).
+## 7. Synthetic fixtures (deterministic, checksummed, no real provider data)
 
-## 7. Measurement definitions (units discipline)
+All fixtures are GENERATED deterministically (the validator implements the
+generator from the schedule's registered shapes and pins the exact bytes —
+execution rounds regenerate + SHA-256 them BEFORE any probe, P0-6). No
+provider is contacted. UTF-8 bytes via `TextEncoder`; CJK paths
+percent-encode at 9 URL bytes per 3-byte character; per-fixture hosts keep
+the registered byte counts EXACT.
 
-- **xAPI** — execution-API-call attempts, per the corrected v3
-  instrument units (R112-03: failed-batch statements are NOT completed;
-  reservoir truncation counted; `prepare()` is construction, never an
-  execution — TR-01 anchor). STMT — submitted statements.
-- **SQL-text bytes / bind bytes** — UTF-8 bytes via `TextEncoder`; the
-  audited per-statement total = SQL text bytes + Σ bound-value bytes
-  (the internal-audit definition; NOT an official unit).
-- **rows read / rows written** — official units from §2.2, recorded
-  from BOTH the per-query `meta` counters (self-reported) and the
-  owner-side daily analytics (authoritative); discrepancies are
-  recorded, never reconciled away.
-- **CPU** — ONLY `CPUTimeMs` (int, milliseconds) from Workers Logs
-  invocation logs or the Workers Trace Events object (§2.3), and the
-  invocation `outcome` (`exceededCpu` on Error 1102). **Wall time is
-  NEVER CPU**: `performance.now()`, `WallTimeMs`, and any local workerd
-  elapsed time are recorded as WALL and are inadmissible for any
-  Free-CPU conclusion. If no CPU-labeled surface is obtainable for an
-  invocation, that invocation's CPU is **UNKNOWN** — never inferred
-  from wall time.
-- **Both unit interpretations of the Free "50 queries" row are always
-  computed and reported** (execution-API calls; submitted statements) —
-  the ambiguity is documented, not resolved by assumption (TR-01).
-- Every number in evidence carries: unit, measurement surface, and the
-  doc version (page "Last updated" date) it is judged against.
+| Fixture    | Shape                                                                                                                          | Exact bytes (validator-verified, V-07)                                             |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| F-NORMAL   | 100-item slices (offsets 0/100/200) of a 300-item fixture; ASCII canonical URLs of exactly 2,048 B                             | URL 2,048 B; raw RSS ≈ 12,456 B per 100-item slice                                 |
+| F-HETERO   | 100 items: 8 short (2,048 B) + 92 CJK (5,000-char paths → 45,023 B canonical)                                                  | URLs {2,048; 45,023} B; raw RSS 1,391,722 B < 2,097,152                            |
+| F-CJK      | 100-item slices (offsets 0/100/200/300) of a 400-item fixture; uniform 45,023 B canonical URLs (the L-14 shape)                | URL 45,023 B each; raw RSS 1,511,666 B < 2,097,152                                 |
+| F-CJK-L    | Ladder fixture: 538 items, distinct ~45 KB CJK URLs (filler length varies at i≥500 → 45,014 B); slices at offsets 0/22/122/330 | 538 distinct URLs; used ONLY by P-01a/P-01b (commit-scope, no RSS delivery)        |
+| F-OVERSIZE | 1 item; canonical URL exactly 102,500 B (above the 102,400 B internal budget, far below the 2,000,000 B row limit)             | Plan-time `OversizedRowPlanError` under the current policy (V-09: audit 103,774 B) |
+| F-ROWSIZE  | 1 item; canonical URL exactly 1,899,995 B (below the documented 2,000,000 B row limit; raw RSS 633,506 B)                      | Documented-limits-only boundary probe (P-06b); current policy: plan-time rejection |
 
-## 8. Exact bounded invocation/data totals (hard caps; exceeding ANY cap aborts)
+Fixture discipline: distinct `source_id` per fixture-writing case + distinct
+fixture slices ⇒ zero cross-case conflicts; every fixture's exact bytes are
+re-derived at execution from the accepted normalizer and any drift is
+recorded BEFORE probing. Request bodies carry the fixtures (raw RSS for
+full-poll cases ≈ 0.2–1.5 MB; pre-built statement payloads for commit-only
+cases ≤ ~9.7 MB JSON — all far under the documented 100 MB Free request-body
+limit; cap registered at 12 MB).
 
-| Budget line                                  | Hard cap (whole probe round)                          | Documented Free allowance                                                 | Margin                  |
-| -------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------- |
-| Probe Worker invocations (HTTP-triggered)    | **≤ 12**                                              | 100,000 requests/day                                                      | ≈ 4 orders of magnitude |
-| Statements per invocation                    | ≤ 120 (P-03 worst case ≈ 50 INSERTs + fixed overhead) | — (per-invocation "50 queries" row judged under BOTH interpretations, §7) | recorded, not assumed   |
-| Submitted statements, round total            | **≤ 600**                                             | —                                                                         | —                       |
-| Rows written (incl. index rows), round total | **≤ 2,500**                                           | 100,000 rows/day                                                          | ≥ 40×                   |
-| Rows read, round total                       | **≤ 50,000**                                          | 5,000,000 rows/day                                                        | ≥ 100×                  |
-| Bind payload, round total (all statements)   | **≤ 30 MB**                                           | no documented row (UNKNOWN — the point of P-01)                           | measured per-statement  |
-| Durable storage growth                       | ≤ 5 MB + ≈12 KB empty-DB baseline                     | 500 MB/database; 5 GB/account                                             | ≥ 100×                  |
-| Queues operations                            | **0** (no queues bound)                               | 10,000 ops/day                                                            | infinite                |
-| Workers Logs events                          | ≤ 2,000 (≤ 12 invocations + custom logs)              | 200,000 events/day (Free)                                                 | ≥ 100×                  |
-| Provider fetches                             | **0** (synthetic fixtures only)                       | —                                                                         | —                       |
-| Product-resource touches                     | **0**                                                 | —                                                                         | —                       |
+## 8. Pre-registered probe cases (R114-01 — per-statement admissibility SEPARATED from aggregate batch payload)
 
-No probe deliberately drives ANY daily allowance toward exhaustion; a
-quota-exceeded error anywhere is an immediate abort with the state
-recorded (§9). The only limit deliberately approached is the
-per-statement SQL-TEXT/bind-COUNT pair — on the disposable database
-only.
+**The R1.10.4 defect (CE1), stated plainly:** the old P-01 registered SINGLE
+multi-row statements at 16/32/50 rows. Owned binds = **11·rows + 7** (11
+row-value columns + 7 shared guard binds — derived from the ACTUAL repo
+source by validator check V-02), so those rungs need 183/359/557 binds
+against the documented 100-bind limit: **illegal — never submitted, now
+removed from the plan entirely** (V-06 asserts no such rung is registered
+anywhere). A single-statement ladder also cannot establish the required
+AGGREGATE batch-payload margin (its best legal rung reaches only 8 × 45,023
+= 360,184 canonical bytes vs the ≥ 9,004,600-byte requirement). The gate is
+now SPLIT:
 
-## 9. Prerequisites (ALL must hold before any probe; each verified with evidence)
+- **P-01a — per-statement admissibility ladder (LEGAL rungs only: 2/4/8
+  rows).** Binds 29/51/95/95 (+ one repeat at rung 8) — every rung legal
+  under 11·rows+7 ≤ 100; each rung submitted as its OWN `db.batch` so a
+  rejection is unambiguously per-statement. Expected classes: accepted with
+  `meta.changes` = rung rows, OR a typed platform rejection — either is a
+  valid measured outcome; the ladder stops at the first rejection (the
+  rejection itself is evidence).
+- **P-01b — AGGREGATE `db.batch` payload ladder (each constituent statement
+  ≤ 95 binds).** Rung 1 (P-01b-r1): the exact F-CJK commit shape — **13
+  statements (12×8 + 1×4), 100 rows** in ONE `db.batch` — total bind payload
+  = the required reference **P_req = 4,510,238 bytes** (validator-computed
+  from the fixture bytes: all 11 row-value binds + 7 shared guard binds per
+  statement). Rung 2 (P-01b-r2): **26 statements × 8 rows = 208 rows** in
+  ONE `db.batch` — total bind payload **P_208 = 9,383,270 bytes =
+  2.080 × P_req ≥ the pre-committed 2× margin** (V-08: the gate is
+  REACHABLE — the CE1 structural unreachability is closed). Rung 3
+  (P-01b-r3): an exact REPEAT of rung 2 (distinct fixture rows, identical
+  registered parameters) — D1(i) requires zero payload-related rejections
+  across ALL repetitions. Each rung invocation stays ≤ 27 statements — under
+  the Free 50-row under BOTH unit interpretations — so a rejection can only
+  be payload/duration-class, never a query-count artifact.
 
-- **P0-1 — §11 checkpoints G1 (create) and G2 (execute) BOTH passed** by
-  explicit owner authorization, in that order, G2 AFTER resources exist
-  and are verified isolated.
-- **P0-2 — Account headroom confirmed by the owner**: D1 databases < 10
-  on the Free account, storage headroom, plan is (still) Workers Free.
-  Owner-side dashboard reads are the owner's own operations; agents
-  perform none.
-- **P0-3 — Baseline usage snapshot recorded** (owner): D1 rows
-  read/written today, storage, Workers requests, BEFORE any probe — so
-  P-08 deltas are attributable.
-- **P0-4 — Official-limit re-verification at execution time**: §2 rows
-  re-fetched from the live pages, dates recorded, drift (if any)
-  documented; if any load-bearing row changed, the plan is RE-REVIEWED
-  before execution (limits are mutable — this plan is a snapshot).
-- **P0-5 — Probe script pinned**: the script, the copied
-  planner/classification code, and the instrument carry the reviewed
-  commit SHA in their provenance headers; the executed bytes are hashed
-  into the evidence set.
-- **P0-6 — Fixture checksums pinned**: every F-\* fixture SHA-256
-  recorded and matched at run time; a mismatch aborts.
-- **P0-7 — Secret scan green** on the probe tree (`npm run scan:secrets`
-  - credential-pattern grep); NO credentials of any kind in the probe
-    Worker, its config, or evidence.
-- **P0-8 — Workers Logs enabled** in the probe config and a 1-invocation
-  smoke confirms invocation logs (with `CPUTimeMs`) are being captured
-  and exportable within the 3-day Free retention.
-- **P0-9 — Abort/cleanup paths rehearsed**: the teardown commands (§10)
-  exist and are syntax-checked BEFORE G2; the owner has them.
+**The complete registered case list** (order, fixtures, statement/API counts,
+expected classes, resource deltas — all in
+`audit/PROBE_CASE_SCHEDULE.json`, reconciled by the validator):
 
-## 10. Cleanup (owner-authorized; part of the plan, not an afterthought)
+| Case                | What it measures                                                                                 | Registered totals                              |
+| ------------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| X-SMOKE (G2)        | Evidence availability: is a CPU-labeled field exportable from Workers Logs on Free?              | 1 invocation / 2 API / 2 statements            |
+| X-SETUP-S3          | S3 tier verification + tier-boundary compile probe (prepare-time error = proof)                  | 1 / 2 / 3                                      |
+| P-C3                | LEGACY (schema-3 accepted path) control commit, full-poll scope — ledger parity                  | 1 / 11 / 31 (13 legacy INSERTs, 88 binds each) |
+| X-SETUP-S4          | S4 verification + ownership-fence negative probe (typed UNIQUE rejection expected)               | 1 / 4 / 5                                      |
+| P-01a               | Per-statement admissibility (2/4/8-row rungs)                                                    | 1 / 6 / 7 (22 rows)                            |
+| P-01b-r1            | Aggregate rung 1 = the exact F-CJK batch (P_req)                                                 | 1 / 3 / 16 (100 rows)                          |
+| P-01b-r2            | Aggregate rung 2 = 208 rows ≥ 2× P_req                                                           | 1 / 2 / 27                                     |
+| P-01b-r3            | Aggregate rung 2 REPEAT (reproducibility)                                                        | 1 / 2 / 27                                     |
+| P-02                | End-to-end CJK commit under documented-limits-only (GATED on D1's P-01b margin), full-poll scope | 1 / 12 / 32                                    |
+| P-03                | CJK control under the CURRENT conservative policy — C-15 parity (50 INSERTs × 2 rows)            | 1 / 12 / 69                                    |
+| P-04                | Heterogeneous control — L-12 parity (1×8 + 46×2 = 47 INSERTs)                                    | 1 / 12 / 66                                    |
+| P-05                | Normal baseline control — C-02/C-06 parity (13 INSERTs)                                          | 1 / 12 / 32                                    |
+| P-06                | F-OVERSIZE plan-time `OversizedRowPlanError`; zero durable effects                               | 1 / 2 / 2                                      |
+| P-06b               | F-ROWSIZE row-size boundary (1 row, 18 binds, ~1.9 MB bind value) under documented-limits-only   | 1 / 4 / 5                                      |
+| P-QU-A              | Quota-unit discriminator A: ONE batch of 51 one-row SELECTs (non-mutating)                       | 1 / 2 / 52                                     |
+| P-QU-B              | Quota-unit discriminator B: 51 SEPARATE one-row SELECT executions (non-mutating)                 | 1 / 52 / 52                                    |
+| P-07a-1/2/3         | COMMIT-ONLY CPU scopes (F-CJK doc-limits / F-CJK conservative / F-NORMAL conservative)           | 3 × 1 / 3 / {17, 54, 17}                       |
+| X-VERIFY-FINAL (G4) | Final row-count/schema/latch verification (1,339 rows expected)                                  | 1 / 2 / 5                                      |
 
-1. Probe Worker deleted (`wrangler delete` or dashboard by the owner).
-2. Disposable D1 database deleted by the owner. **Time Travel note:**
-   Free retention is 7 days; deletion itself is the cleanup — no restore
-   is planned or needed, and no probe data persists beyond deletion.
-3. Verification of zero remaining probe resources (owner-side listing;
-   agents perform none) — recorded in evidence.
-4. Final usage snapshot AFTER the documented analytics lag window
-   (owner records it when stable) so P-08 deltas close to zero.
-5. Evidence archived (§10 evidence set + SHA256SUMS) BEFORE deletion so
-   the archive does not depend on the deleted resources.
+**Expected limit rejections vs safety aborts (R114-04) — separated NOW:**
 
-**Evidence collection (for every probe round):** bound raw logs under
-`logs/` (naming `4x-probe-<case>-<seq>.log`), byte-preserved stdout/
-stderr; the instrument's per-statement audits exported to a committed
-JSON ledger (design-lab extraction pattern, parser committed BEFORE
-execution); owner-exported dashboard/analytics/Workers-Logs artifacts
-stored with provenance headers (round, commit SHA, UTC + Asia/Tehran
-timestamps, doc page dates); `SHA256SUMS.txt` over the whole evidence
-set; any deviation logged as a numbered correction, never an in-place
-edit of an already-published evidence file.
+- **Expected limit rejections are MEASURED OUTCOME CLASSES, never aborts:**
+  P-01a/P-01b rung rejections (payload/duration class); P-06b typed
+  row-size/bind-value rejection; **P-03 (69 statements), P-04 (66) and
+  P-07a-2 (54) exceed the Free 50-row under the STATEMENT interpretation —
+  a typed per-invocation rejection there is itself NOT_READY evidence for
+  the CJK shape, pre-registered as a valid outcome**; P-QU-A/P-QU-B typed
+  rejections near the 50/52 boundary (the discriminator's whole point). The
+  plan no longer claims "only SQL-text/bind-count limits are approached".
+- **Safety aborts (§12):** any DAILY-allowance quota-exceeded error (rows
+  read/written per day, requests per day, storage), any actual total
+  exceeding a §10 cap, any product-resource touch, any isolation failure,
+  any doc drift, or any outcome class OUTSIDE the case's registered set.
 
-## 11. Authorization checkpoints (the ONLY entry points — separate, explicit, recorded)
+**Quota-unit ambiguity (TR-01) — the differential discriminator (R114-05).**
+P-QU-A (one API call, 51 statements) and P-QU-B (52 API calls incl. the
+latch, 51 statements) are minimal, NON-MUTATING, primary-key-read controls
+with distinct typed outcomes and a pre-registered 4-branch interpretation
+matrix: (A✓,B✓) neither boundary at these counts — ambiguity RETAINED,
+honestly recorded; (A✗,B✓) a per-statement/per-subrequest boundary counts
+statements inside one batch — WHICH documented row fired stays ambiguous
+(both are 50) and is recorded as such; (A✓,B✗) the boundary counts
+execution-API calls; (A✗,B✗) both. A success NEVER proves absence of
+enforcement above the tested count. Daily allowances are NEVER deliberately
+exhausted. The general-50 vs internal-service-1,000 subrequest rows are
+kept DISTINCT from the D1-specific 50-query row (§2.3) — no single row is
+claimed to define D1 enforcement.
 
-- **G0 (this round, R1.10.4):** review of THIS PLAN by Posidon. No
-  operation of any kind precedes or accompanies it. ✅ requested — this
-  document is the G0 artifact.
-- **G1 — resource creation checkpoint:** explicit owner "go" to create
-  the §4 disposable Worker + D1 database (and NOTHING else), after
-  P0-2/P0-3. Creation is the ONLY operation G1 authorizes.
-- **G2 — execution checkpoint:** a SEPARATE explicit owner "go" to run
-  the pre-registered cases P-01…P-08 exactly as tabled, after P0-4…P0-9.
-  Any change to cases/limits/totals requires a REISSUED plan and a NEW
-  G2. G2 may authorize a SUBSET of cases (partial runs are valid).
-- **G3 — cleanup checkpoint:** explicit owner "go" for §10 teardown and
-  evidence finalization.
-- Standing rule: read-only, list, metrics, and dashboard operations on
-  the account are ALSO account operations — they are owner-side, never
-  agent-performed, and each future round's compliance record must state
-  its exact operation count (this round: **0**).
+## 9. CPU scopes and measurement definitions (units discipline)
 
-## 12. Pre-committed decision rules (fixed NOW, before any measurement)
+- **COMMIT-ONLY scope (P-07a-1/2/3):** the invocation receives a PRE-BUILT
+  statement payload (JSON envelope with the EXACT binds) and performs:
+  request-body JSON parsing of that payload (**registered inclusion**), bind
+  assembly, `prepare()`/`bind()`, ONE `db.batch()`, response and log
+  serialization, instrumentation. It EXCLUDES: raw XML parsing,
+  normalization, URL expansion, hashing, planner/classification, fixture
+  generation.
+- **FULL-POLL scope (P-02, P-03, P-04, P-05, P-C3):** the invocation
+  receives the raw synthetic RSS XML and performs EVERYTHING: raw XML
+  parsing, normalization, URL expansion, hashing, planner/classification
+  (the grouped source-bound probes), the full fixed-stage read sequence
+  (engine claim read + CAS, source select, capability read, ownership
+  acquire, authorization, budget readback), the commit batch, the fenced
+  terminal state write, the job terminal write, response/log serialization,
+  and instrumentation overhead. **D3 judges FULL-POLL values.** Commit-only
+  values are reported SEPARATELY as diagnostic decomposition.
+- **xAPI** — execution-API-call attempts per the corrected v3 instrument
+  units (R112-03); **STMT** — submitted statements. `prepare()` is
+  construction, never an execution (TR-01 anchor).
+- **SQL-text bytes / bind bytes** — UTF-8 via `TextEncoder`; the audited
+  per-statement total = SQL text + Σ bound-value bytes (internal-audit
+  definition; NOT an official unit).
+- **rows read / rows written** — official units from §2.2, recorded from
+  BOTH the per-query `meta` counters and the owner-side daily analytics;
+  discrepancies are recorded, never reconciled away.
+- **CPU** — ONLY a CPU-labeled field from a Free-available surface whose
+  EXACT name and type were recorded by the G2 smoke (§2.4), or an
+  owner-established Trace Events surface with `CPUTimeMs` (int, ms) — plus
+  the invocation `outcome` (`exceededCpu` on Error 1102). **Wall time
+  (`WallTimeMs`, `performance.now()`, local workerd elapsed) is NEVER CPU**
+  and is inadmissible for any Free-CPU conclusion. No CPU-labeled surface ⇒
+  CPU = UNKNOWN (§15) — never inferred from wall time.
 
-- **D1 — bind-payload / policy adoption:** the documented-limits-only
-  accounting may be adopted for the CJK shape IFF (i) the P-01 ladder
-  reaches the full F-CJK batch payload with **≥ 2× margin** with zero
-  payload-related rejections across all repetitions, AND (ii) P-02
-  completes end-to-end with correct durable rows, AND (iii) P-07 shows
-  CPU within the documented Free 10 ms for the same shape. ANY failure
-  → the conservative combined-byte policy STAYS, unchanged.
-- **D2 — ≤40 STMT target:** the unchanged-envelope NOT_READY verdict is
-  lifted ONLY if, under the adopted accounting, an on-platform F-CJK
-  commit measures ≤ 40 submitted statements AND ≤ 40 execution-API calls
-  (BOTH interpretations) AND D1(iii) holds. Otherwise **NOT_READY
-  stands** — and if the verdict is lifted, it is lifted by MEASURED
-  numbers only, with the full evidence chain.
-- **D3 — CPU dominates:** if any measured `CPUTimeMs` for a CJK-shaped
-  poll exceeds 10 ms, or `exceededCpu`/Error 1102 occurs, the CJK shape
-  is **NOT_READY on Free under ANY byte policy** — the CPU verdict
-  dominates every other gate. CPU UNKNOWN (no CPU-labeled surface) →
-  NOT_READY stands; wall time never substitutes.
-- **D4 — quota honesty:** readiness claims may rest ONLY on measured
-  quota deltas (P-08) vs documented allowances; formula margins alone
-  can never produce a READY claim. Missing/unevaluable measurement →
-  that dimension is UNKNOWN → overall verdict NOT_READY (unchanged).
-- **D5 — no goal-directed re-runs:** probes are never re-run with
-  altered parameters to force a desired outcome; the only re-run is a
-  repetition of the SAME case under the SAME registered parameters
-  (counted, logged), and ladder re-runs are capped at the pre-registered
-  counts in §6.
-- **D6 — drift:** if P0-4 re-verification shows any load-bearing
-  documented row changed, execution stops until the plan is re-issued
-  and re-reviewed (a changed platform invalidates pre-commitments).
+## 10. Exact bounded totals — RECONCILED from the machine-readable schedule (R114-04)
 
-## 13. Wall-time-vs-CPU and UNKNOWN discipline (restated as commitments)
+Every number below is DERIVED from `audit/PROBE_CASE_SCHEDULE.json` and
+verified by the LOCAL validator (§16), which also MEASURED the storage
+arithmetic against the actual schema in local SQLite. **The R1.10.4 5 MB
+storage cap is RETIRED — the reviewer's local counterexample (CE3: one
+100-row CJK fixture grew the actual-schema database by 9,125,888 bytes,
+because `canonical_url` is stored in BOTH the table and the
+`UNIQUE(source_id, canonical_url)` index) disproved it. The replacement cap
+is justified arithmetic, not a smaller wish:**
 
-1. `CPUTimeMs` (or an equivalent CPU-labeled surface re-verified at
-   execution time per P0-4) is the ONLY admissible CPU evidence;
-   `WallTimeMs`/`performance.now()`/local workerd elapsed times are
-   WALL and inadmissible for CPU conclusions.
-2. Every measurement this plan cannot pre-commit a value for (bind
-   payload acceptance, real CPU, real quota enforcement, the "50
-   queries" unit) is recorded as **UNKNOWN until measured** — no
-   derivation, analogy, or local proxy number is promoted into its
-   place.
-3. Local design-lab numbers (C-01…C-16, L-01…L-14) remain LOCAL PROXY
-   UNITS: they pin parity expectations (P-03…P-05) but NEVER serve as
-   cloud evidence.
+| Budget line                        | Registered total (validator-reconciled)                                                                                                                                               | Hard cap              | Documented Free allowance / margin                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------- |
+| Probe Worker invocations           | 20 (+3 transport retries)                                                                                                                                                             | **23**                | 100,000 requests/day (≈ 4,300×)                                                                       |
+| Execution-API calls, round total   | 151                                                                                                                                                                                   | ≤ 55/invocation       | 50-row probed by P-QU (typed classes registered)                                                      |
+| Submitted statements, round total  | 600 = 521 invocations + 79 CLI setup                                                                                                                                                  | **650**               | per-invocation ≤ 70 (max registered 69)                                                               |
+| Rows written (documented counting) | 8,351 (inserts 1,339 × 6 incl. index rows + writes)                                                                                                                                   | **9,000**             | 100,000 rows/day (**12.0×**)                                                                          |
+| Rows read (conservative bound)     | 15,637                                                                                                                                                                                | **25,000**            | 5,000,000 rows/day (**320×**)                                                                         |
+| Bind payload, round total          | 49.0 MB measured locally                                                                                                                                                              | **55,000,000 bytes**  | no documented row (the P-01b unknown)                                                                 |
+| Durable storage growth             | 101.2 MB measured locally (schema baseline 413,696 B — NOT the 12 KB empty-DB figure; 1,030 CJK rows × ≈91.3 KB incl. index amplification + 308 short rows + F-ROWSIZE + latch/seeds) | **120,000,000 bytes** | 500 MB/database (**4.9×**); 5 GB/account (2.0%)                                                       |
+| Max request body                   | ≈ 9.7 MB (P-01b-r2/r3 pre-built payload JSON)                                                                                                                                         | 12,000,000 bytes      | 100 MB Free request body (≈ 8×)                                                                       |
+| Workers Logs events                | ≤ ~600 (invocation + aggregated audit logs)                                                                                                                                           | **3,000**             | 200,000 events/day (≈ 67×); 256 KB/log; per-log audit summaries carry lengths, NEVER full bind values |
+| Queues operations                  | 0                                                                                                                                                                                     | **0**                 | not probed                                                                                            |
+| Provider fetches                   | 0 (synthetic fixtures only)                                                                                                                                                           | **0**                 | —                                                                                                     |
+| Product-resource touches           | 0                                                                                                                                                                                     | **0**                 | —                                                                                                     |
 
-## 14. What R1.10.4 did (closing record)
+The arithmetic is reconciled, not asserted: the validator replayed ALL 521
+invocation-side statements against the real S4 schema in local SQLite,
+executed EXACTLY the registered statement counts (V-10), measured the
+resulting storage growth (101,154,816 bytes — V-11), and computed the
+documented-accounting rows-written total (8,351) from per-kind multipliers
+(6 per source_items insert = 1 table row + 5 index rows; the D1 footnote-6
+rule) including setup, seeds, latch writes, verification calls and
+repetitions. Local numbers are feasibility proxies, NOT cloud measurements;
+the execution round re-measures every one of them from `meta` and
+owner-side analytics (P-08's passive deltas).
 
-Wrote this plan; re-verified the official limits from public docs (§2);
-corrected the §6 universal-fit claim and relabeled §9.4 in
-`free-plan/FREE_SAFE_EXECUTION_DESIGN.md`; performed **zero**
-Cloudflare/account operations; changed **zero** product files;
+## 11. Authorization state machine (R114-03 — the cycle is REMOVED)
+
+The R1.10.4 machine was circular: P0-8 required a real smoke invocation plus
+CPU-log export BEFORE G2, while G1 authorized creation only — the smoke was
+never authorizable. The revised machine is finite, explicit, and acyclic;
+**this round (R1.10.4.1) grants NOTHING**:
+
+- **G0 — plan review (re-requested now):** Posidon reviews THIS revised plan
+  (the R1.10.4 G0 verdict was CHANGES REQUIRED; R114-01…05 are addressed
+  in place). No operation accompanies it.
+- **G1 — resource creation:** owner "go" to create the §4 disposable Worker
+  - D1 database, deploy the pinned probe script (token secret bound), and
+    run the CLI setup: apply S3 migrations (71 statements), probe DDL (1),
+    latch seed (1), sources seed (1) — 74 CLI statements, all counted in §10.
+    No probe Worker invocation yet.
+- **G2 — smoke/evidence-availability check:** a SEPARATE owner "go" for
+  exactly ONE probe invocation (X-SMOKE) plus the owner-side Workers Logs
+  export check (record the actual CPU-labeled field name+type, or CPU =
+  UNKNOWN for the round — D3 then keeps NOT_READY; the owner may stop or
+  continue with CPU=UNKNOWN). The smoke authorizes itself NOTHING further.
+- **G3 — substantive probes:** a separate owner "go" to run the
+  pre-registered cases in the registered order (per-case or whole-set). The
+  future G3 grant **PRE-AUTHORIZES safe emergency teardown**: on ANY §12
+  abort criterion, the SAME grant authorizes immediately stopping all
+  submission (latch hard-stop), exporting available evidence within the
+  3-day Workers Logs retention, and deleting the probe Worker + database —
+  WITHOUT waiting for any later checkpoint. No abort is ever left dependent
+  on an ungranted future permission.
+- **G4 — final verification + evidence export:** X-VERIFY-FINAL invocation,
+  owner-side analytics/Workers-Logs exports, final usage snapshot after the
+  documented analytics lag, evidence archive + SHA256SUMS BEFORE deletion.
+- **G5 — cleanup:** delete the probe Worker + disposable DB; verify zero
+  remaining probe resources (owner-side listing); Time Travel note (Free 7
+  days) — deletion itself is the cleanup; no restore planned.
+- Standing rule: read-only/list/metrics/dashboard operations on the account
+  are ALSO account operations — owner-side, never agent-performed; each
+  future round's compliance record states its exact operation count.
+
+## 12. Prerequisites and abort criteria
+
+**Prerequisites (each verified with evidence, per phase):** P0-1 G0 passed
+on THIS revised plan; P0-2 owner-confirmed account headroom (D1 databases
+< 10, storage, plan still Workers Free); P0-3 owner-recorded baseline usage
+snapshot BEFORE any probe; P0-4 official-limit re-verification at execution
+time (drift ⇒ re-review, D6 — including the Dec 1 2026 Workers Logs pricing
+change); P0-5 probe script + copied planner/instrument pinned by commit SHA
+and hashed into evidence; P0-6 fixture checksums pinned and matched at run
+time; P0-7 secret scan green over the probe tree; P0-8 (at G2, not before)
+the smoke's CPU-field record per §2.4; P0-9 teardown commands rehearsed and
+in the owner's hands BEFORE G3.
+
+**Abort criteria (each triggers the PRE-AUTHORIZED emergency teardown of
+§11/G3):** (a) any daily-allowance quota-exceeded error; (b) any actual
+total exceeding a §10 cap (including the 23rd invocation); (c) any
+product-resource touch or isolation failure; (d) P0-4 drift in any
+load-bearing documented row; (e) any outcome outside a case's registered
+expected classes; (f) any credential-shaped string appearing in probe
+output. Expected limit rejections (§8) are NOT aborts.
+
+## 13. Cleanup and evidence collection
+
+Cleanup order: evidence archived FIRST (§13 evidence set + SHA256SUMS, never
+depending on live resources), then probe Worker deleted, then the disposable
+D1 database deleted (owner-authorized G5), then owner-side verification of
+zero remaining probe resources, then the final usage snapshot after the
+analytics lag window so P-08 deltas close to zero. Evidence collection (every
+probe round): bound raw logs under `logs/` (`5x-probe-<case>-<seq>.log`
+naming), byte-preserved stdout/stderr, the instrument's per-statement audits
+exported to a committed JSON ledger, owner-exported dashboard/analytics/
+Workers-Logs artifacts with provenance headers (round, commit SHA, UTC +
+Asia/Tehran timestamps, doc page dates), SHA256SUMS over the whole evidence
+set, and any deviation logged as a numbered correction — never an in-place
+edit of published evidence.
+
+## 14. Pre-committed decision rules (fixed NOW, before any measurement)
+
+- **D1 — aggregate payload/policy adoption (REFORMULATED and registered
+  BEFORE execution, per the review's requirement; the ≥2× margin itself is
+  NOT weakened — only the measurement vehicle changed from illegal single
+  statements to legal aggregate batches):** the documented-limits-only
+  accounting may be adopted for the CJK shape IFF (i) the P-01b AGGREGATE
+  ladder — each constituent statement ≤ 100 binds — demonstrates a single
+  accepted `db.batch` whose total bind payload is ≥ 2× the exact F-CJK batch
+  payload (P_req = 4,510,238 B; P_208 = 9,383,270 B = 2.080×; the gate is
+  REACHABLE — V-08) with zero payload-related rejections across ALL
+  registered repetitions (P-01b-r3 included), AND (ii) P-02 completes
+  end-to-end with correct durable rows, AND (iii) P-07's FULL-POLL CPU is
+  within the documented Free 10 ms. ANY failure ⇒ the conservative
+  combined-byte policy STAYS, unchanged.
+- **D2 — ≤40 STMT target:** the NOT_READY verdict is lifted ONLY if, under
+  the adopted accounting, an on-platform F-CJK commit measures ≤ 40 submitted
+  statements AND ≤ 40 execution-API calls (BOTH interpretations) AND D1(iii)
+  holds — by MEASURED numbers with the full evidence chain. Otherwise
+  **NOT_READY stands**.
+- **D3 — CPU dominates:** if any measured FULL-POLL CPU value for a
+  CJK-shaped poll exceeds 10 ms, or `exceededCpu`/Error 1102 occurs, the CJK
+  shape is **NOT_READY on Free under ANY byte policy** — the CPU verdict
+  dominates every other gate. CPU UNKNOWN (no CPU-labeled surface) ⇒
+  NOT_READY stands; wall time never substitutes. COMMIT-ONLY CPU is reported
+  separately and never substitutes for full-poll CPU.
+- **D4 — quota honesty:** readiness claims rest ONLY on measured quota
+  deltas (P-08) vs documented allowances; formula margins alone never produce
+  READY. Missing/unevaluable measurement ⇒ that dimension is UNKNOWN ⇒
+  overall NOT_READY (unchanged).
+- **D5 — no goal-directed re-runs:** probes are never re-run with altered
+  parameters to force an outcome; the only re-run is a repetition of the
+  SAME case under the SAME registered parameters (counted, logged), and
+  ladder repetitions are capped at the pre-registered counts (P-01b-r3).
+- **D6 — drift:** if P0-4 re-verification shows any load-bearing documented
+  row changed, execution stops until the plan is re-issued and re-reviewed.
+- **D7 — coverage scope (NEW):** no fixture outcome may be promoted beyond
+  its registered shape (§1); the large-single-URL region (canonical URLs
+  above the measured shapes, up to and beyond the 2,000,000-byte documented
+  row limit — e.g. the registered 1,800,116-byte RSS / 5,400,023-byte
+  canonical counterexample) stays NOT_READY unless separately measured
+  (P-06b covers exactly ONE point: 1,899,995 B); under the CURRENT policy
+  those shapes are plan-time REJECTED (`OversizedRowPlanError`) — no silent
+  cap, no truncation, no drop, ever. No global envelope-READY inference.
+- **D8 — rejection/abort class separation (NEW):** expected limit rejections
+  (§8) are recorded as measured outcomes and NEVER reinterpreted as aborts;
+  safety aborts (§12) ALWAYS trigger the pre-authorized teardown. A verdict
+  may cite a typed rejection as evidence, never as an excuse to rerun.
+
+## 15. Wall-time-vs-CPU and UNKNOWN discipline (restated as commitments)
+
+1. A CPU-labeled field from the G2-verified Free-available surface (or an
+   owner-established Trace Events surface with `CPUTimeMs`) is the ONLY
+   admissible CPU evidence; `WallTimeMs`/`performance.now()`/local workerd
+   elapsed times are WALL and inadmissible for CPU conclusions.
+2. Every measurement this plan cannot pre-commit a value for (aggregate
+   bind-payload acceptance, real CPU, real quota enforcement, the "50
+   queries" unit, the actual Workers Logs CPU field name) is **UNKNOWN until
+   measured** — no derivation, analogy, or local proxy number is promoted.
+3. Local design-lab numbers (C-01…C-16, L-01…L-14) and the validator's
+   LOCAL numbers (§16) remain LOCAL PROXY UNITS: they pin feasibility and
+   parity expectations but NEVER serve as cloud evidence.
+
+## 16. The LOCAL feasibility validator (R1.10.4.1 deliverable)
+
+`audit-tools/probe-plan/validate-probe-plan.mjs` — Node (≥ 23.4 for
+`node:sqlite`; on Node 22 run with `--experimental-sqlite`), zero
+dependencies, zero network, zero account operations. It consumes
+`audit/PROBE_CASE_SCHEDULE.json` and the ACTUAL repository files and proves,
+as 19 named checks (full current results bound in
+`logs/50-plan-validator-r11041.log`):
+
+- **V-01** schedule structural integrity (20 cases; phase invocation sums
+  G2:1 / G3:18 / G4:1); **V-02** the bind formula derived from
+  `design-lab/candidate-sql.ts` itself (11 values/row + 7 owned guards ⇒
+  owned binds = 11·rows+7; ≤ 8 owned rows per statement); **V-03** the
+  owned/legacy INSERT templates extracted from the same source with
+  placeholder counts 11k+7 / 11k verified for k ∈ {1,2,4,8,9}.
+- **V-04a/V-04b** the REAL migrations applied to local SQLite: S3 = 71
+  statements, `schema_version` = 3, `poll_owner_job_id` ABSENT, the owned
+  compile probe FAILS (tier boundary proven); +0004 ⇒ `schema_version` = 4,
+  column PRESENT, probe prepares, the partial unique index exists, CLI setup
+  totals reconcile (79).
+- **V-05** `latch-seed.sql` AND `sources-seed.sql` regenerated from the
+  schedule are byte-identical to the committed files (drift fences;
+  `--write-seeds` regenerates).
+- **V-06** every registered statement is legal (owned ≤ 8 rows / 95 binds;
+  legacy ≤ 9 rows / 99 binds) and the illegal 16/32/50-row rungs are GONE.
+- **V-07** fixture byte exactness (F-CJK 45,023 B; F-ROWSIZE 1,899,995 B;
+  F-OVERSIZE 102,500 B; distinct URLs; raw RSS under the feed bound).
+- **V-08** the REACHABLE gate: P_208 = 9,383,270 B ≥ 2 × P_req =
+  4,510,238 B (multiple 2.080×).
+- **V-09** internal-budget proofs (2-row fits at 91,399 B; 3-row rejected at
+  136,511 B ⇒ P-03's 50 INSERTs; F-OVERSIZE/F-ROWSIZE plan-time rejections
+  at 103,774 / 1,901,273 B).
+- **V-10/V-10f** the FULL local replay against the real S4 schema: guarded
+  inserts land, a WRONG generation inserts ZERO rows (the fence is live),
+  the negative probe rejects, and the replay executes EXACTLY the 521
+  registered invocation-side statements.
+- **V-11** resource reconciliation (600/650 statements; 8,351/9,000
+  documented rows written — 12.0× under 100,000/day; 49.0/55 MB bind
+  payload; 101.2/120 MB MEASURED local storage growth — 4.9× under
+  500 MB/db); **V-12** invocation totals (20 + 3 retries = 23; per-invocation
+  maxima 69 statements / 52 API calls); **V-13** rows-read bounds
+  (15,637/25,000 — 320× under 5M/day).
+- **V-14** the static coverage counterexample computes exactly (1,800,116 B
+  raw RSS < 2,097,152; canonical 5,400,023 B > 2,000,000).
+- **V-15** THIS document cites the schedule, the validator, the ladder, the
+  fixtures, the phases, the protected invocation, the CPU scopes, the
+  coverage numbers and the reconciled caps (33 anchors).
+- **V-16** the quota-unit discriminator structure (non-mutating; 51+51;
+  4-branch matrix); **V-17** the protected-invocation artifacts (kill-switch
+  DDL; 21 latch rows; every registered budget consumed exactly once).
+
+Count separation: the validator is REVIEW-SIDE tooling — its checks are
+NEVER added to the accepted product suite's 1142 or its subsets, and never
+to CI's `npm run check` (product counts unchanged). Run:
+`node audit-tools/probe-plan/validate-probe-plan.mjs` (from the repository
+root). Local SQLite numbers are feasibility proxies, NOT cloud measurements.
+
+## 17. What R1.10.4.1 did (closing record)
+
+Revised this plan in place against the G0 review's five findings: split the
+payload gate into legal per-statement admissibility (2/4/8) + a REACHABLE
+aggregate `db.batch` ladder (13/26/26 statements; 2.080× margin) with exact
+repetitions (R114-01); specified the S3 control and S4 owned schema tiers
+separately with exact DDL, versions, seeding, order and verification
+(R114-02); replaced the circular authorization machine with the acyclic
+G0→G1→G2→G3→G4→G5 state machine including PRE-AUTHORIZED emergency teardown,
+with all smoke/setup/verification calls inside the caps (R114-03);
+recalculated every budget from the machine-readable schedule with a LOCAL
+validator and MEASURED index-amplified storage arithmetic (the 5 MB cap
+retired; 120 MB cap, 4.9× under the documented 500 MB/db) (R114-04); added
+the protected invocation + replay limits (token, durable latch, kill switch),
+the quota-unit discriminator with typed outcomes and retained ambiguity, the
+separate expected-rejection/abort classes, the commit-only vs full-poll CPU
+scopes, the honest CPU-field caveat, the 50-general/1,000-internal
+subrequest distinction, and the exact coverage claim with the registered
+static counterexample and decision rule D7 (R114-05). Performed ZERO
+Cloudflare/account operations (including reads); changed ZERO product files;
 preserved frozen historical evidence; committed ordinarily to
 `review/r1.10.3-sql-design` (Draft PR #11) with no force push.
-**STOP — awaiting independent review (G0) before any future
-checkpoint.**
+**STOP — awaiting independent review (G0) of this revised plan.**

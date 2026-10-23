@@ -1,4 +1,4 @@
-# PIXEL — Free-Safe Execution Design v3 (DESIGN REVIEW — R1.10.3 + R1.10.3.1 + R1.10.4 corrections)
+# PIXEL — Free-Safe Execution Design v3 (DESIGN REVIEW — R1.10.3 + R1.10.3.1 + R1.10.4 + R1.10.4.1 corrections)
 
 **Status: DESIGN REVIEW — lab-evidenced candidate, NOTHING implemented in the
 product, nothing authorized for product use.** This is the R1.10.3 revision
@@ -20,10 +20,19 @@ RSS envelope — relabels §9.4 as that outline, and adds the
 authorization-gated preview resource probe PLAN
 `audit/PREVIEW_RESOURCE_PROBE_PLAN.md` (PLAN ONLY: zero
 Cloudflare/account operations, including reads, were performed in
-R1.10.4). Product source stays
+R1.10.4). R1.10.4.1 (the G0 review of that plan returned CHANGES
+REQUIRED — R114-01…R114-05) revises the plan in place: the payload gate
+is split into legal per-statement admissibility plus a REACHABLE aggregate
+`db.batch` ladder, the disposable schema3/schema4 tiers are specified
+separately, the authorization machine is acyclic with pre-authorized
+emergency teardown, every budget is reconciled from the machine-readable
+`audit/PROBE_CASE_SCHEDULE.json` by a LOCAL-only feasibility validator
+(`audit-tools/probe-plan/validate-probe-plan.mjs`), and the conclusions are
+constrained to the measured shapes — zero Cloudflare/account operations
+(including reads) in R1.10.4.1. Product source stays
 `f70205648922d0f8e60619e45e5d54e6e87b8f1b` (297 files, byte-identical);
 no product patch, no migration, no config change, no Cloudflare operation,
-no paid upgrade in R1.10.3 / R1.10.3.1 / R1.10.4.
+no paid upgrade in R1.10.3 / R1.10.3.1 / R1.10.4 / R1.10.4.1.
 
 ## 1. The measured problem (unchanged, verified)
 
@@ -356,10 +365,13 @@ lossless in-window processing are designed NOWHERE; nothing in this
 section is executable as written). Stated plainly: **the ≤40
 execution-API-call target PASSES for the unchanged supported RSS
 envelope; the ≤40 SQL-statement target FAILS** (§6/§9.2). The concrete,
-authorization-gated measurement gate for item 1 below is the R1.10.4
-probe PLAN `audit/PREVIEW_RESOURCE_PROBE_PLAN.md` — PLAN ONLY, zero
-Cloudflare/account operations performed in R1.10.4, unexecuted until its
-own separate authorization checkpoints pass.
+authorization-gated measurement gate for item 1 below is the probe PLAN
+`audit/PREVIEW_RESOURCE_PROBE_PLAN.md` — PLAN ONLY, zero
+Cloudflare/account operations performed in R1.10.4/R1.10.4.1, unexecuted
+until its own separate authorization checkpoints pass. **R1.10.4.1: the
+plan was REVISED after its G0 review returned CHANGES REQUIRED
+(R114-01…R114-05, addressed in place — see
+`audit/CORRECTIONS_R1_10_4_1.md`); a NEW G0 review is requested.**
 
 To lift NOT_READY honestly, a future round (NOT authorized by this
 round) must deliver, in this order:
@@ -375,7 +387,12 @@ round) must deliver, in this order:
    **R1.10.4: this plan now EXISTS as
    `audit/PREVIEW_RESOURCE_PROBE_PLAN.md` (PLAN ONLY — it has NOT been
    executed, performs zero account operations itself, and execution
-   requires its own separate authorization checkpoints).**
+   requires its own separate authorization checkpoints). R1.10.4.1: the
+   plan is REVISED in place per the G0 CHANGES REQUIRED verdict (legal
+   aggregate ladder; S3/S4 tiers; acyclic authorization machine;
+   schedule-reconciled budgets + LOCAL validator; exact coverage claim),
+   with `audit/PROBE_CASE_SCHEDULE.json` as the machine-readable source of
+   truth.**
 2. **Policy decision rule (pre-committed):** if measured evidence shows
    the documented SQL-TEXT limit (≤ 100 KB text, ≤ 100 params) alone is
    safe for the envelope, the planner switches to documented-limits
