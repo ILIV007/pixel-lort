@@ -1,4 +1,4 @@
--- PIXEL — PROBE-ONLY sources seeding (R1.10.4.1). GENERATED from
+-- PIXEL — PROBE-ONLY sources seeding (R1.10.4.2). GENERATED from
 -- audit/PROBE_CASE_SCHEDULE.json by audit-tools/probe-plan/validate-probe-plan.mjs.
 -- Applied ONLY to the disposable probe database at G1 (CLI, literal VALUES,
 -- no binds). One sources row per probe case that needs one; sources is

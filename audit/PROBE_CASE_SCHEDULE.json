@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 1,
-  "scheduleId": "PIXEL-PROBE-SCHEDULE-R1.10.4.1",
+  "schemaVersion": 2,
+  "scheduleId": "PIXEL-PROBE-SCHEDULE-R1.10.4.2",
   "planDocument": "audit/PREVIEW_RESOURCE_PROBE_PLAN.md",
-  "parentCommit": "06caee0eb9d12dd0d037dc125c7bace4db420f28",
-  "purpose": "Machine-readable pre-registered case schedule for the authorization-gated preview resource probe plan. Every future authorized probe operation, invocation, statement, bind payload, row read/write and storage bound is derived from THIS file. The LOCAL-only feasibility validator (audit-tools/probe-plan/validate-probe-plan.mjs) proves: bind counts, required schemas, reachable gates, invocation/repetition totals, and reconciled payload/read/write/storage bounds. Nothing in this schedule has been executed.",
+  "parentCommit": "fc679f1f051f6d223356515160068980727f768b",
+  "purpose": "Machine-readable pre-registered case schedule for the authorization-gated preview resource probe plan. Every future authorized probe operation, invocation, ATTEMPTED QUERY, statement, bind payload, row read/write and storage bound is derived from THIS file. The LOCAL-only feasibility validator (audit-tools/probe-plan/validate-probe-plan.mjs) proves: bind counts, required schemas, reachable gates, invocation/repetition totals, reconciled payload/read/write/storage bounds, same-link fixture round-trips, and behavioral latch controls. The validator's replay is a STRUCTURAL SIMULATION (SELECT-1/simplified substitutes), NOT a full semantic/resource replay; the full-poll-equivalent harness is UNPROVEN (proofScope). Nothing in this schedule has been executed; publication is HELD (publicationSafety).",
   "accounting": {
     "ownedBindsPerStatement": "11*rows+7",
     "legacyBindsPerStatement": "11*rows",
@@ -14,7 +14,9 @@
     "numericBindBytes": 8,
     "sourceItemsIndexesPerInsert": 5,
     "sourceItemsRowsWrittenPerInsert": 6,
-    "bindByteDefinition": "UTF-8 bytes via TextEncoder for strings; 8 bytes conservative for numeric/NULL binds (the audited internal definition, mirrored from design-lab/candidate-sql.ts bindBytes)"
+    "bindByteDefinition": "UTF-8 bytes via TextEncoder for strings; 8 bytes conservative for numeric/NULL binds (the audited internal definition, mirrored from design-lab/candidate-sql.ts bindBytes)",
+    "attemptedQueryDefinition": "D1 CONTRACT (R1141-02, pinned by the permanent workerd control audit-tools/d1-contract/): prepare() is CONSTRUCTION ONLY and never a submitted statement; TERMINAL execution (.all()/.first()/.run()/db.batch) is the attempted query and is counted in apiCalls/statements EVEN WHEN REJECTED. node:sqlite COMPILES at prepare(), so a local compile rejection is LOCAL-ENGINE metadata (proves the column truly does not exist) and is NEVER a Cloudflare billable counter.",
+    "engineMetadataDistinction": "Local validator numbers (statements attempted, local changes, measured SQLite bytes) are LOCAL-ENGINE feasibility proxies. Cloudflare billable counters (rows_read/rows_written per-query meta, owner-side daily analytics, Workers requests) are separate surfaces measured only during authorized execution rounds (P-08)."
   },
   "documentedLimits": {
     "d1Limits": {
@@ -61,6 +63,13 @@
       "host": "example-normal",
       "items": 300,
       "canonicalUrlBytes": 2048,
+      "rawRss": {
+        "note": "R1141-03: raw documents are generated from the SAME deterministic links as the canonical rows (the padded 2,048-byte URL IS the raw link - ASCII never expands); complete serialized UTF-8 documents (open + items + close), byte-verified by the validator",
+        "deliveredSlices": [
+          { "caseId": "P-C3", "offset": 0, "count": 100, "rawRssBytes": 207582 },
+          { "caseId": "P-05", "offset": 100, "count": 100, "rawRssBytes": 207582 }
+        ]
+      },
       "rowValues": {
         "idPattern": "it-normal-<index>",
         "externalIdPattern": "ext-normal-<index>",
@@ -82,6 +91,9 @@
       "shortCanonicalUrlBytes": 2048,
       "cjkItems": 92,
       "cjkChars": 5000,
+      "rawRss": {
+        "deliveredSlices": [{ "caseId": "P-04", "offset": 0, "count": 100, "rawRssBytes": 1401282 }]
+      },
       "rowValues": {
         "idPattern": "it-hetero-<index>",
         "externalIdPattern": "ext-hetero-<index>",
@@ -100,6 +112,12 @@
       "host": "example-source",
       "items": 400,
       "cjkChars": 5000,
+      "rawRss": {
+        "deliveredSlices": [
+          { "caseId": "P-02", "offset": 0, "count": 100, "rawRssBytes": 1505082 },
+          { "caseId": "P-03", "offset": 100, "count": 100, "rawRssBytes": 1505082 }
+        ]
+      },
       "rowValues": {
         "idPattern": "it-cjk-<index>",
         "externalIdPattern": "ext-cjk-<index>",
@@ -120,6 +138,9 @@
       "cjkCharsBase": 5000,
       "charsStep": 1,
       "perStep": 500,
+      "rawRss": {
+        "delivery": "none - commit-scope only (pre-built statement payloads for P-01a/P-01b); no RSS document"
+      },
       "rowValues": {
         "idPattern": "it-ladder-<index>",
         "externalIdPattern": "ext-ladder-<index>",
@@ -138,6 +159,9 @@
       "host": "example-oversize",
       "items": 1,
       "canonicalUrlBytes": 102500,
+      "rawRss": {
+        "deliveredSlices": [{ "caseId": "P-06", "offset": 0, "count": 1, "rawRssBytes": 102609 }]
+      },
       "rowValues": {
         "idPattern": "it-oversize-0",
         "externalIdPattern": "ext-oversize-0",
@@ -156,6 +180,9 @@
       "host": "rowsize-source",
       "items": 1,
       "cjkChars": 211108,
+      "rawRss": {
+        "delivery": "none - pre-built payload only (P-06b, documented-limits-only commit scope); no RSS document"
+      },
       "rowValues": {
         "idPattern": "it-rowsize-0",
         "externalIdPattern": "ext-rowsize-0",
@@ -223,7 +250,7 @@
     {
       "id": "G0",
       "name": "plan review",
-      "status": "R1.10.4 G0 returned CHANGES REQUIRED; R1.10.4.1 revises the plan; a NEW G0 review is requested for the revised plan. NO operation of any kind is authorized by this file."
+      "status": "R1.10.4 G0 returned CHANGES REQUIRED; R1.10.4.1 revised the plan; the R1.10.4.1 G0 review returned PARTIALLY ACCEPTED / CHANGES REQUIRED (R1141-01..05); R1.10.4.2 corrects proof scope, fixtures, accounting and adds the publication-safety hold; a NEW G0 review is requested for the revised plan. NO operation of any kind is authorized by this file."
     },
     {
       "id": "G1",
@@ -289,8 +316,8 @@
       "caseId": "X-SMOKE",
       "order": 1,
       "phase": "G2",
-      "tier": "S4",
-      "title": "Evidence-availability smoke",
+      "tier": "S3",
+      "title": "Evidence-availability smoke (tier-agnostic statements: probe latch + liveness SELECT run while the disposable DB is still at schema version 3 - migration 0004 is applied later, at the registered X-SCHEMA4 boundary)",
       "invocations": 1,
       "apiCalls": 2,
       "statements": [
@@ -309,23 +336,25 @@
       "tier": "S3",
       "title": "S3 control-tier verification (schema version, tier boundary)",
       "invocations": 1,
-      "apiCalls": 2,
+      "apiCalls": 3,
       "statements": [
         { "kind": "latch-increment", "count": 1 },
         {
           "kind": "verify-select",
           "count": 2,
           "note": "schema_version read (=3); probe source row count"
-        }
-      ],
-      "prepareProbes": [
+        },
         {
-          "kind": "compile-probe",
+          "kind": "terminal-probe",
+          "count": 1,
           "sql": "SELECT poll_owner_job_id FROM source_state LIMIT 0",
-          "expectation": "PREPARE-TIME ERROR on S3 (the tier boundary is real; recorded, never submitted as a statement)"
+          "expectation": "terminal-rejection",
+          "note": "R1141-02: prepare() constructs the statement (construction is NEVER a submitted statement); TERMINAL execution REJECTS for the missing column - the rejection IS one attempted query (+1 API call, +1 attempted statement, 0 rows, 0 changes). The permanent positive workerd control audit-tools/d1-contract/ pins this exact contract"
         }
       ],
-      "expectedClasses": ["success; S3 tier boundary proven by the prepare-time error record"]
+      "expectedClasses": [
+        "success; S3 tier boundary proven by the REGISTERED TERMINAL REJECTION of the attempted query (prepare succeeds; .all() rejects - workerd control audit-tools/d1-contract/)"
+      ]
     },
     {
       "caseId": "P-C3",
@@ -383,10 +412,17 @@
       "tier": "S4",
       "title": "Schema-4 application verification (0004 applied by CLI before this invocation) and ownership-fence negative probe",
       "invocations": 1,
-      "apiCalls": 4,
+      "apiCalls": 5,
       "statements": [
         { "kind": "latch-increment", "count": 1 },
         { "kind": "verify-select", "count": 2, "note": "schema_version read (=4); jobs row count" },
+        {
+          "kind": "terminal-probe",
+          "count": 1,
+          "sql": "SELECT poll_owner_job_id FROM source_state LIMIT 0",
+          "expectation": "terminal-success",
+          "note": "R1141-02 positive half of the contract: the SAME statement that terminally rejects on S3 now constructS AND executes with 0 rows on S4 (pinned by audit-tools/d1-contract/) - one attempted query, 0 rows"
+        },
         {
           "kind": "seed-job",
           "count": 1,
@@ -398,15 +434,8 @@
           "note": "SECOND non-terminal job for the SAME aggregate; expected typed UNIQUE rejection from idx_jobs_source_outstanding_poll; submitted alone so nothing else rolls back"
         }
       ],
-      "prepareProbes": [
-        {
-          "kind": "compile-probe",
-          "sql": "SELECT poll_owner_job_id FROM source_state LIMIT 0",
-          "expectation": "prepares cleanly on S4 (recorded)"
-        }
-      ],
       "expectedClasses": [
-        "typed UNIQUE rejection on the negative probe (the ownership fence works); everything else succeeds"
+        "typed UNIQUE rejection on the negative probe (the ownership fence works); the terminal probe returns 0 rows (positive contract); everything else succeeds"
       ]
     },
     {
@@ -909,10 +938,11 @@
     "invocationsRegistered": 20,
     "transportRetryAllowance": 3,
     "invocationsHardCap": 23,
-    "transportRetryRule": "retries ONLY for invocations with NO D1 statement submitted (pre-flight/transport failures), re-executing the SAME case under the SAME registered parameters, each logged; the latch consumes a slot on every authenticated request that reaches the database",
+    "transportRetryRule": "retries ONLY for invocations with NO D1 statement submitted (pre-flight/transport failures), re-executing the SAME case under the SAME registered parameters, each logged; the latch consumes a slot on every authenticated request that reaches the database; a retry after a consumed-but-unanswered latch slot is NOT permitted (conservative before-work admission - the slot stays consumed)",
     "statementsRoundTotalCap": 650,
     "statementsPerInvocationCap": 70,
     "apiCallsPerInvocationCap": 55,
+    "apiCallsRoundTotalCap": 170,
     "rowsWrittenRoundTotalCap": 9000,
     "rowsReadRoundTotalCap": 25000,
     "bindPayloadRoundTotalCapBytes": 55000000,
@@ -921,7 +951,29 @@
     "workersLogsEventsCap": 3000,
     "queueOperations": 0,
     "providerFetches": 0,
-    "productResourceTouches": 0
+    "productResourceTouches": 0,
+    "reservedRefusalAndEmergencyOverhead": {
+      "d1Attempts": 8,
+      "apiCalls": 8,
+      "rowsWritten": 16,
+      "rowsRead": 64,
+      "note": "R1141-04: RESERVED bounded allowance (may be unused) for authorized-but-rejected latch observations (duplicate deliveries, kill-switch observation/activation, closed/exhausted cases) and the emergency hard-stop batch (set __global__ aborted + close the case). Detecting any refusal costs exactly ONE submitted UPDATE with zero durable changes; these attempts are counted D1 attempts. Beyond this reserve, ANY additional refused attempt is an abort-criterion event (registered outcome set exceeded)."
+    },
+    "accessControlClasses": {
+      "durablyEnforced": [
+        "per-case invocation budget (probe_run_state.invocations_registered - behavioral proof V-18)",
+        "per-case statement budget at invocation granularity (statements_registered + the latch statements_used guard - behavioral proof V-18)",
+        "per-case status gating (open/closed/aborted) and the __global__ kill switch"
+      ],
+      "operatorSubmissionLimits": [
+        "the aggregate 23-invocation ceiling (sum of durably enforced per-case budgets + retry allowance) - an ACCOUNTING IDENTITY with NO separate durable aggregate counter",
+        "single registered execution per case; no goal-directed re-runs (D5)",
+        "the 3-retry transport allowance and its no-D1-statement precondition"
+      ],
+      "notEnforced": [
+        "UNAUTHENTICATED PUBLIC TRAFFIC VOLUME: rejected pre-D1 by the token check (zero probe statements, zero durable changes) but NOT bounded in count by this schedule - there is no global request ceiling mechanism in this plan; Workers-level request flooding is outside the plan's scope and is the owner's platform concern"
+      ]
+    }
   },
   "decisionRuleInputs": {
     "p01bRequiredPayloadMultiple": 2,
@@ -950,5 +1002,73 @@
       "A-rejection_B-rejection": "both boundaries exist at these counts (statement AND call counting)"
     },
     "honestyRule": "a success NEVER proves absence of enforcement above the tested count; the ambiguity is retained wherever the matrix leaves it unresolved; daily allowances are NEVER deliberately exhausted"
+  },
+  "proofScope": {
+    "structuralSimulation": {
+      "what": "The LOCAL validator executes every registered statement shape against the real S3-then-S4 schemas in node:sqlite (S3-tier cases BEFORE 0004, S4 cases after): exact statement counts, guarded inserts, the ownership fence, the negative probe, actual bind payloads, and the measured storage of THIS EXACT simulation.",
+      "substitutedKinds": [
+        "source-select",
+        "capability-read",
+        "authorization",
+        "budget-readback",
+        "classification-lookup"
+      ],
+      "substituteForm": "SELECT 1 (or simplified SQL) - NOT the accepted operations",
+      "proves": [
+        "the schedule's statement/invocation/API-call accounting is internally exact",
+        "the registered INSERT templates, guard fences and chunk sizes are legal and executable against the real schema",
+        "the S3/S4 tier boundary (column absent/present) and the partial-unique-index rejection",
+        "the storage growth of THIS EXACT simulation in local SQLite (incl. UNIQUE-index amplification)"
+      ],
+      "doesNotProve": [
+        "the accepted call-chain semantics (authorizeIngestionUnit's guarded UPDATE + INSERT..SELECT budget mutation pair, the real source/capability/classification reads)",
+        "execution-API grouping / batch boundaries as the runtime would issue them",
+        "durable budget effects of the accepted authorization path",
+        "CPU of any scope",
+        "any Cloudflare billable counter",
+        "full-path storage (the accepted authorization/budget writes are NOT in the simulation)"
+      ],
+      "evidenceLabel": "independently measured (local engine metadata; NOT Cloudflare billable counters)"
+    },
+    "fullPollHarness": {
+      "status": "UNPROVEN — NOT IMPLEMENTED (LOCAL round)",
+      "definition": "An executable review-side harness that runs the ACCEPTED source/capability/claim/authorization/ownership/terminal operations plus the design-only commit candidate over actual source-bound grouped probes, observing actual execution-API calls, statement attempts/batch boundaries, durable budget effects and bind payloads.",
+      "requiredOperations": [
+        "accepted claimJob (row read + CAS claim)",
+        "accepted SOURCE_SELECT_SQL source read",
+        "accepted resolveSchemaCapability capability read",
+        "accepted authorizeIngestionUnit (guarded UPDATE + INSERT..SELECT budget mutation, one atomic batch)",
+        "accepted readIngestionBudget readback",
+        "accepted ownership acquire/fenced state writes",
+        "accepted completeJob terminal write",
+        "design-only commit candidate (design-lab/candidate-sql.ts)",
+        "actual source-bound grouped probes"
+      ],
+      "cloudExecutionBlocked": true,
+      "blockRule": "No full-poll-equivalent claim may be made until the harness exists and a G0-approved authorized round executes it. Structural calibration must NEVER be promoted into full-poll readiness. Until then every full-poll figure (API grouping, attempted-statement ledger, authorization mutations, error-path overhead) stays UNPROVEN.",
+      "evidenceLabel": "future measurement"
+    }
+  },
+  "publicationSafety": {
+    "status": "HELD — no push, no PR update, no remote write of any kind in this LOCAL round",
+    "knownFacts": [
+      "Public GitHub check-runs show 'Workers Builds: pixel-preview' (app cloudflare-workers-and-pages), conclusion FAILURE, with DISTINCT Cloudflare Build IDs on the three recent review heads 761f176, 06caee0 and fc679f1 — i.e., account-side BUILD ATTEMPTS were associated with pushes to this review branch",
+      "The 'Phase 0 quality gate' GitHub Actions run completed SUCCESS on fc679f1 (run 39984358358)"
+    ],
+    "unknowns": [
+      "deployment outcome, failure stage and cause of the Workers Builds failures",
+      "whether any deployment/migration/activation side effect occurred",
+      "any incremental account charge",
+      "whether the review branch can trigger FUTURE builds or deployments"
+    ],
+    "rule": "Pre-existing does NOT imply harmless; a red build is NOT a safety mechanism. No further push until a SEPARATE publication-safety authorization resolves the integration/branch behavior (owner-side investigation only; no Cloudflare account access is granted to or performed by this round). Ordinary LOCAL commits stay unpushed.",
+    "evidence": [
+      "posidon-review/R1.10.4.1/761f176-checks.json",
+      "posidon-review/R1.10.4.1/06caee0-checks.json",
+      "posidon-review/R1.10.4.1/fc679f1-checks.json",
+      "posidon-review/R1.10.4.1/761f176-statuses.json",
+      "posidon-review/R1.10.4.1/06caee0-statuses.json",
+      "posidon-review/R1.10.4.1/fc679f1-statuses.json"
+    ]
   }
 }

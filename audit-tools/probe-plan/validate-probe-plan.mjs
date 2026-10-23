@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PIXEL R1.10.4.1 — LOCAL-ONLY probe-plan feasibility validator.
+ * PIXEL R1.10.4.2 — LOCAL-ONLY probe-plan feasibility validator.
  *
  * Proves, from the machine-readable case schedule
  * (audit/PROBE_CASE_SCHEDULE.json) against the ACTUAL repository files:
@@ -9,33 +9,55 @@
  *   V-02 bind-formula derivation from design-lab/candidate-sql.ts source
  *   V-03 owned/legacy SQL templates derived from the same source ('?' counts)
  *   V-04 S3 control tier + S4 owned tier on real migrations in local SQLite
- *        (tier boundary proven: owned predicate cannot compile on S3)
+ *        (tier boundary: the owned column is truly absent on S3 — node:sqlite
+ *        COMPILES at prepare(); D1 defers the rejection to TERMINAL execution,
+ *        pinned by the permanent workerd control audit-tools/d1-contract/)
  *   V-05 latch-seed.sql AND sources-seed.sql regenerated from the schedule,
  *        byte-identical to the committed files (drift fences)
  *   V-06 per-statement admissibility: every registered statement legal
  *        (owned 11*rows+7 <= 100; legacy 11*rows <= 100); NO 16/32/50-row rungs
  *   V-07 fixtures: exact canonical-URL bytes, distinctness, raw RSS under the
- *        2 MiB feed bound
+ *        2 MiB feed bound, AND the same-link round-trip: every registered
+ *        delivered RSS document is regenerated from the SAME deterministic
+ *        links as its canonical rows, serialized to actual UTF-8 bytes,
+ *        re-extracted and canonicalized back to EXACTLY those rows
+ *        (R1141-03: the raw/canonical sizes are round-trip equivalents now)
  *   V-08 reachable gate: aggregate rung-2 payload >= 2x the exact F-CJK batch
  *        payload P_req (the R1.10.4 single-statement ladder defect is closed)
  *   V-09 internal-budget proofs (OversizedRowPlanError arithmetic; the 2-row
  *        conservative chunking boundary behind P-03's 50 INSERTs)
- *   V-10 full local replay of the case schedule against the real S4 schema:
- *        guarded inserts land, the fence blocks wrong generations, the
- *        partial-unique-index negative probe rejects, and the replay executes
- *        EXACTLY the registered statement counts
+ *   V-10 STRUCTURAL SQL/payload/storage SIMULATION of the case schedule
+ *        against the real S3-then-S4 schemas (the S3 control cases replay
+ *        BEFORE 0004 is applied). SELECT-1/simplified-SQL substitutes stand in
+ *        for source-select/capability-read/authorization/budget-readback/
+ *        classification — this is NOT a full semantic/resource replay and
+ *        proves NO full-poll equivalence (R1141-01; see V-19 + schedule
+ *        proofScope). It DOES prove: statement-count exactness, guarded-insert
+ *        semantics, fence liveness, negative-probe rejection, and the storage
+ *        of THIS EXACT simulation.
  *   V-11 resource reconciliation (documented-accounting rows written, MEASURED
- *        local storage growth incl. index amplification) vs caps and docs
+ *        local storage growth incl. index amplification) vs caps and docs —
+ *        including the reserved refusal/emergency overhead (R1141-04); local
+ *        engine metadata is kept DISTINCT from Cloudflare billable counters
  *   V-12 invocation/statement/api-call totals vs registered caps
  *   V-13 conservative rows-read bounds vs the registered cap
- *   V-14 coverage boundary: the static large-single-URL counterexample computes
+ *   V-14 coverage boundary: the static large-single-URL counterexample
+ *        computes exactly (reviewer-registered frozen arithmetic preserved)
  *   V-15 plan-document cross-checks (the plan cites the schedule's numbers)
  *   V-16 quota-unit discriminator structure (non-mutating, typed outcomes)
  *   V-17 protected invocation artifacts (latch DDL, kill switch, seeded rows)
+ *   V-18 BEHAVIORAL latch controls (R1141-04): admission, duplicate delivery,
+ *        kill-switch observation cost (ONE submitted UPDATE, zero durable
+ *        changes), closed-case refusal, statement-budget refusal — executed,
+ *        not just inspected
+ *   V-19 proof-scope register (R1141-01): the schedule declares the structural
+ *        simulation vs the UNPROVEN full-poll harness; the plan carries the
+ *        matching labels; the reviewer latch-harness bind arity is preserved
  *
  * LOCAL ONLY: node:sqlite + the repository tree. No network, no account
  * operations, no credentials. Local SQLite numbers are feasibility proxies,
- * NOT cloud measurements.
+ * NOT cloud measurements; node:sqlite compile behavior is LOCAL-ENGINE
+ * metadata, never a Cloudflare billable counter.
  *
  * Run: node audit-tools/probe-plan/validate-probe-plan.mjs
  *      (Node >= 23.4 for node:sqlite without a flag; on Node 22 run with
@@ -237,29 +259,50 @@ function splitStatements(text) {
 
 // ---------------------------------------------------------------------------
 // Fixture builders (per the schedule's registered shapes)
+//
+// R1141-03: ONE deterministic generator produces BOTH the raw RSS documents
+// AND the canonical expected rows from the SAME links. The raw link embedded
+// in the XML is the SAME string whose canonicalization yields the registered
+// canonical row (ASCII links are already canonical; CJK raw paths expand at
+// 9 URL bytes per 3-byte character under the accepted WHATWG-URL normalizer).
+// Documents are COMPLETE (open + items + close) and measured as ACTUAL UTF-8
+// serialized bytes — no estimation, no double-counted wrapper.
 // ---------------------------------------------------------------------------
 function cjkRawPath(cjkChars, index) {
   const filler = 'あ'.repeat(Math.max(0, cjkChars - 1));
   const last = String.fromCharCode(0x4e00 + (index % 500));
   return `${filler}${last}`;
 }
-function cjkCanonicalUrl(host, cjkChars, index) {
-  const encoded = [...cjkRawPath(cjkChars, index)].map((c) => encodeURIComponent(c)).join('');
-  return `https://${host}/${encoded}`;
-}
 function asciiCanonicalUrl(host, targetBytes, index) {
   const prefix = `https://${host}/`;
   const tail = `-${index}`;
   return prefix + 'a'.repeat(targetBytes - prefix.length - tail.length) + tail;
 }
+function rawLinkOf(fx, i) {
+  if (fx.kind === 'ascii') return asciiCanonicalUrl(fx.host, fx.canonicalUrlBytes, i);
+  if (fx.kind === 'cjk') return `https://${fx.host}/${cjkRawPath(fx.cjkChars, i)}`;
+  if (fx.kind === 'cjk-ladder') {
+    const cjkChars = fx.cjkCharsBase - Math.floor(i / fx.perStep);
+    return `https://${fx.host}/${cjkRawPath(cjkChars, i % fx.perStep)}`;
+  }
+  if (fx.kind === 'mixed') {
+    return i < fx.shortItems
+      ? asciiCanonicalUrl(fx.host, fx.shortCanonicalUrlBytes, i)
+      : `https://${fx.host}/${cjkRawPath(fx.cjkChars, i - fx.shortItems)}`;
+  }
+  throw new Error(`unknown fixture kind ${fx.kind}`);
+}
 function buildFixture(fx) {
   const rows = [];
   for (let i = 0; i < fx.items; i += 1) {
     const rv = fx.rowValues;
-    const row = {
+    const rawLink = rawLinkOf(fx, i);
+    const canonicalUrl = new URL(rawLink).href; // the accepted WHATWG-URL normalizer
+    rows.push({
       id: rv.idPattern.replace('<index>', String(i)),
       externalId: rv.externalIdPattern.replace('<index>', String(i)),
-      canonicalUrl: null,
+      rawLink,
+      canonicalUrl,
       title: rv.title,
       excerpt: rv.excerpt,
       author: rv.author,
@@ -267,51 +310,27 @@ function buildFixture(fx) {
       fetchedAt: rv.fetchedAt,
       contentHash: rv.contentHash,
       rawJson: rv.rawJson,
-    };
-    if (fx.kind === 'ascii') {
-      row.canonicalUrl = asciiCanonicalUrl(fx.host, fx.canonicalUrlBytes, i);
-    } else if (fx.kind === 'cjk') {
-      row.canonicalUrl = cjkCanonicalUrl(fx.host, fx.cjkChars, i);
-    } else if (fx.kind === 'cjk-ladder') {
-      const cjkChars = fx.cjkCharsBase - Math.floor(i / fx.perStep);
-      row.canonicalUrl = cjkCanonicalUrl(fx.host, cjkChars, i % fx.perStep);
-    } else if (fx.kind === 'mixed') {
-      row.canonicalUrl =
-        i < fx.shortItems
-          ? asciiCanonicalUrl(fx.host, fx.shortCanonicalUrlBytes, i)
-          : cjkCanonicalUrl(fx.host, fx.cjkChars, i - fx.shortItems);
-    } else {
-      throw new Error(`unknown fixture kind ${fx.kind}`);
-    }
-    rows.push(row);
+    });
   }
   return rows;
 }
-// 66-byte wrapper; chosen so the static counterexample document computes to
-// EXACTLY the reviewer-registered 1,800,116 raw RSS bytes.
-const RSS_WRAPPER = '<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>';
-function rssBytes(host, rawPath) {
+const RSS_OPEN = '<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>';
+const RSS_ITEM_OPEN = '<item><link>';
+const RSS_ITEM_CLOSE = '</link></item>\n';
+const RSS_CLOSE = '</channel></rss>';
+function buildRssDocument(rowsSlice) {
   return (
-    byteLen(RSS_WRAPPER) +
-    byteLen('<item><link>') +
-    byteLen(`https://${host}/`) +
-    byteLen(rawPath) +
-    byteLen('</link></item>\n')
+    RSS_OPEN +
+    rowsSlice.map((r) => `${RSS_ITEM_OPEN}${r.rawLink}${RSS_ITEM_CLOSE}`).join('') +
+    RSS_CLOSE
   );
 }
-function fixtureRssBytes(fx, offset, count) {
-  let total = byteLen(RSS_WRAPPER);
-  for (let i = offset; i < offset + count; i += 1) {
-    if (fx.kind === 'cjk') total += rssBytes(fx.host, cjkRawPath(fx.cjkChars, i));
-    else if (fx.kind === 'mixed' && i >= fx.shortItems)
-      total += rssBytes(fx.host, cjkRawPath(fx.cjkChars, i - fx.shortItems));
-    else total += rssBytes(fx.host, `short-${i}`);
-  }
-  return total;
+function extractLinks(xml) {
+  return [...xml.matchAll(/<link>([^<]+)<\/link>/g)].map((m) => m[1]);
 }
 
 // ---------------------------------------------------------------------------
-// V-07 fixtures: exact bytes, distinctness, raw RSS under the feed bound
+// V-07 fixtures: exact bytes, distinctness, same-link round-trip (R1141-03)
 // ---------------------------------------------------------------------------
 const fixtures = {};
 {
@@ -327,17 +346,7 @@ const fixtures = {};
       ok = false;
       detail.push(`${fx.id}: distinct=${distinct} underRowLimit=${allUnderRowLimit}`);
     }
-    const rss = fixtureRssBytes(fx, 0, Math.min(fx.items, 100));
-    if ((fx.kind === 'cjk' || fx.kind === 'mixed') && rss >= 2097152) {
-      ok = false;
-      detail.push(`${fx.id} raw RSS ${rss} >= 2097152`);
-    }
-    fixtures[fx.id] = { def: fx, rows, urls, byteSet, rss };
-    report.numbers[`fixture_${fx.id}`] = {
-      items: rows.length,
-      canonicalUrlBytes: byteSet,
-      rssBytes: rss,
-    };
+    fixtures[fx.id] = { def: fx, rows, urls, byteSet };
   }
   const fcjk = fixtures['F-CJK'];
   if (!(fcjk.byteSet.length === 1 && fcjk.byteSet[0] === 45023)) {
@@ -368,12 +377,68 @@ const fixtures = {};
     ok = false;
     detail.push('F-CJK-L distinct URLs != 538');
   }
+
+  // --- same-link round-trip for EVERY registered delivered RSS document ---
+  const deliveries = [];
+  for (const fx of schedule.fixtures) {
+    const slices = fx.rawRss?.deliveredSlices ?? [];
+    for (const slice of slices) {
+      const rowsSlice = fixtures[fx.id].rows.slice(slice.offset, slice.offset + slice.count);
+      if (rowsSlice.length !== slice.count) {
+        ok = false;
+        detail.push(`${fx.id}[${slice.offset},+${slice.count}]: slice out of range`);
+        continue;
+      }
+      const xml = buildRssDocument(rowsSlice);
+      const bytes = byteLen(xml);
+      if (bytes !== slice.rawRssBytes) {
+        ok = false;
+        detail.push(
+          `${fx.id}[${slice.offset},+${slice.count}]: serialized ${bytes} != registered ${slice.rawRssBytes}`,
+        );
+      }
+      if (bytes >= 2097152) {
+        ok = false;
+        detail.push(
+          `${fx.id}[${slice.offset},+${slice.count}]: raw RSS ${bytes} >= 2,097,152 feed bound`,
+        );
+      }
+      const links = extractLinks(xml);
+      if (links.length !== slice.count) {
+        ok = false;
+        detail.push(
+          `${fx.id}[${slice.offset},+${slice.count}]: extracted ${links.length} links != ${slice.count}`,
+        );
+        continue;
+      }
+      let identity = true;
+      for (let i = 0; i < links.length; i += 1) {
+        if (new URL(links[i]).href !== rowsSlice[i].canonicalUrl) identity = false;
+      }
+      if (!identity) {
+        ok = false;
+        detail.push(`${fx.id}[${slice.offset},+${slice.count}]: round-trip canonical rows differ`);
+      }
+      deliveries.push({
+        fixture: fx.id,
+        offset: slice.offset,
+        count: slice.count,
+        bytes,
+        identity,
+      });
+    }
+  }
+  if (deliveries.length === 0) {
+    ok = false;
+    detail.push('no registered raw-RSS deliveries found in the schedule');
+  }
+  report.numbers.rawRssDeliveries = deliveries;
   check(
     'V-07',
-    'fixtures: exact canonical-URL byte counts (F-CJK 45,023; F-ROWSIZE 1,899,995; F-OVERSIZE 102,500), distinct URLs, raw RSS < 2 MiB feed bound',
+    'fixtures: exact canonical-URL byte counts (F-CJK 45,023; F-ROWSIZE 1,899,995; F-OVERSIZE 102,500), distinct URLs, AND same-link round-trip: every registered delivered RSS document regenerates from the SAME deterministic links, serializes to exactly its registered UTF-8 bytes (all < 2,097,152), and canonicalizes back to EXACTLY the registered canonical rows',
     ok,
     detail.join('; ') ||
-      `F-CJK RSS=${fcjk.rss} B; F-HETERO RSS=${fixtures['F-HETERO'].rss} B; F-ROWSIZE RSS=${frowsize.rss} B (all < 2,097,152)`,
+      `deliveries verified=${deliveries.length}: F-NORMAL/100=${deliveries.find((d) => d.fixture === 'F-NORMAL')?.bytes} B; F-HETERO/100=${deliveries.find((d) => d.fixture === 'F-HETERO')?.bytes} B; F-CJK/100=${deliveries.find((d) => d.fixture === 'F-CJK')?.bytes} B; F-OVERSIZE/1=${deliveries.find((d) => d.fixture === 'F-OVERSIZE')?.bytes} B (all round-trip identity=true)`,
   );
 }
 
@@ -524,6 +589,12 @@ function schemaVersion() {
 }
 
 // --- V-04a S3 control tier ---
+// R1141-02 label: node:sqlite COMPILES at prepare() — a local compile failure
+// is LOCAL-ENGINE metadata proving the column truly does not exist. D1 treats
+// prepare() as construction-only; the SAME statement is rejected at TERMINAL
+// execution (pinned by the permanent workerd control in
+// audit-tools/d1-contract/). The tier boundary itself (column absent on S3,
+// present on S4) is engine-independent.
 {
   const v3 = schemaVersion();
   const cols = db
@@ -532,32 +603,48 @@ function schemaVersion() {
     .map((r) => r.name);
   const ownedColS3 = cols.includes('poll_owner_job_id');
   let prepareFailsOnS3 = false;
+  let terminalRejectsOnS3 = false;
+  let stmt = null;
   try {
-    db.prepare('SELECT poll_owner_job_id FROM source_state LIMIT 0');
+    stmt = db.prepare('SELECT poll_owner_job_id FROM source_state LIMIT 0');
   } catch {
-    prepareFailsOnS3 = true;
+    prepareFailsOnS3 = true; // node:sqlite compile-time behavior (LOCAL engine)
+  }
+  if (stmt) {
+    try {
+      stmt.all();
+    } catch {
+      terminalRejectsOnS3 = true;
+    }
+  } else {
+    // node:sqlite rejected at compile; the D1-contract path (construct then
+    // reject at terminal) is exercised by the permanent workerd control.
+    terminalRejectsOnS3 = true;
   }
   const ok =
     v3 === 3 &&
     cliStatements.s3 === schedule.schemas.S3.statementCount &&
     !ownedColS3 &&
-    prepareFailsOnS3;
+    prepareFailsOnS3 &&
+    terminalRejectsOnS3;
   check(
     'V-04a',
-    'S3 control tier: real migrations 0001-0003 applied to local SQLite (71 statements), schema_version=3, poll_owner_job_id ABSENT, owned compile-probe FAILS to prepare (the CE2 tier boundary is real)',
+    'S3 control tier: real migrations 0001-0003 applied to local SQLite (71 statements), schema_version=3, poll_owner_job_id ABSENT — the tier boundary is real (node:sqlite compile rejection = LOCAL-ENGINE metadata; D1 rejects the same statement at TERMINAL execution per the permanent workerd control)',
     ok,
-    `version=${v3} statements=${cliStatements.s3}/${schedule.schemas.S3.statementCount} ownedColumn=${ownedColS3} prepareFails=${prepareFailsOnS3}`,
+    `version=${v3} statements=${cliStatements.s3}/${schedule.schemas.S3.statementCount} ownedColumn=${ownedColS3} localCompileFails=${prepareFailsOnS3} terminalRejects=${terminalRejectsOnS3}`,
   );
 }
 
 // --- Generated seed files (latch + sources) ---
 function generateLatchSeed() {
   const lines = [
-    '-- PIXEL — PROBE-ONLY latch seeding (R1.10.4.1). GENERATED from',
+    '-- PIXEL — PROBE-ONLY latch seeding (R1.10.4.2). GENERATED from',
     '-- audit/PROBE_CASE_SCHEDULE.json by audit-tools/probe-plan/validate-probe-plan.mjs.',
     '-- Applied ONLY to the disposable probe database at G1 (CLI, literal VALUES,',
     "-- no binds). The __global__ row is the kill switch: status = 'aborted'",
-    '-- hard-stops every case.',
+    '-- hard-stops every case. Detecting the aborted/closed/exhausted state',
+    '-- costs exactly ONE submitted UPDATE (zero durable changes) — that',
+    '-- observation attempt is itself a counted D1 attempt (plan §5).',
     '',
     'INSERT INTO probe_run_state',
     '  (case_id, invocations_registered, invocations_used, statements_registered, statements_used, status, last_invocation_at_ms, updated_at_ms)',
@@ -583,7 +670,7 @@ function probeSourceIds() {
 function generateSourcesSeed() {
   const now = 4102444800000;
   const lines = [
-    '-- PIXEL — PROBE-ONLY sources seeding (R1.10.4.1). GENERATED from',
+    '-- PIXEL — PROBE-ONLY sources seeding (R1.10.4.2). GENERATED from',
     '-- audit/PROBE_CASE_SCHEDULE.json by audit-tools/probe-plan/validate-probe-plan.mjs.',
     '-- Applied ONLY to the disposable probe database at G1 (CLI, literal VALUES,',
     '-- no binds). One sources row per probe case that needs one; sources is',
@@ -633,15 +720,96 @@ db.exec(sourcesSeedText);
 cliStatements.latchSeed = 1;
 cliStatements.sourcesSeed = 1;
 
-// --- Apply 0004 (S4) ---
+// --- V-18 BEHAVIORAL latch controls (R1141-04) — executed, not inspected ---
+// Runs on a FRESH in-memory copy so the replay DB is untouched.
+const LATCH_SQL = `UPDATE probe_run_state
+         SET invocations_used = invocations_used + 1,
+             statements_used = statements_used + ?,
+             last_invocation_at_ms = ?,
+             updated_at_ms = ?
+       WHERE case_id = ?
+         AND status = 'open'
+         AND invocations_used < invocations_registered
+         AND statements_used < statements_registered
+         AND NOT EXISTS (SELECT 1 FROM probe_run_state g WHERE g.case_id = '__global__' AND g.status = 'aborted')`;
 {
+  let ok = true;
+  const detail = [];
+  const bdb = new DatabaseSync(':memory:');
+  bdb.exec(probeDdlText);
+  bdb.exec(latchSeedText);
+  const latchState = (caseId) =>
+    bdb
+      .prepare('SELECT invocations_used, statements_used FROM probe_run_state WHERE case_id = ?')
+      .get(caseId);
+
+  // (1) first admission: the registered budget is consumed conservatively
+  const xsmoke = schedule.cases.find((c) => c.caseId === 'X-SMOKE');
+  const xsmokeStmts = xsmoke.statements.reduce((a, s) => a + s.count, 0);
+  const admitted = bdb.prepare(LATCH_SQL).run(xsmokeStmts, 1, 1, 'X-SMOKE').changes;
+  if (admitted !== 1 || latchState('X-SMOKE').invocations_used !== 1) ok = false;
+  detail.push(`admission=${admitted}`);
+
+  // (2) duplicate delivery: refused with ZERO durable changes — detecting the
+  // exhaustion costs exactly ONE submitted UPDATE (the observation attempt)
+  const dup = bdb.prepare(LATCH_SQL).run(xsmokeStmts, 1, 2, 'X-SMOKE').changes;
+  const afterDup = latchState('X-SMOKE');
+  if (dup !== 0 || afterDup.invocations_used !== 1 || afterDup.statements_used !== xsmokeStmts)
+    ok = false;
+  detail.push(`duplicateRefused=${dup === 0} (zero durable changes)`);
+
+  // (3) global kill switch: abort __global__; a DIFFERENT case is refused by
+  // ONE submitted UPDATE with zero durable changes (reviewer latch-control parity)
+  bdb.prepare("UPDATE probe_run_state SET status = 'aborted' WHERE case_id = '__global__'").run();
+  const p01a = schedule.cases.find((c) => c.caseId === 'P-01a');
+  const p01aStmts = p01a.statements.reduce((a, s) => a + s.count, 0);
+  const aborted = bdb.prepare(LATCH_SQL).run(p01aStmts, 1, 3, 'P-01a').changes;
+  const afterAbort = latchState('P-01a');
+  if (aborted !== 0 || afterAbort.invocations_used !== 0) ok = false;
+  detail.push(
+    `globalAbortObservation: 1 submitted UPDATE, changes=${aborted}, zero durable effects`,
+  );
+
+  // (4) closed case: refused
+  bdb.prepare("UPDATE probe_run_state SET status = 'open' WHERE case_id = '__global__'").run();
+  bdb.prepare("UPDATE probe_run_state SET status = 'closed' WHERE case_id = 'P-C3'").run();
+  const pc3 = schedule.cases.find((c) => c.caseId === 'P-C3');
+  const pc3Stmts = pc3.statements.reduce((a, s) => a + s.count, 0);
+  const closed = bdb.prepare(LATCH_SQL).run(pc3Stmts, 1, 4, 'P-C3').changes;
+  if (closed !== 0) ok = false;
+  detail.push(`closedCaseRefused=${closed === 0}`);
+
+  // (5) statement-budget refusal: invocations remain but the statement budget
+  // is exhausted -> refused (the latch durably records AND enforces the
+  // statement budget at invocation granularity)
+  bdb
+    .prepare(
+      "UPDATE probe_run_state SET statements_used = statements_registered WHERE case_id = 'P-QU-A'",
+    )
+    .run();
+  const quA = schedule.cases.find((c) => c.caseId === 'P-QU-A');
+  const quAStmts = quA.statements.reduce((a, s) => a + s.count, 0);
+  const exhausted = bdb.prepare(LATCH_SQL).run(quAStmts, 1, 5, 'P-QU-A').changes;
+  if (exhausted !== 0) ok = false;
+  detail.push(`statementBudgetRefused=${exhausted === 0}`);
+  bdb.close();
+  check(
+    'V-18',
+    'behavioral latch controls (R1141-04): admission consumes conservatively; duplicate delivery, kill-switch observation, closed case and exhausted statement budget each cost exactly ONE submitted UPDATE with ZERO durable changes — executed locally, not merely inspected',
+    ok,
+    detail.join('; '),
+  );
+}
+
+// --- Apply 0004 (S4) — AFTER the S3-tier replay (R1141-01 ordering) ---
+const apply0004 = () => {
   const text = readFileSync(join(ROOT, 'migrations/0004_source_poll_ownership.sql'), 'utf8');
   db.exec(text);
   cliStatements.s4 = splitStatements(text).length;
-}
+};
 
-// --- V-04b S4 owned tier ---
-{
+// --- V-04b S4 owned tier (run AFTER 0004; see below for invocation) ---
+function checkS4() {
   const v4 = schemaVersion();
   const cols = db
     .prepare('PRAGMA table_info(source_state)')
@@ -649,8 +817,10 @@ cliStatements.sourcesSeed = 1;
     .map((r) => r.name);
   const ownedColS4 = cols.includes('poll_owner_job_id');
   let prepareOkOnS4 = true;
+  let terminalReturnsZeroRows = false;
   try {
-    db.prepare('SELECT poll_owner_job_id FROM source_state LIMIT 0');
+    const rows = db.prepare('SELECT poll_owner_job_id FROM source_state LIMIT 0').all();
+    terminalReturnsZeroRows = Array.isArray(rows) && rows.length === 0;
   } catch {
     prepareOkOnS4 = false;
   }
@@ -663,6 +833,7 @@ cliStatements.sourcesSeed = 1;
     v4 === 4 &&
     ownedColS4 &&
     prepareOkOnS4 &&
+    terminalReturnsZeroRows &&
     idx.length === 1 &&
     cliStatements.s4 === 5 &&
     schedule.schemas.S4.statementCount === cliStatements.s3 + cliStatements.s4 &&
@@ -674,9 +845,9 @@ cliStatements.sourcesSeed = 1;
         cliStatements.sourcesSeed;
   check(
     'V-04b',
-    'S4 owned tier: + migration 0004 applied (5 statements), schema_version=4, poll_owner_job_id PRESENT, owned compile-probe prepares, partial unique index exists; CLI setup totals reconcile (79)',
+    'S4 owned tier: + migration 0004 applied (5 statements), schema_version=4, poll_owner_job_id PRESENT, the SAME probe statement now PREPARES and TERMINALLY SUCCEEDS with 0 rows (the positive half of the D1 contract), partial unique index exists; CLI setup totals reconcile (79)',
     ok,
-    `version=${v4} statements=${cliStatements.s4} index=${idx.length === 1} cliTotal=${cliStatements.s3 + cliStatements.s4 + cliStatements.probeDdl + cliStatements.latchSeed + cliStatements.sourcesSeed}/${schedule.cliSetupStatements.total}`,
+    `version=${v4} statements=${cliStatements.s4} index=${idx.length === 1} terminalZeroRows=${terminalReturnsZeroRows} cliTotal=${cliStatements.s3 + cliStatements.s4 + cliStatements.probeDdl + cliStatements.latchSeed + cliStatements.sourcesSeed}/${schedule.cliSetupStatements.total}`,
   );
 }
 
@@ -728,7 +899,11 @@ function parseChunking(chunking) {
 }
 
 // ---------------------------------------------------------------------------
-// Full replay of the case schedule against the real S4 schema
+// STRUCTURAL SIMULATION of the case schedule against the real schemas
+// (R1141-01 relabel): S3-tier cases replay BEFORE 0004 is applied; the S4
+// cases after. SELECT-1/simplified-SQL substitutes stand in for the accepted
+// source/capability/authorization/budget-readback/classification operations —
+// this is NOT a full semantic/resource replay (see V-19 / proofScope).
 // ---------------------------------------------------------------------------
 const NOW = 4102444800001;
 function seedJob(jobId, aggregateId, status, attempts) {
@@ -750,10 +925,17 @@ function seedJob(jobId, aggregateId, status, attempts) {
     NOW - 1000,
   );
 }
-function seedSourceState(sourceId, jobId) {
-  db.prepare(
-    'INSERT OR REPLACE INTO source_state (source_id, next_poll_at, poll_owner_job_id, updated_at) VALUES (?, ?, ?, ?)',
-  ).run(sourceId, HOLD, jobId ?? null, NOW);
+function seedSourceState(sourceId, jobId, tier) {
+  if (tier === 'S3') {
+    // S3 has NO poll_owner_job_id column — the legacy seeding is column-exact.
+    db.prepare(
+      'INSERT OR REPLACE INTO source_state (source_id, next_poll_at, updated_at) VALUES (?, ?, ?)',
+    ).run(sourceId, HOLD, NOW);
+  } else {
+    db.prepare(
+      'INSERT OR REPLACE INTO source_state (source_id, next_poll_at, poll_owner_job_id, updated_at) VALUES (?, ?, ?, ?)',
+    ).run(sourceId, HOLD, jobId ?? null, NOW);
+  }
 }
 function ownedInsertBinds(rows, sourceId, jobId, generation, hold = HOLD) {
   const binds = [];
@@ -777,11 +959,12 @@ function ownedInsertBinds(rows, sourceId, jobId, generation, hold = HOLD) {
 }
 
 const replay = {
-  statementsExecuted: 0,
+  statementsAttempted: 0,
   localChanges: 0,
   documentedRowsWritten: 0,
   bindPayloadBytes: 0,
   rowsReadBound: 0,
+  terminalProbeOutcomes: [],
   perCase: [],
 };
 const ROWS_WRITTEN_MULTIPLIER = {
@@ -794,10 +977,11 @@ const ROWS_WRITTEN_MULTIPLIER = {
   'engine-claim-cas': 4,
   'latch-increment': 2,
   'negative-probe-insert': 0,
+  'terminal-probe': 0,
 };
 function executeStatement(kind, sql, binds, changesExpected) {
   const res = db.prepare(sql).run(...binds);
-  replay.statementsExecuted += 1;
+  replay.statementsAttempted += 1;
   replay.localChanges += res.changes;
   replay.bindPayloadBytes += binds.reduce((a, v) => a + bindBytes(v), 0);
   replay.documentedRowsWritten += res.changes * (ROWS_WRITTEN_MULTIPLIER[kind] ?? 0);
@@ -806,15 +990,6 @@ function executeStatement(kind, sql, binds, changesExpected) {
   }
   return res.changes;
 }
-const LATCH_SQL = `UPDATE probe_run_state
-         SET invocations_used = invocations_used + 1,
-             statements_used = statements_used + ?,
-             last_invocation_at_ms = ?,
-             updated_at_ms = ?
-       WHERE case_id = ?
-         AND status = 'open'
-         AND invocations_used < invocations_registered
-         AND NOT EXISTS (SELECT 1 FROM probe_run_state g WHERE g.case_id = '__global__' AND g.status = 'aborted')`;
 
 function rowsForCase(c) {
   const insertEntry = c.statements.find((s) => s.kind === 'multi-row-insert');
@@ -828,7 +1003,17 @@ function rowsForCase(c) {
 }
 
 const claimSeeded = new Set();
+let s4Applied = false;
 for (const c of schedule.cases) {
+  // R1141-01 ordering: migration 0004 is applied at the registered X-SCHEMA4
+  // boundary — immediately BEFORE the first S4-tier setup case — so every
+  // S3-tier case (X-SMOKE, X-SETUP-S3, P-C3) genuinely replays under S3.
+  if (c.caseId === 'X-SETUP-S4' && !s4Applied) {
+    apply0004();
+    s4Applied = true;
+    checkS4();
+  }
+  const tier = c.tier === 'S3' && !s4Applied ? 'S3' : 'S4';
   const registeredStatements = c.statements.reduce((a, s) => a + s.count, 0);
   let caseStatements = 0;
   const bump = (n = 1) => {
@@ -846,7 +1031,7 @@ for (const c of schedule.cases) {
 
   // latch increment first (conservative consumption — replay of the runtime gate)
   const latchChanges = db.prepare(LATCH_SQL).run(registeredStatements, NOW, NOW, c.caseId).changes;
-  replay.statementsExecuted += 1;
+  replay.statementsAttempted += 1;
   replay.localChanges += latchChanges;
   replay.documentedRowsWritten += 2;
   replay.rowsReadBound += 3;
@@ -868,7 +1053,7 @@ for (const c of schedule.cases) {
           } else {
             seedJob(jobId, sourceId, hasClaim ? 'queued' : 'claimed', hasClaim ? 0 : 1);
           }
-          replay.statementsExecuted += 1;
+          replay.statementsAttempted += 1;
           replay.localChanges += 1;
           replay.documentedRowsWritten += 4;
           replay.rowsReadBound += 8;
@@ -876,9 +1061,9 @@ for (const c of schedule.cases) {
           break;
         }
         case 'seed-source-state': {
-          if (hasClaim) seedSourceState(sourceId, null);
-          else seedSourceState(sourceId, jobId);
-          replay.statementsExecuted += 1;
+          if (hasClaim) seedSourceState(sourceId, null, tier);
+          else seedSourceState(sourceId, jobId, tier);
+          replay.statementsAttempted += 1;
           replay.localChanges += 1;
           replay.documentedRowsWritten += 2;
           replay.rowsReadBound += 4;
@@ -887,7 +1072,7 @@ for (const c of schedule.cases) {
         }
         case 'engine-claim-read': {
           db.prepare('SELECT id, status, attempts FROM jobs WHERE id = ?').all(jobId);
-          replay.statementsExecuted += 1;
+          replay.statementsAttempted += 1;
           replay.rowsReadBound += 4;
           bump();
           break;
@@ -904,12 +1089,17 @@ for (const c of schedule.cases) {
           bump();
           break;
         }
+        // R1141-01 label: these five kinds are SELECT-1 SUBSTITUTES for the
+        // accepted operations (source select, capability read, the guarded
+        // UPDATE + INSERT..SELECT authorization pair, budget readback,
+        // classification lookups). They count statements/rows-read bounds but
+        // prove NOTHING about the accepted operations' semantics or costs.
         case 'source-select':
         case 'capability-read':
         case 'authorization':
         case 'budget-readback': {
           db.prepare('SELECT 1').all();
-          replay.statementsExecuted += 1;
+          replay.statementsAttempted += 1;
           replay.rowsReadBound += 4;
           bump();
           break;
@@ -928,7 +1118,7 @@ for (const c of schedule.cases) {
         }
         case 'classification-lookup': {
           db.prepare('SELECT 1').all();
-          replay.statementsExecuted += 1;
+          replay.statementsAttempted += 1;
           replay.rowsReadBound += 200;
           bump();
           break;
@@ -1018,7 +1208,7 @@ for (const c of schedule.cases) {
             const probes = [
               () => {
                 const n = db.prepare('SELECT COUNT(*) AS n FROM source_items').get().n;
-                if (n !== 1339) throw new Error(`X-VERIFY-FINAL total=${n} != 1239`);
+                if (n !== 1339) throw new Error(`X-VERIFY-FINAL total=${n} != 1339`);
               },
               () => {
                 const n = db
@@ -1041,7 +1231,7 @@ for (const c of schedule.cases) {
           } else {
             db.prepare('SELECT 1').all();
           }
-          replay.statementsExecuted += 1;
+          replay.statementsAttempted += 1;
           replay.rowsReadBound += 300;
           bump();
           break;
@@ -1050,7 +1240,43 @@ for (const c of schedule.cases) {
           db.prepare('SELECT updated_at_ms FROM probe_run_state WHERE case_id = ?').all(
             '__global__',
           );
-          replay.statementsExecuted += 1;
+          replay.statementsAttempted += 1;
+          replay.rowsReadBound += 2;
+          bump();
+          break;
+        }
+        // R1141-02: the tier-boundary probe is an ATTEMPTED QUERY. D1
+        // constructs at prepare() and rejects at TERMINAL execution; local
+        // node:sqlite may reject at compile — EITHER counts as the attempt,
+        // and the outcome is recorded (never assumed).
+        case 'terminal-probe': {
+          let outcome = 'unrecorded';
+          let stmt = null;
+          try {
+            stmt = db.prepare(s.sql);
+          } catch {
+            outcome = 'local-compile-rejection (node:sqlite; D1 defers to terminal)';
+          }
+          if (stmt) {
+            try {
+              const r = stmt.all();
+              outcome = `terminal-success rows=${r.length}`;
+            } catch (e) {
+              outcome = `terminal-rejection (${String(e.message).slice(0, 60)})`;
+            }
+          }
+          const expectRejection = s.expectation === 'terminal-rejection';
+          const expectSuccess = s.expectation === 'terminal-success';
+          if (
+            expectRejection &&
+            !outcome.startsWith('terminal-rejection') &&
+            !outcome.startsWith('local-compile-rejection')
+          )
+            throw new Error(`${c.caseId}: terminal probe expected rejection, got ${outcome}`);
+          if (expectSuccess && !outcome.startsWith('terminal-success'))
+            throw new Error(`${c.caseId}: terminal probe expected success, got ${outcome}`);
+          replay.terminalProbeOutcomes.push({ caseId: c.caseId, outcome });
+          replay.statementsAttempted += 1;
           replay.rowsReadBound += 2;
           bump();
           break;
@@ -1078,7 +1304,7 @@ for (const c of schedule.cases) {
           } catch (e) {
             rejected = String(e.message).includes('UNIQUE constraint failed');
           }
-          replay.statementsExecuted += 1;
+          replay.statementsAttempted += 1;
           replay.bindPayloadBytes += 13 * 8;
           if (!rejected)
             throw new Error(
@@ -1099,6 +1325,7 @@ for (const c of schedule.cases) {
   }
   replay.perCase.push({
     caseId: c.caseId,
+    tier,
     statements: caseStatements,
     storageAfter: statSync(dbPath).size,
   });
@@ -1135,25 +1362,25 @@ for (const c of schedule.cases) {
   );
 }
 
-// --- V-10 totals ---
+// --- V-10 totals (STRUCTURAL SIMULATION — relabeled per R1141-01) ---
 {
   const registeredInvocationStatements = schedule.cases.reduce(
     (a, c) => a + c.statements.reduce((x, s) => x + s.count, 0),
     0,
   );
   const registeredApiCalls = schedule.cases.reduce((a, c) => a + c.apiCalls, 0);
-  const ok = replay.statementsExecuted === registeredInvocationStatements;
+  const ok = replay.statementsAttempted === registeredInvocationStatements;
   report.numbers.replay = {
-    statementsExecuted: replay.statementsExecuted,
+    statementsAttempted: replay.statementsAttempted,
     registeredInvocationStatements,
     registeredApiCalls,
     localChanges: replay.localChanges,
   };
   check(
     'V-10',
-    'full local replay against the real S4 schema: guarded inserts land, the fence blocks wrong generations, the partial-unique-index negative probe rejects, and the replay executes EXACTLY the registered invocation-side statement count (521)',
+    'STRUCTURAL SQL/payload/storage SIMULATION (NOT a full semantic/resource replay — SELECT-1/simplified substitutes; see V-19): the S3-tier cases replayed BEFORE 0004, the S4 cases after; guarded inserts land, the fence blocks wrong generations, the negative probe rejects, and the simulation executes EXACTLY the registered invocation-side statement count',
     ok,
-    `replayed ${replay.statementsExecuted} statements (registered: ${registeredInvocationStatements}); registered API calls: ${registeredApiCalls}; local changes: ${replay.localChanges}`,
+    `attempted ${replay.statementsAttempted} statements (registered: ${registeredInvocationStatements}); registered API calls: ${registeredApiCalls}; local changes: ${replay.localChanges}; terminal-probe outcomes: ${replay.terminalProbeOutcomes.map((o) => `${o.caseId}=${o.outcome}`).join(' | ')}`,
   );
 }
 
@@ -1165,18 +1392,29 @@ for (const c of schedule.cases) {
     cliStatements.probeDdl +
     cliStatements.latchSeed +
     cliStatements.sourcesSeed;
-  const roundStatements = replay.statementsExecuted + cliTotal;
+  const roundStatements = replay.statementsAttempted + cliTotal;
   const caps = schedule.caps;
   const growth = statSync(dbPath).size;
   const cliDocumented = cliTotal + probeSourceIds().length * 2 + (schedule.cases.length + 1) * 2;
+  const reserved = caps.reservedRefusalAndEmergencyOverhead ?? {
+    d1Attempts: 0,
+    apiCalls: 0,
+    rowsWritten: 0,
+    rowsRead: 0,
+  };
+  const reservedStatements = reserved.d1Attempts ?? reserved.statements ?? 0;
   const documented = replay.documentedRowsWritten + cliDocumented;
+  const withReservedStatements = roundStatements + reservedStatements;
+  const withReservedRowsWritten = documented + reserved.rowsWritten;
+  const withReservedRowsRead = replay.rowsReadBound + reserved.rowsRead;
   const ok =
-    roundStatements <= caps.statementsRoundTotalCap &&
-    documented <= caps.rowsWrittenRoundTotalCap &&
+    withReservedStatements <= caps.statementsRoundTotalCap &&
+    withReservedRowsWritten <= caps.rowsWrittenRoundTotalCap &&
     growth <= caps.durableStorageGrowthCapBytes &&
     replay.bindPayloadBytes <= caps.bindPayloadRoundTotalCapBytes &&
-    documented <= 100000 &&
-    growth <= 500000000;
+    withReservedRowsWritten <= 100000 &&
+    growth <= 500000000 &&
+    withReservedRowsRead <= caps.rowsReadRoundTotalCap;
   report.numbers.resources = {
     roundStatements,
     cliStatements,
@@ -1184,12 +1422,13 @@ for (const c of schedule.cases) {
     localChanges: replay.localChanges,
     bindPayloadBytes: replay.bindPayloadBytes,
     measuredLocalStorageGrowthBytes: growth,
+    reservedOverhead: reserved,
   };
   check(
     'V-11',
-    'resource reconciliation: round statements (600), documented-accounting rows written, bind payload and MEASURED local storage growth (incl. UNIQUE-index storage of canonical URLs) all within the registered caps and the documented Free allowances',
+    'resource reconciliation incl. the RESERVED refusal/emergency overhead (R1141-04): round statements, documented-accounting rows written, bind payload and MEASURED local storage growth of THIS EXACT simulation (incl. UNIQUE-index storage of canonical URLs) all within the registered caps and the documented Free allowances — local engine metadata, NOT Cloudflare billable counters',
     ok,
-    `statements ${roundStatements}/${caps.statementsRoundTotalCap}; documented rows written ${documented}/${caps.rowsWrittenRoundTotalCap} (${(100000 / documented).toFixed(1)}x under 100,000/day); bind payload ${(replay.bindPayloadBytes / 1e6).toFixed(1)} MB/${caps.bindPayloadRoundTotalCapBytes / 1e6} MB; local storage growth ${(growth / 1e6).toFixed(1)} MB/${caps.durableStorageGrowthCapBytes / 1e6} MB (${(500000000 / growth).toFixed(1)}x under 500 MB/db; 12 KB is the EMPTY-DB figure, not the schema baseline)`,
+    `statements ${roundStatements}+${reservedStatements} reserved/${caps.statementsRoundTotalCap}; documented rows written ${documented}+${reserved.rowsWritten}/${caps.rowsWrittenRoundTotalCap} (${(100000 / (documented + reserved.rowsWritten)).toFixed(1)}x under 100,000/day); bind payload ${(replay.bindPayloadBytes / 1e6).toFixed(1)} MB/${caps.bindPayloadRoundTotalCapBytes / 1e6} MB; SIMULATION storage growth ${(growth / 1e6).toFixed(1)} MB/${caps.durableStorageGrowthCapBytes / 1e6} MB (${(500000000 / growth).toFixed(1)}x under 500 MB/db; full-path storage stays UNKNOWN until measured — the accepted authorization/budget writes are NOT in this simulation)`,
   );
 }
 
@@ -1202,38 +1441,44 @@ for (const c of schedule.cases) {
   );
   const maxApi = Math.max(...schedule.cases.map((c) => c.apiCalls));
   const caps = schedule.caps;
+  const reservedApi =
+    (caps.reservedRefusalAndEmergencyOverhead?.apiCalls ?? 0) + caps.transportRetryAllowance;
   const ok =
     invocations === caps.invocationsRegistered &&
     invocations + caps.transportRetryAllowance === caps.invocationsHardCap &&
     maxStatements <= caps.statementsPerInvocationCap &&
-    maxApi <= caps.apiCallsPerInvocationCap;
+    maxApi <= caps.apiCallsPerInvocationCap &&
+    apiCalls + reservedApi <= caps.apiCallsRoundTotalCap;
   report.numbers.invocations = { invocations, apiCalls, maxStatements, maxApi };
   check(
     'V-12',
-    'invocation totals: 20 registered (+3 transport retries = hard cap 23); per-invocation max statements (69) and max API calls (52, P-QU-B only) within caps',
+    'invocation totals: 20 registered (+3 transport retries = hard cap 23); per-invocation maxima within caps; round API calls + reserved refusal/emergency overhead within the round API cap',
     ok,
-    `invocations=${invocations} apiCalls=${apiCalls} maxStatements/invocation=${maxStatements}/${caps.statementsPerInvocationCap} maxApi/invocation=${maxApi}/${caps.apiCallsPerInvocationCap}`,
+    `invocations=${invocations} apiCalls=${apiCalls}+${reservedApi} reserved/${caps.apiCallsRoundTotalCap} maxStatements/invocation=${maxStatements}/${caps.statementsPerInvocationCap} maxApi/invocation=${maxApi}/${caps.apiCallsPerInvocationCap}`,
   );
 }
 
 // --- V-13 conservative rows-read bounds ---
 {
   const caps = schedule.caps;
-  const ok = replay.rowsReadBound <= caps.rowsReadRoundTotalCap;
+  const reservedRowsRead = caps.reservedRefusalAndEmergencyOverhead?.rowsRead ?? 0;
+  const bound = replay.rowsReadBound + reservedRowsRead;
+  const ok = bound <= caps.rowsReadRoundTotalCap;
   check(
     'V-13',
-    'conservative rows-read bounds within the registered cap (>= 200x under the documented 5,000,000 rows/day)',
+    'conservative rows-read bounds (incl. reserved refusal/emergency reads) within the registered cap (>= 100x under the documented 5,000,000 rows/day)',
     ok,
-    `bound=${replay.rowsReadBound}/${caps.rowsReadRoundTotalCap} (${(5000000 / replay.rowsReadBound).toFixed(0)}x under 5M/day)`,
+    `bound=${bound}/${caps.rowsReadRoundTotalCap} (${(5000000 / bound).toFixed(0)}x under 5M/day)`,
   );
 }
 
-// --- V-14 coverage boundary ---
+// --- V-14 coverage boundary (reviewer-registered frozen arithmetic) ---
 {
   const cb = schedule.coverageBoundary.staticCounterexample;
   const rawLink = 23 + 3 * cb.cjkPathChars;
-  const rawRss =
-    byteLen(RSS_WRAPPER) + byteLen('<item><link>') + rawLink + byteLen('</link></item>\n');
+  // The reviewer's registered document shape: OPEN + one item, no CLOSE —
+  // preserved EXACTLY so the registered 1,800,116 B still computes.
+  const rawRss = byteLen(RSS_OPEN) + byteLen(RSS_ITEM_OPEN) + rawLink + byteLen('</link></item>\n');
   const canonical = 23 + 9 * cb.cjkPathChars;
   const ok =
     rawRss === cb.rawRssBytes &&
@@ -1284,11 +1529,26 @@ for (const c of schedule.cases) {
     '25,000',
     '55,000,000',
     '120,000,000',
+    'UNPROVEN',
+    'structural',
+    'terminal',
+    'R1141-01',
+    'R1141-02',
+    'R1141-03',
+    'R1141-04',
+    'R1141-05',
+    '207,582',
+    '1,505,082',
+    '1,401,282',
+    '602',
+    '523',
+    'publication-safety',
+    'audit-tools/d1-contract',
   ];
   const missing = required.filter((s) => !planText.includes(s));
   check(
     'V-15',
-    'plan-document cross-checks: the plan cites the schedule, validator, ladder, fixtures, phases, protected invocation, CPU scopes, coverage numbers and reconciled caps',
+    'plan-document cross-checks: the plan cites the schedule, validator, ladder, fixtures, phases, protected invocation, CPU scopes, coverage numbers, reconciled caps, the proof-scope labels and the publication-safety hold',
     missing.length === 0,
     missing.length === 0 ? `${required.length} anchors present` : `missing: ${missing.join(', ')}`,
   );
@@ -1336,9 +1596,41 @@ for (const c of schedule.cases) {
     withRemainingBudget === 0;
   check(
     'V-17',
-    "protected invocation artifacts: latch DDL carries the kill-switch states; 21 latch rows seeded; every case's registered budget consumed EXACTLY once by the replay; __global__ open (unused)",
+    "protected invocation artifacts: latch DDL carries the kill-switch states; 21 latch rows seeded; every case's registered budget consumed EXACTLY once by the simulation; __global__ open (unused)",
     ok,
     `rows=${latchRows} global=${globalRow.status} casesWithRemainingBudget=${withRemainingBudget}`,
+  );
+}
+
+// --- V-19 proof-scope register (R1141-01) ---
+{
+  const ps = schedule.proofScope;
+  const harness = ps?.fullPollHarness;
+  const sim = ps?.structuralSimulation;
+  const arity = (LATCH_SQL.match(/\?/g) || []).length;
+  const planHasLabels =
+    planText.includes('UNPROVEN') &&
+    planText.includes('structural simulation') &&
+    planText.includes('NOT a full semantic/resource replay');
+  const substitutesDeclared =
+    Array.isArray(sim?.substitutedKinds) &&
+    sim.substitutedKinds.includes('authorization') &&
+    sim.substitutedKinds.includes('source-select') &&
+    sim.substitutedKinds.includes('budget-readback');
+  const ok =
+    ps != null &&
+    harness?.status === 'UNPROVEN — NOT IMPLEMENTED (LOCAL round)' &&
+    harness?.cloudExecutionBlocked === true &&
+    Array.isArray(harness?.requiredOperations) &&
+    harness.requiredOperations.length >= 5 &&
+    substitutesDeclared &&
+    planHasLabels &&
+    arity === 4;
+  check(
+    'V-19',
+    'proof-scope register (R1141-01): the schedule separates the STRUCTURAL SIMULATION (declared SELECT-1/simplified substitutes) from the full-poll-equivalent harness (UNPROVEN — not implemented; cloud execution blocked); the plan carries the matching labels; the reviewer latch-harness bind arity (4) is preserved',
+    ok,
+    `harness=${harness?.status}; requiredOperations=${harness?.requiredOperations?.length}; substitutes=${sim?.substitutedKinds?.join(',')}; LATCH_SQL binds=${arity}; planLabels=${planHasLabels}`,
   );
 }
 
@@ -1356,5 +1648,7 @@ out('');
 out(
   `VALIDATOR RESULT: ${failures === 0 ? 'PASS' : 'FAIL'} — ${checkCount} checks, ${failures} failures`,
 );
-out('LOCAL ONLY: node:sqlite + repository files; zero network/account operations.');
+out(
+  'LOCAL ONLY: node:sqlite + repository files; zero network/account operations. Structural simulation — NOT full-poll evidence (R1141-01); full-poll harness UNPROVEN.',
+);
 process.exit(failures === 0 ? 0 : 1);
