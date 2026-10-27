@@ -147,7 +147,7 @@ export function createRssConnector(): SourceConnector {
         const headers: Record<string, string> = {
           accept:
             'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
-          'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellort)',
+          'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellores)',
         };
         // Conditional GET: BOTH validators when available (blueprint §8).
         if (entry.etag !== null) {

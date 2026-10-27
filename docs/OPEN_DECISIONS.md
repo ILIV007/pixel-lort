@@ -33,6 +33,12 @@ Keep it outside `PixelSecrets`.
 **Implementation:** removed from `FUTURE_SECRET_CATALOG`; documented under
 non-secret configuration in `.env.example`. See ADR-0009.
 
+**Owner amendment (Round 1.10.5, 2026-10-27):** the channel was renamed by the
+owner to **pixel lores** (`@pixellores`, https://t.me/pixellores). The
+"as opened" quote above is preserved verbatim as history; the current
+intended value is `TARGET_CHANNEL=@pixellores` (still non-secret — ADR-0009
+classification unchanged).
+
 ---
 
 ## OD-002 — Zod adoption timing — **CLOSED**

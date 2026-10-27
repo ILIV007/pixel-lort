@@ -1,0 +1,1003 @@
+
+> pixel@1.4.0 check
+> npm run lint && npm run format:check && npm run typecheck && npm run test && npm run test:telegram-setup && npm run test:secrets && npm run scan:secrets && npm run check:versions && npm run build
+
+
+> pixel@1.4.0 lint
+> eslint .
+
+
+> pixel@1.4.0 format:check
+> prettier --check .
+
+Checking formatting...
+All matched files use Prettier code style!
+
+> pixel@1.4.0 typecheck
+> tsc --noEmit
+
+
+> pixel@1.4.0 test
+> vitest run
+
+
+ RUN  v4.1.11 /home/z/my-project/pixel-lort-pub
+
+ ✓ tests/integration/round18-r10-budget-authority.test.ts (38 tests) 440ms
+ ✓ tests/integration/round19-r09-ownership.test.ts (17 tests) 334ms
+ ✓ tests/integration/round15-design-ownership.test.ts (22 tests) 263ms
+stdout | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > cron (gate OFF) dispatches only enabled types and spends no ingestion budget
+{"ts":"2026-10-27T11:00:21.766Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > cron (gate OFF) dispatches only enabled types and spends no ingestion budget
+{"ts":"2026-10-27T11:00:21.771Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":1,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > queue (gate OFF) acks the paused poll delivery and completes enabled work in the same batch — no dropped durable jobs
+{"ts":"2026-10-27T11:00:21.780Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":2}
+
+stdout | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > queue (gate OFF) acks the paused poll delivery and completes enabled work in the same batch — no dropped durable jobs
+{"ts":"2026-10-27T11:00:21.784Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":2,"retried":0}
+
+stderr | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > global JOBS_ENABLED=false still retries delivered queue work (never ACK-drops)
+{"ts":"2026-10-27T11:00:21.791Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"disabled"}
+
+stderr | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > present-but-invalid gate value fails closed at the queue entrypoint (messages retry)
+{"ts":"2026-10-27T11:00:21.799Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"config_invalid"}
+
+ ✓ tests/integration/round16-d01-policy-pause.test.ts (22 tests) 390ms
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 503 (service_unavailable) when an outbound action has no client
+{"ts":"2026-10-27T11:00:22.571Z","level":"info","msg":"http.request.received","requestId":"522441a7-6cb0-43cd-9e39-570a01085421","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 503 (service_unavailable) when an outbound action has no client
+{"ts":"2026-10-27T11:00:22.575Z","level":"info","msg":"telegram.update.classified","requestId":"522441a7-6cb0-43cd-9e39-570a01085421","kind":"message"}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 503 (service_unavailable) when an outbound action has no client
+{"ts":"2026-10-27T11:00:22.577Z","level":"info","msg":"telegram.update.claimed","requestId":"522441a7-6cb0-43cd-9e39-570a01085421","updateId":8600,"reclaimed":false,"reclaimedStale":false,"attempt":1}
+
+stderr | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 503 (service_unavailable) when an outbound action has no client
+{"ts":"2026-10-27T11:00:22.580Z","level":"warn","msg":"telegram.action.outbound_unavailable","requestId":"522441a7-6cb0-43cd-9e39-570a01085421","action":"send_message"}
+
+stderr | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 503 (service_unavailable) when an outbound action has no client
+{"ts":"2026-10-27T11:00:22.580Z","level":"warn","msg":"telegram.update.failed","requestId":"522441a7-6cb0-43cd-9e39-570a01085421","updateId":8600,"errorCode":"service_unavailable","retryable":true}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 503 (service_unavailable) when an outbound action has no client
+{"ts":"2026-10-27T11:00:22.582Z","level":"info","msg":"telegram.update.terminal_transition_succeeded","requestId":"522441a7-6cb0-43cd-9e39-570a01085421","updateId":8600,"transition":"failed","failureClass":"retryable"}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 503 (service_unavailable) when an outbound action has no client
+{"ts":"2026-10-27T11:00:22.582Z","level":"info","msg":"http.request.completed","requestId":"522441a7-6cb0-43cd-9e39-570a01085421","status":503,"durationMs":12}
+
+stderr | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 503 (service_unavailable) when an outbound action has no client
+{"ts":"2026-10-27T11:00:22.582Z","level":"error","msg":"http.request.failed","requestId":"522441a7-6cb0-43cd-9e39-570a01085421","code":"service_unavailable","httpStatus":503,"error":{"errorKind":"app_error","name":"AppError","code":"service_unavailable","httpStatus":503}}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > completes a noop update safely without a client (200, processed)
+{"ts":"2026-10-27T11:00:22.587Z","level":"info","msg":"http.request.received","requestId":"e798f97c-9eb5-4dce-aefa-8e01348f0ec9","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > completes a noop update safely without a client (200, processed)
+{"ts":"2026-10-27T11:00:22.587Z","level":"info","msg":"telegram.update.classified","requestId":"e798f97c-9eb5-4dce-aefa-8e01348f0ec9","kind":"unsupported"}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > completes a noop update safely without a client (200, processed)
+{"ts":"2026-10-27T11:00:22.589Z","level":"info","msg":"telegram.update.claimed","requestId":"e798f97c-9eb5-4dce-aefa-8e01348f0ec9","updateId":8601,"reclaimed":false,"reclaimedStale":false,"attempt":1}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > completes a noop update safely without a client (200, processed)
+{"ts":"2026-10-27T11:00:22.590Z","level":"info","msg":"telegram.update.terminal_transition_succeeded","requestId":"e798f97c-9eb5-4dce-aefa-8e01348f0ec9","updateId":8601,"transition":"processed"}
+{"ts":"2026-10-27T11:00:22.590Z","level":"info","msg":"telegram.update.processed","requestId":"e798f97c-9eb5-4dce-aefa-8e01348f0ec9","updateId":8601,"action":"noop","noopReason":"unsupported_update","authorized":false}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > completes a noop update safely without a client (200, processed)
+{"ts":"2026-10-27T11:00:22.590Z","level":"info","msg":"http.request.completed","requestId":"e798f97c-9eb5-4dce-aefa-8e01348f0ec9","status":200,"durationMs":3}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > redelivers after the 503 and the reclaim path re-claims the same update
+{"ts":"2026-10-27T11:00:22.594Z","level":"info","msg":"http.request.received","requestId":"9d463f04-049d-41a0-9ded-69e2fbc655cb","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > redelivers after the 503 and the reclaim path re-claims the same update
+{"ts":"2026-10-27T11:00:22.594Z","level":"info","msg":"telegram.update.classified","requestId":"9d463f04-049d-41a0-9ded-69e2fbc655cb","kind":"message"}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > redelivers after the 503 and the reclaim path re-claims the same update
+{"ts":"2026-10-27T11:00:22.596Z","level":"info","msg":"telegram.update.claimed","requestId":"9d463f04-049d-41a0-9ded-69e2fbc655cb","updateId":8602,"reclaimed":false,"reclaimedStale":false,"attempt":1}
+
+stderr | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > redelivers after the 503 and the reclaim path re-claims the same update
+{"ts":"2026-10-27T11:00:22.597Z","level":"warn","msg":"telegram.action.outbound_unavailable","requestId":"9d463f04-049d-41a0-9ded-69e2fbc655cb","action":"send_message"}
+
+stderr | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > redelivers after the 503 and the reclaim path re-claims the same update
+{"ts":"2026-10-27T11:00:22.597Z","level":"warn","msg":"telegram.update.failed","requestId":"9d463f04-049d-41a0-9ded-69e2fbc655cb","updateId":8602,"errorCode":"service_unavailable","retryable":true}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > redelivers after the 503 and the reclaim path re-claims the same update
+{"ts":"2026-10-27T11:00:22.598Z","level":"info","msg":"telegram.update.terminal_transition_succeeded","requestId":"9d463f04-049d-41a0-9ded-69e2fbc655cb","updateId":8602,"transition":"failed","failureClass":"retryable"}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > redelivers after the 503 and the reclaim path re-claims the same update
+{"ts":"2026-10-27T11:00:22.598Z","level":"info","msg":"http.request.completed","requestId":"9d463f04-049d-41a0-9ded-69e2fbc655cb","status":503,"durationMs":4}
+
+stderr | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > redelivers after the 503 and the reclaim path re-claims the same update
+{"ts":"2026-10-27T11:00:22.598Z","level":"error","msg":"http.request.failed","requestId":"9d463f04-049d-41a0-9ded-69e2fbc655cb","code":"service_unavailable","httpStatus":503,"error":{"errorKind":"app_error","name":"AppError","code":"service_unavailable","httpStatus":503}}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry
+{"ts":"2026-10-27T11:00:22.606Z","level":"info","msg":"http.request.received","requestId":"0a584636-d52c-4264-b8f5-c10fd3a9a6d3","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry
+{"ts":"2026-10-27T11:00:22.607Z","level":"info","msg":"telegram.update.classified","requestId":"0a584636-d52c-4264-b8f5-c10fd3a9a6d3","kind":"unsupported"}
+
+stderr | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry
+{"ts":"2026-10-27T11:00:22.609Z","level":"warn","msg":"telegram.update.in_flight","requestId":"0a584636-d52c-4264-b8f5-c10fd3a9a6d3","updateId":8603}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry
+{"ts":"2026-10-27T11:00:22.609Z","level":"info","msg":"http.request.completed","requestId":"0a584636-d52c-4264-b8f5-c10fd3a9a6d3","status":503,"durationMs":3}
+
+stderr | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry
+{"ts":"2026-10-27T11:00:22.609Z","level":"error","msg":"http.request.failed","requestId":"0a584636-d52c-4264-b8f5-c10fd3a9a6d3","code":"service_unavailable","httpStatus":503,"error":{"errorKind":"app_error","name":"AppError","code":"service_unavailable","httpStatus":503}}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry
+{"ts":"2026-10-27T11:00:22.612Z","level":"info","msg":"http.request.received","requestId":"55bd45d6-3c6c-4233-8222-838e06ed9e6c","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry
+{"ts":"2026-10-27T11:00:22.613Z","level":"info","msg":"telegram.update.classified","requestId":"55bd45d6-3c6c-4233-8222-838e06ed9e6c","kind":"unsupported"}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry
+{"ts":"2026-10-27T11:00:22.615Z","level":"info","msg":"telegram.update.claimed","requestId":"55bd45d6-3c6c-4233-8222-838e06ed9e6c","updateId":8603,"reclaimed":true,"reclaimedStale":true,"attempt":2}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry
+{"ts":"2026-10-27T11:00:22.616Z","level":"info","msg":"telegram.update.terminal_transition_succeeded","requestId":"55bd45d6-3c6c-4233-8222-838e06ed9e6c","updateId":8603,"transition":"processed"}
+{"ts":"2026-10-27T11:00:22.616Z","level":"info","msg":"telegram.update.processed","requestId":"55bd45d6-3c6c-4233-8222-838e06ed9e6c","updateId":8603,"action":"noop","noopReason":"unsupported_update","authorized":false}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers safe 503 for an IN-FLIGHT update and recovers it after lease expiry
+{"ts":"2026-10-27T11:00:22.616Z","level":"info","msg":"http.request.completed","requestId":"55bd45d6-3c6c-4233-8222-838e06ed9e6c","status":200,"durationMs":4}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 200 without executing for a TERMINAL permanently-failed update
+{"ts":"2026-10-27T11:00:22.620Z","level":"info","msg":"http.request.received","requestId":"aba6725e-570c-4d34-bcfa-28a9a973bdf4","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 200 without executing for a TERMINAL permanently-failed update
+{"ts":"2026-10-27T11:00:22.621Z","level":"info","msg":"telegram.update.classified","requestId":"aba6725e-570c-4d34-bcfa-28a9a973bdf4","kind":"message"}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 200 without executing for a TERMINAL permanently-failed update
+{"ts":"2026-10-27T11:00:22.623Z","level":"info","msg":"telegram.update.permanently_failed","requestId":"aba6725e-570c-4d34-bcfa-28a9a973bdf4","updateId":8604}
+
+stdout | tests/integration/telegram-update-reclaim.test.ts > webhook edge — retryable failure is never falsely acknowledged > answers 200 without executing for a TERMINAL permanently-failed update
+{"ts":"2026-10-27T11:00:22.623Z","level":"info","msg":"http.request.completed","requestId":"aba6725e-570c-4d34-bcfa-28a9a973bdf4","status":200,"durationMs":3}
+
+ ✓ tests/integration/telegram-update-reclaim.test.ts (25 tests) 217ms
+ ✓ tests/integration/job-engine.test.ts (22 tests) 266ms
+ ✓ tests/integration/source-poll-pipeline.test.ts (14 tests) 337ms
+ ✓ tests/integration/round181-boundary-corrections.test.ts (15 tests) 373ms
+ ✓ tests/integration/round13-r03-r07-r08.test.ts (23 tests) 268ms
+ ✓ tests/integration/round14-r05-r06.test.ts (31 tests) 128ms
+ ✓ tests/integration/round15-design-pause.test.ts (13 tests) 298ms
+ ✓ tests/integration/round15-design-recovery-policy.test.ts (10 tests) 338ms
+ ✓ tests/integration/round17-r04-steam-rotation.test.ts (9 tests) 174ms
+ ✓ tests/integration/round12-r01-r02.test.ts (15 tests) 142ms
+ ✓ tests/unit/bot-api-client.test.ts (32 tests) 40ms
+ ✓ tests/integration/round191-capability-failclosed.test.ts (16 tests) 266ms
+ ✓ tests/integration/round15-design-recovery.test.ts (7 tests) 180ms
+ ✓ tests/integration/admin-ui-language.test.ts (22 tests) 261ms
+stdout | tests/integration/telegram-update-claims.test.ts > duplicate delivery through the worker webhook > acknowledges the second delivery of the same update without reprocessing
+{"ts":"2026-10-27T11:00:35.736Z","level":"info","msg":"http.request.received","requestId":"c7355dd3-7c8f-4548-a0cb-874d15416b67","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-update-claims.test.ts > duplicate delivery through the worker webhook > acknowledges the second delivery of the same update without reprocessing
+{"ts":"2026-10-27T11:00:35.738Z","level":"info","msg":"telegram.update.classified","requestId":"c7355dd3-7c8f-4548-a0cb-874d15416b67","kind":"unsupported"}
+
+stdout | tests/integration/telegram-update-claims.test.ts > duplicate delivery through the worker webhook > acknowledges the second delivery of the same update without reprocessing
+{"ts":"2026-10-27T11:00:35.740Z","level":"info","msg":"telegram.update.claimed","requestId":"c7355dd3-7c8f-4548-a0cb-874d15416b67","updateId":7200,"reclaimed":false,"reclaimedStale":false,"attempt":1}
+
+stdout | tests/integration/telegram-update-claims.test.ts > duplicate delivery through the worker webhook > acknowledges the second delivery of the same update without reprocessing
+{"ts":"2026-10-27T11:00:35.741Z","level":"info","msg":"telegram.update.terminal_transition_succeeded","requestId":"c7355dd3-7c8f-4548-a0cb-874d15416b67","updateId":7200,"transition":"processed"}
+{"ts":"2026-10-27T11:00:35.741Z","level":"info","msg":"telegram.update.processed","requestId":"c7355dd3-7c8f-4548-a0cb-874d15416b67","updateId":7200,"action":"noop","noopReason":"unsupported_update","authorized":false}
+
+stdout | tests/integration/telegram-update-claims.test.ts > duplicate delivery through the worker webhook > acknowledges the second delivery of the same update without reprocessing
+{"ts":"2026-10-27T11:00:35.742Z","level":"info","msg":"http.request.completed","requestId":"c7355dd3-7c8f-4548-a0cb-874d15416b67","status":200,"durationMs":7}
+
+stdout | tests/integration/telegram-update-claims.test.ts > duplicate delivery through the worker webhook > acknowledges the second delivery of the same update without reprocessing
+{"ts":"2026-10-27T11:00:35.743Z","level":"info","msg":"http.request.received","requestId":"2e1b15ce-548e-4a60-beac-a60542be5d54","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-update-claims.test.ts > duplicate delivery through the worker webhook > acknowledges the second delivery of the same update without reprocessing
+{"ts":"2026-10-27T11:00:35.743Z","level":"info","msg":"telegram.update.classified","requestId":"2e1b15ce-548e-4a60-beac-a60542be5d54","kind":"unsupported"}
+
+stdout | tests/integration/telegram-update-claims.test.ts > duplicate delivery through the worker webhook > acknowledges the second delivery of the same update without reprocessing
+{"ts":"2026-10-27T11:00:35.745Z","level":"info","msg":"telegram.update.duplicate","requestId":"2e1b15ce-548e-4a60-beac-a60542be5d54","updateId":7200,"existingStatus":"processed"}
+
+stdout | tests/integration/telegram-update-claims.test.ts > duplicate delivery through the worker webhook > acknowledges the second delivery of the same update without reprocessing
+{"ts":"2026-10-27T11:00:35.745Z","level":"info","msg":"http.request.completed","requestId":"2e1b15ce-548e-4a60-beac-a60542be5d54","status":200,"durationMs":2}
+
+ ✓ tests/integration/telegram-update-claims.test.ts (21 tests) 132ms
+ ✓ tests/integration/job-store-lifecycle.test.ts (21 tests) 156ms
+stdout | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > disabled (default): a structured no-op that never dispatches
+{"ts":"2026-10-27T11:00:37.345Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stdout | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled without both queue bindings: config_invalid — cron no-op, rows stay recoverable
+{"ts":"2026-10-27T11:00:37.352Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stderr | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled without both queue bindings: config_invalid — cron no-op, rows stay recoverable
+{"ts":"2026-10-27T11:00:37.353Z","level":"warn","msg":"cron.jobs_config_invalid","evt":"cron"}
+
+stdout | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled without DB: config_invalid — no dispatch, no crash
+{"ts":"2026-10-27T11:00:37.356Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stderr | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled without DB: config_invalid — no dispatch, no crash
+{"ts":"2026-10-27T11:00:37.356Z","level":"warn","msg":"cron.jobs_config_invalid","evt":"cron"}
+
+stdout | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled + DB + fake JOBS/DLQ producers: dispatches the canonical envelope OBJECT
+{"ts":"2026-10-27T11:00:37.360Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stdout | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled + DB + fake JOBS/DLQ producers: dispatches the canonical envelope OBJECT
+{"ts":"2026-10-27T11:00:37.368Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stderr | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > disabled (default): retries instead of acknowledging
+{"ts":"2026-10-27T11:00:37.374Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"disabled"}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > enabled + DB + required bindings: processes a real delivery end-to-end and acks durable success
+{"ts":"2026-10-27T11:00:37.378Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > enabled + DB + required bindings: processes a real delivery end-to-end and acks durable success
+{"ts":"2026-10-27T11:00:37.383Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stderr | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > enabled but missing required bindings: config_invalid — retries instead of acknowledging
+{"ts":"2026-10-27T11:00:37.387Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"config_invalid"}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > enabled + malformed message: acks the poison message (no hot loop)
+{"ts":"2026-10-27T11:00:37.391Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > enabled + malformed message: acks the poison message (no hot loop)
+{"ts":"2026-10-27T11:00:37.391Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:00:37.394Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:00:37.399Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:00:37.401Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:00:37.404Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:00:37.406Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:00:37.407Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > entrypoint persistence fault on the terminal write: retry, never ack, row stays claimed
+{"ts":"2026-10-27T11:00:37.412Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stderr | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > entrypoint persistence fault on the terminal write: retry, never ack, row stays claimed
+{"ts":"2026-10-27T11:00:37.416Z","level":"warn","msg":"db.run.failed","evt":"queue","errorCode":"db_query_failed","durationMs":1}
+
+stderr | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > entrypoint persistence fault on the terminal write: retry, never ack, row stays claimed
+{"ts":"2026-10-27T11:00:37.416Z","level":"warn","msg":"jobs.msg.consumer_error","evt":"queue","messageId":"m-pf-1","errorCode":"db_query_failed"}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > entrypoint persistence fault on the terminal write: retry, never ack, row stays claimed
+{"ts":"2026-10-27T11:00:37.416Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":0,"retried":1}
+
+stderr | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > invalid queue activation (DLQ missing): retries without executing a handler
+{"ts":"2026-10-27T11:00:37.428Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"config_invalid"}
+
+ ✓ tests/integration/job-entrypoints.test.ts (14 tests) 105ms
+ ✓ tests/integration/d1-schema.test.ts (13 tests) 72ms
+ ✓ tests/unit/command-router.test.ts (33 tests) 8ms
+ ✓ tests/unit/steam-rotation.test.ts (18 tests) 17ms
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — ingress flag gating > behaves like an unknown route (404) while the ingress flag is disabled
+{"ts":"2026-10-27T11:00:39.789Z","level":"info","msg":"http.request.received","requestId":"95f6550a-e4df-4de4-bf29-52a77374f25f","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — ingress flag gating > behaves like an unknown route (404) while the ingress flag is disabled
+{"ts":"2026-10-27T11:00:39.790Z","level":"warn","msg":"http.request.client_error","requestId":"95f6550a-e4df-4de4-bf29-52a77374f25f","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — ingress flag gating > behaves like an unknown route (404) while the ingress flag is disabled
+{"ts":"2026-10-27T11:00:39.791Z","level":"info","msg":"http.request.completed","requestId":"95f6550a-e4df-4de4-bf29-52a77374f25f","status":404,"durationMs":3}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — ingress flag gating > rejects an invalid flag value like an unknown route (fail closed)
+{"ts":"2026-10-27T11:00:39.794Z","level":"info","msg":"http.request.received","requestId":"92801239-79a5-4166-9e4a-6a0fb7f6a2c6","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — ingress flag gating > rejects an invalid flag value like an unknown route (fail closed)
+{"ts":"2026-10-27T11:00:39.794Z","level":"info","msg":"http.request.completed","requestId":"92801239-79a5-4166-9e4a-6a0fb7f6a2c6","status":404,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — ingress flag gating > rejects an invalid flag value like an unknown route (fail closed)
+{"ts":"2026-10-27T11:00:39.794Z","level":"warn","msg":"http.request.client_error","requestId":"92801239-79a5-4166-9e4a-6a0fb7f6a2c6","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects GET with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.796Z","level":"info","msg":"http.request.received","requestId":"e15ced6d-7f46-4d94-9d04-bc9abe6ecba4","http":{"method":"GET","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects GET with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.797Z","level":"warn","msg":"http.request.client_error","requestId":"e15ced6d-7f46-4d94-9d04-bc9abe6ecba4","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects GET with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.797Z","level":"info","msg":"http.request.completed","requestId":"e15ced6d-7f46-4d94-9d04-bc9abe6ecba4","status":404,"durationMs":1}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects PUT with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.798Z","level":"info","msg":"http.request.received","requestId":"62a61b14-a2bb-4df0-be7d-efd2245c5615","http":{"method":"PUT","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects PUT with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.799Z","level":"warn","msg":"http.request.client_error","requestId":"62a61b14-a2bb-4df0-be7d-efd2245c5615","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects PUT with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.799Z","level":"info","msg":"http.request.completed","requestId":"62a61b14-a2bb-4df0-be7d-efd2245c5615","status":404,"durationMs":1}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects DELETE with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.801Z","level":"info","msg":"http.request.received","requestId":"368bf3a2-4e3e-4cf9-b3ab-b268ec6f6939","http":{"method":"DELETE","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects DELETE with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.801Z","level":"info","msg":"http.request.completed","requestId":"368bf3a2-4e3e-4cf9-b3ab-b268ec6f6939","status":404,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects DELETE with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.801Z","level":"warn","msg":"http.request.client_error","requestId":"368bf3a2-4e3e-4cf9-b3ab-b268ec6f6939","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects HEAD with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.802Z","level":"info","msg":"http.request.received","requestId":"b4aa369b-494c-4682-ac48-8ef77abb3aa5","http":{"method":"HEAD","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects HEAD with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.803Z","level":"info","msg":"http.request.completed","requestId":"b4aa369b-494c-4682-ac48-8ef77abb3aa5","status":404,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — non-POST methods are rejected uniformly > rejects HEAD with the uniform safe 404
+{"ts":"2026-10-27T11:00:39.803Z","level":"warn","msg":"http.request.client_error","requestId":"b4aa369b-494c-4682-ac48-8ef77abb3aa5","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — durable idempotency requirements > fails closed with a safe 503 when ingress is enabled but D1 is unavailable
+{"ts":"2026-10-27T11:00:39.804Z","level":"info","msg":"http.request.received","requestId":"f7664729-35bd-4fe7-8d7e-a3e12fbf0d73","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — durable idempotency requirements > fails closed with a safe 503 when ingress is enabled but D1 is unavailable
+{"ts":"2026-10-27T11:00:39.806Z","level":"warn","msg":"telegram.webhook.unavailable","requestId":"f7664729-35bd-4fe7-8d7e-a3e12fbf0d73","reason":"db_binding_missing"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — durable idempotency requirements > fails closed with a safe 503 when ingress is enabled but D1 is unavailable
+{"ts":"2026-10-27T11:00:39.806Z","level":"info","msg":"telegram.update.classified","requestId":"f7664729-35bd-4fe7-8d7e-a3e12fbf0d73","kind":"unsupported"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — durable idempotency requirements > fails closed with a safe 503 when ingress is enabled but D1 is unavailable
+{"ts":"2026-10-27T11:00:39.806Z","level":"info","msg":"http.request.completed","requestId":"f7664729-35bd-4fe7-8d7e-a3e12fbf0d73","status":503,"durationMs":2}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — durable idempotency requirements > fails closed with a safe 503 when ingress is enabled but D1 is unavailable
+{"ts":"2026-10-27T11:00:39.806Z","level":"error","msg":"http.request.failed","requestId":"f7664729-35bd-4fe7-8d7e-a3e12fbf0d73","code":"service_unavailable","httpStatus":503,"error":{"errorKind":"app_error","name":"AppError","code":"service_unavailable","httpStatus":503}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects a missing secret header with 401
+{"ts":"2026-10-27T11:00:39.808Z","level":"info","msg":"http.request.received","requestId":"61a20f25-e150-4de5-aa38-55c96ccbc43d","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects a missing secret header with 401
+{"ts":"2026-10-27T11:00:39.808Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"61a20f25-e150-4de5-aa38-55c96ccbc43d","reason":"invalid_secret"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects a missing secret header with 401
+{"ts":"2026-10-27T11:00:39.808Z","level":"info","msg":"http.request.completed","requestId":"61a20f25-e150-4de5-aa38-55c96ccbc43d","status":401,"durationMs":0}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects a missing secret header with 401
+{"ts":"2026-10-27T11:00:39.808Z","level":"warn","msg":"http.request.client_error","requestId":"61a20f25-e150-4de5-aa38-55c96ccbc43d","code":"unauthorized","httpStatus":401}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects an empty secret header with 401
+{"ts":"2026-10-27T11:00:39.810Z","level":"info","msg":"http.request.received","requestId":"b1151842-3e82-403c-822b-ed01c598015f","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects an empty secret header with 401
+{"ts":"2026-10-27T11:00:39.810Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"b1151842-3e82-403c-822b-ed01c598015f","reason":"invalid_secret"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects an empty secret header with 401
+{"ts":"2026-10-27T11:00:39.811Z","level":"info","msg":"http.request.completed","requestId":"b1151842-3e82-403c-822b-ed01c598015f","status":401,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects an empty secret header with 401
+{"ts":"2026-10-27T11:00:39.811Z","level":"warn","msg":"http.request.client_error","requestId":"b1151842-3e82-403c-822b-ed01c598015f","code":"unauthorized","httpStatus":401}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects a wrong secret with 401 without echoing anything
+{"ts":"2026-10-27T11:00:39.812Z","level":"info","msg":"http.request.received","requestId":"f6f95429-fddc-45c0-942e-f50988da63ee","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects a wrong secret with 401 without echoing anything
+{"ts":"2026-10-27T11:00:39.813Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"f6f95429-fddc-45c0-942e-f50988da63ee","reason":"invalid_secret"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects a wrong secret with 401 without echoing anything
+{"ts":"2026-10-27T11:00:39.813Z","level":"info","msg":"http.request.completed","requestId":"f6f95429-fddc-45c0-942e-f50988da63ee","status":401,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > rejects a wrong secret with 401 without echoing anything
+{"ts":"2026-10-27T11:00:39.813Z","level":"warn","msg":"http.request.client_error","requestId":"f6f95429-fddc-45c0-942e-f50988da63ee","code":"unauthorized","httpStatus":401}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > serves a valid secret request with a deterministic minimal 200
+{"ts":"2026-10-27T11:00:39.815Z","level":"info","msg":"http.request.received","requestId":"6350c024-2111-4124-bd70-1ccfe4f01285","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > serves a valid secret request with a deterministic minimal 200
+{"ts":"2026-10-27T11:00:39.815Z","level":"info","msg":"telegram.update.classified","requestId":"6350c024-2111-4124-bd70-1ccfe4f01285","kind":"unsupported"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > serves a valid secret request with a deterministic minimal 200
+{"ts":"2026-10-27T11:00:39.817Z","level":"info","msg":"telegram.update.claimed","requestId":"6350c024-2111-4124-bd70-1ccfe4f01285","updateId":5001,"reclaimed":false,"reclaimedStale":false,"attempt":1}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > serves a valid secret request with a deterministic minimal 200
+{"ts":"2026-10-27T11:00:39.819Z","level":"info","msg":"telegram.update.terminal_transition_succeeded","requestId":"6350c024-2111-4124-bd70-1ccfe4f01285","updateId":5001,"transition":"processed"}
+{"ts":"2026-10-27T11:00:39.819Z","level":"info","msg":"telegram.update.processed","requestId":"6350c024-2111-4124-bd70-1ccfe4f01285","updateId":5001,"action":"noop","noopReason":"unsupported_update","authorized":false}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > serves a valid secret request with a deterministic minimal 200
+{"ts":"2026-10-27T11:00:39.819Z","level":"info","msg":"http.request.completed","requestId":"6350c024-2111-4124-bd70-1ccfe4f01285","status":200,"durationMs":4}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > never fakes success for an outbound action without a client (503, ADR-0027)
+{"ts":"2026-10-27T11:00:39.821Z","level":"info","msg":"http.request.received","requestId":"7ea5a7b7-df79-40cc-b9ec-6c81cdab7fc1","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > never fakes success for an outbound action without a client (503, ADR-0027)
+{"ts":"2026-10-27T11:00:39.822Z","level":"info","msg":"telegram.update.classified","requestId":"7ea5a7b7-df79-40cc-b9ec-6c81cdab7fc1","kind":"message"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > never fakes success for an outbound action without a client (503, ADR-0027)
+{"ts":"2026-10-27T11:00:39.823Z","level":"info","msg":"telegram.update.claimed","requestId":"7ea5a7b7-df79-40cc-b9ec-6c81cdab7fc1","updateId":5002,"reclaimed":false,"reclaimedStale":false,"attempt":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > never fakes success for an outbound action without a client (503, ADR-0027)
+{"ts":"2026-10-27T11:00:39.825Z","level":"warn","msg":"telegram.action.outbound_unavailable","requestId":"7ea5a7b7-df79-40cc-b9ec-6c81cdab7fc1","action":"send_message"}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > never fakes success for an outbound action without a client (503, ADR-0027)
+{"ts":"2026-10-27T11:00:39.825Z","level":"warn","msg":"telegram.update.failed","requestId":"7ea5a7b7-df79-40cc-b9ec-6c81cdab7fc1","updateId":5002,"errorCode":"service_unavailable","retryable":true}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > never fakes success for an outbound action without a client (503, ADR-0027)
+{"ts":"2026-10-27T11:00:39.827Z","level":"info","msg":"telegram.update.terminal_transition_succeeded","requestId":"7ea5a7b7-df79-40cc-b9ec-6c81cdab7fc1","updateId":5002,"transition":"failed","failureClass":"retryable"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > never fakes success for an outbound action without a client (503, ADR-0027)
+{"ts":"2026-10-27T11:00:39.827Z","level":"info","msg":"http.request.completed","requestId":"7ea5a7b7-df79-40cc-b9ec-6c81cdab7fc1","status":503,"durationMs":6}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — secret verification > never fakes success for an outbound action without a client (503, ADR-0027)
+{"ts":"2026-10-27T11:00:39.827Z","level":"error","msg":"http.request.failed","requestId":"7ea5a7b7-df79-40cc-b9ec-6c81cdab7fc1","code":"service_unavailable","httpStatus":503,"error":{"errorKind":"app_error","name":"AppError","code":"service_unavailable","httpStatus":503}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a non-JSON content type with 415
+{"ts":"2026-10-27T11:00:39.829Z","level":"info","msg":"http.request.received","requestId":"caa51112-ba19-4956-a501-41dc456be703","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a non-JSON content type with 415
+{"ts":"2026-10-27T11:00:39.829Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"caa51112-ba19-4956-a501-41dc456be703","reason":"unsupported_media_type"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a non-JSON content type with 415
+{"ts":"2026-10-27T11:00:39.829Z","level":"info","msg":"http.request.completed","requestId":"caa51112-ba19-4956-a501-41dc456be703","status":415,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a non-JSON content type with 415
+{"ts":"2026-10-27T11:00:39.829Z","level":"warn","msg":"http.request.client_error","requestId":"caa51112-ba19-4956-a501-41dc456be703","code":"unsupported_media_type","httpStatus":415}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a declared oversized body with 413
+{"ts":"2026-10-27T11:00:39.831Z","level":"info","msg":"http.request.received","requestId":"55be710a-0efc-4382-a75a-d3b6c0e8f447","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a declared oversized body with 413
+{"ts":"2026-10-27T11:00:39.831Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"55be710a-0efc-4382-a75a-d3b6c0e8f447","reason":"payload_too_large"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a declared oversized body with 413
+{"ts":"2026-10-27T11:00:39.832Z","level":"info","msg":"http.request.completed","requestId":"55be710a-0efc-4382-a75a-d3b6c0e8f447","status":413,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a declared oversized body with 413
+{"ts":"2026-10-27T11:00:39.832Z","level":"warn","msg":"http.request.client_error","requestId":"55be710a-0efc-4382-a75a-d3b6c0e8f447","code":"payload_too_large","httpStatus":413}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > enforces the cap on actual bytes even when Content-Length lies
+{"ts":"2026-10-27T11:00:39.833Z","level":"info","msg":"http.request.received","requestId":"788da1d7-3d83-4ff7-ad81-bcc47e5b07b1","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > enforces the cap on actual bytes even when Content-Length lies
+{"ts":"2026-10-27T11:00:39.834Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"788da1d7-3d83-4ff7-ad81-bcc47e5b07b1","reason":"payload_too_large"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > enforces the cap on actual bytes even when Content-Length lies
+{"ts":"2026-10-27T11:00:39.834Z","level":"info","msg":"http.request.completed","requestId":"788da1d7-3d83-4ff7-ad81-bcc47e5b07b1","status":413,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > enforces the cap on actual bytes even when Content-Length lies
+{"ts":"2026-10-27T11:00:39.834Z","level":"warn","msg":"http.request.client_error","requestId":"788da1d7-3d83-4ff7-ad81-bcc47e5b07b1","code":"payload_too_large","httpStatus":413}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.836Z","level":"info","msg":"http.request.received","requestId":"39c4a228-c4ff-417c-ac5d-686d4634ed52","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.836Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"39c4a228-c4ff-417c-ac5d-686d4634ed52","reason":"invalid_content_length"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.836Z","level":"info","msg":"http.request.completed","requestId":"39c4a228-c4ff-417c-ac5d-686d4634ed52","status":400,"durationMs":0}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.836Z","level":"warn","msg":"http.request.client_error","requestId":"39c4a228-c4ff-417c-ac5d-686d4634ed52","code":"bad_request","httpStatus":400}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.837Z","level":"info","msg":"http.request.received","requestId":"af4c293b-ef14-4e30-a171-55ebb8f4d9f8","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.837Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"af4c293b-ef14-4e30-a171-55ebb8f4d9f8","reason":"invalid_content_length"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.837Z","level":"info","msg":"http.request.completed","requestId":"af4c293b-ef14-4e30-a171-55ebb8f4d9f8","status":400,"durationMs":0}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.837Z","level":"warn","msg":"http.request.client_error","requestId":"af4c293b-ef14-4e30-a171-55ebb8f4d9f8","code":"bad_request","httpStatus":400}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.838Z","level":"info","msg":"http.request.received","requestId":"6088219c-5ca0-4dda-841b-d326621c999c","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.838Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"6088219c-5ca0-4dda-841b-d326621c999c","reason":"invalid_content_length"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.838Z","level":"info","msg":"http.request.completed","requestId":"6088219c-5ca0-4dda-841b-d326621c999c","status":400,"durationMs":0}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.838Z","level":"warn","msg":"http.request.client_error","requestId":"6088219c-5ca0-4dda-841b-d326621c999c","code":"bad_request","httpStatus":400}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.839Z","level":"info","msg":"http.request.received","requestId":"b5cebdee-dfdb-4200-b56f-e1fdc3d17199","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.839Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"b5cebdee-dfdb-4200-b56f-e1fdc3d17199","reason":"invalid_content_length"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.839Z","level":"info","msg":"http.request.completed","requestId":"b5cebdee-dfdb-4200-b56f-e1fdc3d17199","status":400,"durationMs":0}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an invalid Content-Length with a safe 400 before reading
+{"ts":"2026-10-27T11:00:39.839Z","level":"warn","msg":"http.request.client_error","requestId":"b5cebdee-dfdb-4200-b56f-e1fdc3d17199","code":"bad_request","httpStatus":400}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an oversized declared Content-Length before parsing (413)
+{"ts":"2026-10-27T11:00:39.841Z","level":"info","msg":"http.request.received","requestId":"81a858a1-46a3-4a26-b3f3-21b1070ae489","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an oversized declared Content-Length before parsing (413)
+{"ts":"2026-10-27T11:00:39.841Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"81a858a1-46a3-4a26-b3f3-21b1070ae489","reason":"payload_too_large"}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an oversized declared Content-Length before parsing (413)
+{"ts":"2026-10-27T11:00:39.841Z","level":"warn","msg":"http.request.client_error","requestId":"81a858a1-46a3-4a26-b3f3-21b1070ae489","code":"payload_too_large","httpStatus":413}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects an oversized declared Content-Length before parsing (413)
+{"ts":"2026-10-27T11:00:39.842Z","level":"info","msg":"http.request.completed","requestId":"81a858a1-46a3-4a26-b3f3-21b1070ae489","status":413,"durationMs":1}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > accepts a body at the exact 64 KiB limit
+{"ts":"2026-10-27T11:00:39.844Z","level":"info","msg":"http.request.received","requestId":"66232c6f-fee7-4ce9-ae7e-483c45321b58","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > accepts a body at the exact 64 KiB limit
+{"ts":"2026-10-27T11:00:39.845Z","level":"info","msg":"telegram.update.classified","requestId":"66232c6f-fee7-4ce9-ae7e-483c45321b58","kind":"unsupported"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > accepts a body at the exact 64 KiB limit
+{"ts":"2026-10-27T11:00:39.846Z","level":"info","msg":"telegram.update.claimed","requestId":"66232c6f-fee7-4ce9-ae7e-483c45321b58","updateId":5077,"reclaimed":false,"reclaimedStale":false,"attempt":1}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > accepts a body at the exact 64 KiB limit
+{"ts":"2026-10-27T11:00:39.847Z","level":"info","msg":"telegram.update.terminal_transition_succeeded","requestId":"66232c6f-fee7-4ce9-ae7e-483c45321b58","updateId":5077,"transition":"processed"}
+{"ts":"2026-10-27T11:00:39.847Z","level":"info","msg":"telegram.update.processed","requestId":"66232c6f-fee7-4ce9-ae7e-483c45321b58","updateId":5077,"action":"noop","noopReason":"unsupported_update","authorized":false}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > accepts a body at the exact 64 KiB limit
+{"ts":"2026-10-27T11:00:39.847Z","level":"info","msg":"http.request.completed","requestId":"66232c6f-fee7-4ce9-ae7e-483c45321b58","status":200,"durationMs":3}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a streamed oversized body with NO Content-Length header (413)
+{"ts":"2026-10-27T11:00:39.849Z","level":"info","msg":"http.request.received","requestId":"28892131-5c1f-4343-942d-4129d72418db","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a streamed oversized body with NO Content-Length header (413)
+{"ts":"2026-10-27T11:00:39.849Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"28892131-5c1f-4343-942d-4129d72418db","reason":"payload_too_large"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a streamed oversized body with NO Content-Length header (413)
+{"ts":"2026-10-27T11:00:39.849Z","level":"info","msg":"http.request.completed","requestId":"28892131-5c1f-4343-942d-4129d72418db","status":413,"durationMs":0}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects a streamed oversized body with NO Content-Length header (413)
+{"ts":"2026-10-27T11:00:39.849Z","level":"warn","msg":"http.request.client_error","requestId":"28892131-5c1f-4343-942d-4129d72418db","code":"payload_too_large","httpStatus":413}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects malformed UTF-8 in the body with a safe 400
+{"ts":"2026-10-27T11:00:39.851Z","level":"info","msg":"http.request.received","requestId":"4166a22b-e41e-4b55-8dec-8d44481db332","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects malformed UTF-8 in the body with a safe 400
+{"ts":"2026-10-27T11:00:39.851Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"4166a22b-e41e-4b55-8dec-8d44481db332","reason":"malformed_json"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects malformed UTF-8 in the body with a safe 400
+{"ts":"2026-10-27T11:00:39.851Z","level":"info","msg":"http.request.completed","requestId":"4166a22b-e41e-4b55-8dec-8d44481db332","status":400,"durationMs":0}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — content type and body-size caps > rejects malformed UTF-8 in the body with a safe 400
+{"ts":"2026-10-27T11:00:39.851Z","level":"warn","msg":"http.request.client_error","requestId":"4166a22b-e41e-4b55-8dec-8d44481db332","code":"bad_request","httpStatus":400}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects malformed JSON with a safe 400
+{"ts":"2026-10-27T11:00:39.853Z","level":"info","msg":"http.request.received","requestId":"5944dec0-ff7e-4f5d-82fe-2572e5726eda","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects malformed JSON with a safe 400
+{"ts":"2026-10-27T11:00:39.854Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"5944dec0-ff7e-4f5d-82fe-2572e5726eda","reason":"malformed_json"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects malformed JSON with a safe 400
+{"ts":"2026-10-27T11:00:39.854Z","level":"info","msg":"http.request.completed","requestId":"5944dec0-ff7e-4f5d-82fe-2572e5726eda","status":400,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects malformed JSON with a safe 400
+{"ts":"2026-10-27T11:00:39.854Z","level":"warn","msg":"http.request.client_error","requestId":"5944dec0-ff7e-4f5d-82fe-2572e5726eda","code":"bad_request","httpStatus":400}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects a missing update_id with a safe 400
+{"ts":"2026-10-27T11:00:39.855Z","level":"info","msg":"http.request.received","requestId":"6e3450d8-38b0-44e1-a11f-ca5ff94b7d49","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects a missing update_id with a safe 400
+{"ts":"2026-10-27T11:00:39.856Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"6e3450d8-38b0-44e1-a11f-ca5ff94b7d49","reason":"invalid_update","detail":"missing_update_id"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects a missing update_id with a safe 400
+{"ts":"2026-10-27T11:00:39.856Z","level":"info","msg":"http.request.completed","requestId":"6e3450d8-38b0-44e1-a11f-ca5ff94b7d49","status":400,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects a missing update_id with a safe 400
+{"ts":"2026-10-27T11:00:39.856Z","level":"warn","msg":"http.request.client_error","requestId":"6e3450d8-38b0-44e1-a11f-ca5ff94b7d49","code":"bad_request","httpStatus":400}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects an unsafe update_id with a safe 400
+{"ts":"2026-10-27T11:00:39.857Z","level":"info","msg":"http.request.received","requestId":"a1ec84bf-0ad0-4abc-9690-4b950f2774e3","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects an unsafe update_id with a safe 400
+{"ts":"2026-10-27T11:00:39.858Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"a1ec84bf-0ad0-4abc-9690-4b950f2774e3","reason":"invalid_update","detail":"invalid_update_id"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects an unsafe update_id with a safe 400
+{"ts":"2026-10-27T11:00:39.858Z","level":"info","msg":"http.request.completed","requestId":"a1ec84bf-0ad0-4abc-9690-4b950f2774e3","status":400,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > rejects an unsafe update_id with a safe 400
+{"ts":"2026-10-27T11:00:39.858Z","level":"warn","msg":"http.request.client_error","requestId":"a1ec84bf-0ad0-4abc-9690-4b950f2774e3","code":"bad_request","httpStatus":400}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > acknowledges unsupported update types without crashing
+{"ts":"2026-10-27T11:00:39.859Z","level":"info","msg":"http.request.received","requestId":"c04ab3f2-b2c7-4fec-9612-6ca279bdac06","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > acknowledges unsupported update types without crashing
+{"ts":"2026-10-27T11:00:39.860Z","level":"info","msg":"telegram.update.classified","requestId":"c04ab3f2-b2c7-4fec-9612-6ca279bdac06","kind":"unsupported"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > acknowledges unsupported update types without crashing
+{"ts":"2026-10-27T11:00:39.861Z","level":"info","msg":"telegram.update.claimed","requestId":"c04ab3f2-b2c7-4fec-9612-6ca279bdac06","updateId":5099,"reclaimed":false,"reclaimedStale":false,"attempt":1}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > acknowledges unsupported update types without crashing
+{"ts":"2026-10-27T11:00:39.862Z","level":"info","msg":"telegram.update.terminal_transition_succeeded","requestId":"c04ab3f2-b2c7-4fec-9612-6ca279bdac06","updateId":5099,"transition":"processed"}
+{"ts":"2026-10-27T11:00:39.862Z","level":"info","msg":"telegram.update.processed","requestId":"c04ab3f2-b2c7-4fec-9612-6ca279bdac06","updateId":5099,"action":"noop","noopReason":"unsupported_update","authorized":false}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — body validation > acknowledges unsupported update types without crashing
+{"ts":"2026-10-27T11:00:39.862Z","level":"info","msg":"http.request.completed","requestId":"c04ab3f2-b2c7-4fec-9612-6ca279bdac06","status":200,"durationMs":3}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.863Z","level":"info","msg":"http.request.received","requestId":"243102da-7b06-49e1-a31f-d2c69d7664ca","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.864Z","level":"info","msg":"telegram.update.classified","requestId":"243102da-7b06-49e1-a31f-d2c69d7664ca","kind":"unsupported"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.866Z","level":"info","msg":"telegram.update.duplicate","requestId":"243102da-7b06-49e1-a31f-d2c69d7664ca","updateId":5001,"existingStatus":"processed"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.866Z","level":"info","msg":"http.request.completed","requestId":"243102da-7b06-49e1-a31f-d2c69d7664ca","status":200,"durationMs":3}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.866Z","level":"info","msg":"http.request.received","requestId":"e4a816c8-dde5-4853-98ea-b1df7eeb436d","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.866Z","level":"warn","msg":"telegram.webhook.rejected","requestId":"e4a816c8-dde5-4853-98ea-b1df7eeb436d","reason":"invalid_secret"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.867Z","level":"info","msg":"http.request.completed","requestId":"e4a816c8-dde5-4853-98ea-b1df7eeb436d","status":401,"durationMs":1}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.867Z","level":"warn","msg":"http.request.client_error","requestId":"e4a816c8-dde5-4853-98ea-b1df7eeb436d","code":"unauthorized","httpStatus":401}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.867Z","level":"info","msg":"http.request.received","requestId":"fb268869-c868-4f06-8e53-81a579a0dc3a","http":{"method":"GET","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.867Z","level":"info","msg":"http.request.completed","requestId":"fb268869-c868-4f06-8e53-81a579a0dc3a","status":404,"durationMs":0}
+
+stderr | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > retains security headers and correlation-ID behavior on success and errors
+{"ts":"2026-10-27T11:00:39.867Z","level":"warn","msg":"http.request.client_error","requestId":"fb268869-c868-4f06-8e53-81a579a0dc3a","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > honors a well-formed incoming x-request-id
+{"ts":"2026-10-27T11:00:39.868Z","level":"info","msg":"http.request.received","requestId":"webhook-test-req-00000001","http":{"method":"POST","path":"/telegram/webhook"}}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > honors a well-formed incoming x-request-id
+{"ts":"2026-10-27T11:00:39.869Z","level":"info","msg":"telegram.update.classified","requestId":"webhook-test-req-00000001","kind":"unsupported"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > honors a well-formed incoming x-request-id
+{"ts":"2026-10-27T11:00:39.870Z","level":"info","msg":"telegram.update.duplicate","requestId":"webhook-test-req-00000001","updateId":5001,"existingStatus":"processed"}
+
+stdout | tests/integration/telegram-webhook-security.test.ts > POST /telegram/webhook — response hygiene > honors a well-formed incoming x-request-id
+{"ts":"2026-10-27T11:00:39.871Z","level":"info","msg":"http.request.completed","requestId":"webhook-test-req-00000001","status":200,"durationMs":3}
+
+ ✓ tests/integration/telegram-webhook-security.test.ts (27 tests) 107ms
+ ✓ tests/integration/extended-review.test.ts (10 tests) 114ms
+ ✓ tests/integration/round131-real-http-port.test.ts (5 tests) 64ms
+ ✓ tests/unit/update-parser.test.ts (24 tests) 7ms
+ ✓ tests/integration/telegram-ingress-pipeline.test.ts (8 tests) 64ms
+ ✓ tests/integration/telegram-admin-flow.test.ts (14 tests) 142ms
+ ✓ tests/integration/admin-ui-language-ordering.test.ts (8 tests) 90ms
+ ✓ tests/unit/telegram-html.test.ts (25 tests) 10ms
+ ✓ tests/integration/posidon-round18-counterexamples.test.ts (8 tests) 109ms
+ ✓ tests/integration/round151-counterexample-regressions.test.ts (4 tests) 81ms
+ ✓ tests/unit/safe-http.test.ts (17 tests) 111ms
+ ✓ tests/integration/round131-seed-contract.test.ts (12 tests) 135ms
+ ✓ tests/unit/ingestion-normalization.test.ts (26 tests) 10ms
+ ✓ tests/unit/logger.test.ts (14 tests) 8ms
+ ✓ tests/unit/connectors-rss.test.ts (14 tests) 13ms
+ ✓ tests/integration/migration-0002.test.ts (6 tests) 52ms
+ ✓ tests/unit/source-registry.test.ts (16 tests) 12ms
+ ✓ tests/integration/migration-plan.test.ts (13 tests) 32ms
+ ✓ tests/unit/connectors-github.test.ts (9 tests) 10ms
+ ✓ tests/integration/round15-design-migration-preflight.test.ts (5 tests) 58ms
+ ✓ tests/integration/round191-foreign-window-identity.test.ts (7 tests) 93ms
+ ✓ tests/integration/db-boundary.test.ts (13 tests) 51ms
+ ✓ tests/unit/connectors-reddit.test.ts (8 tests) 12ms
+ ✓ tests/unit/safe-xml.test.ts (15 tests) 9ms
+ ✓ tests/unit/phase2-config.test.ts (15 tests) 8ms
+ ✓ tests/unit/phase1a-config.test.ts (30 tests) 7ms
+ ✓ tests/integration/posidon-round19-counterexamples.test.ts (7 tests) 118ms
+ ✓ tests/integration/source-registry-seed.test.ts (5 tests) 62ms
+ ✓ tests/unit/connectors-youtube.test.ts (8 tests) 10ms
+ ✓ tests/unit/action-token-validation.test.ts (10 tests) 8ms
+ ✓ tests/integration/ingestion-budget.test.ts (8 tests) 91ms
+ ✓ tests/unit/job-contracts.test.ts (28 tests) 21ms
+stdout | tests/integration/version.test.ts > GET /version via SELF > returns exactly the four documented fields with correct types
+{"ts":"2026-10-27T11:01:01.037Z","level":"info","msg":"http.request.received","requestId":"d62b211b-91de-4c75-b138-1a068cffb403","http":{"method":"GET","path":"/version"}}
+
+stdout | tests/integration/version.test.ts > GET /version via SELF > returns exactly the four documented fields with correct types
+{"ts":"2026-10-27T11:01:01.040Z","level":"info","msg":"http.request.completed","requestId":"d62b211b-91de-4c75-b138-1a068cffb403","status":200,"durationMs":4}
+
+stdout | tests/integration/version.test.ts > GET /version via SELF > contains no timestamps, secrets, or environment dump
+{"ts":"2026-10-27T11:01:01.045Z","level":"info","msg":"http.request.received","requestId":"7a7a6bc4-2c20-4d95-a57d-ea80c1c58777","http":{"method":"GET","path":"/version"}}
+
+stdout | tests/integration/version.test.ts > GET /version via SELF > contains no timestamps, secrets, or environment dump
+{"ts":"2026-10-27T11:01:01.045Z","level":"info","msg":"http.request.completed","requestId":"7a7a6bc4-2c20-4d95-a57d-ea80c1c58777","status":200,"durationMs":0}
+
+stdout | tests/integration/version.test.ts > GET /version via SELF > rejects unsupported methods with the uniform safe 404
+{"ts":"2026-10-27T11:01:01.048Z","level":"info","msg":"http.request.received","requestId":"cccfcaf3-ec65-4ba0-b672-95b0468d1421","http":{"method":"POST","path":"/version"}}
+
+stderr | tests/integration/version.test.ts > GET /version via SELF > rejects unsupported methods with the uniform safe 404
+{"ts":"2026-10-27T11:01:01.049Z","level":"warn","msg":"http.request.client_error","requestId":"cccfcaf3-ec65-4ba0-b672-95b0468d1421","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/version.test.ts > GET /version via SELF > rejects unsupported methods with the uniform safe 404
+{"ts":"2026-10-27T11:01:01.049Z","level":"info","msg":"http.request.completed","requestId":"cccfcaf3-ec65-4ba0-b672-95b0468d1421","status":404,"durationMs":1}
+
+stdout | tests/integration/version.test.ts > GET /version — fail-closed metadata handling > maps invalid metadata through the worker error path to a safe 503
+{"ts":"2026-10-27T11:01:01.051Z","level":"info","msg":"http.request.received","requestId":"2db2f79d-b538-4e80-88e3-daae6fe230c9","http":{"method":"GET","path":"/version"}}
+
+stderr | tests/integration/version.test.ts > GET /version — fail-closed metadata handling > maps invalid metadata through the worker error path to a safe 503
+{"ts":"2026-10-27T11:01:01.051Z","level":"warn","msg":"version.metadata_invalid","requestId":"2db2f79d-b538-4e80-88e3-daae6fe230c9","issues":[{"field":"SCHEMA_VERSION","reason":"invalid_format","note":"value does not match the required format"}]}
+
+stdout | tests/integration/version.test.ts > GET /version — fail-closed metadata handling > maps invalid metadata through the worker error path to a safe 503
+{"ts":"2026-10-27T11:01:01.052Z","level":"info","msg":"http.request.completed","requestId":"2db2f79d-b538-4e80-88e3-daae6fe230c9","status":503,"durationMs":1}
+
+stderr | tests/integration/version.test.ts > GET /version — fail-closed metadata handling > maps invalid metadata through the worker error path to a safe 503
+{"ts":"2026-10-27T11:01:01.052Z","level":"error","msg":"http.request.failed","requestId":"2db2f79d-b538-4e80-88e3-daae6fe230c9","code":"config_invalid","httpStatus":503,"error":{"errorKind":"app_error","name":"AppError","code":"config_invalid","httpStatus":503}}
+
+stdout | tests/integration/version.test.ts > GET /health/ready — Phase 1A schema health (DB binding present) > reports ready when the applied schema matches SCHEMA_VERSION
+{"ts":"2026-10-27T11:01:01.072Z","level":"info","msg":"http.request.received","requestId":"d67cfe7f-a7ea-4ddc-839c-42fba8324419","http":{"method":"GET","path":"/health/ready"}}
+
+stdout | tests/integration/version.test.ts > GET /health/ready — Phase 1A schema health (DB binding present) > reports ready when the applied schema matches SCHEMA_VERSION
+{"ts":"2026-10-27T11:01:01.074Z","level":"info","msg":"http.request.completed","requestId":"d67cfe7f-a7ea-4ddc-839c-42fba8324419","status":200,"durationMs":2}
+
+stdout | tests/integration/version.test.ts > GET /health/ready — Phase 1A schema health (DB binding present) > reports not_ready when the application schema metadata is missing
+{"ts":"2026-10-27T11:01:01.079Z","level":"info","msg":"http.request.received","requestId":"a4246cb2-fad2-4736-8f93-24b8c085d97a","http":{"method":"GET","path":"/health/ready"}}
+
+stderr | tests/integration/version.test.ts > GET /health/ready — Phase 1A schema health (DB binding present) > reports not_ready when the application schema metadata is missing
+{"ts":"2026-10-27T11:01:01.080Z","level":"warn","msg":"health.ready.not_ready","requestId":"a4246cb2-fad2-4736-8f93-24b8c085d97a","reasons":["schema_missing_metadata"]}
+
+stdout | tests/integration/version.test.ts > GET /health/ready — Phase 1A schema health (DB binding present) > reports not_ready when the application schema metadata is missing
+{"ts":"2026-10-27T11:01:01.080Z","level":"info","msg":"http.request.completed","requestId":"a4246cb2-fad2-4736-8f93-24b8c085d97a","status":503,"durationMs":1}
+
+stdout | tests/integration/version.test.ts > GET /health/ready — Phase 1A schema health (DB binding present) > reports not_ready when the schema version mismatches the configuration
+{"ts":"2026-10-27T11:01:01.085Z","level":"info","msg":"http.request.received","requestId":"0a30c0c1-62d8-4152-a6d3-5e5550489e33","http":{"method":"GET","path":"/health/ready"}}
+
+stderr | tests/integration/version.test.ts > GET /health/ready — Phase 1A schema health (DB binding present) > reports not_ready when the schema version mismatches the configuration
+{"ts":"2026-10-27T11:01:01.087Z","level":"warn","msg":"health.ready.not_ready","requestId":"0a30c0c1-62d8-4152-a6d3-5e5550489e33","reasons":["schema_version_mismatch"]}
+
+stdout | tests/integration/version.test.ts > GET /health/ready — Phase 1A schema health (DB binding present) > reports not_ready when the schema version mismatches the configuration
+{"ts":"2026-10-27T11:01:01.087Z","level":"info","msg":"http.request.completed","requestId":"0a30c0c1-62d8-4152-a6d3-5e5550489e33","status":503,"durationMs":2}
+
+ ✓ tests/integration/version.test.ts (12 tests) 57ms
+ ✓ tests/unit/bounded-reader.test.ts (15 tests) 19ms
+ ✓ tests/unit/connectors-steam.test.ts (8 tests) 10ms
+ ✓ tests/unit/channel-identity.test.ts (8 tests) 10ms
+ ✓ tests/integration/migration-plan-failures.test.ts (3 tests) 35ms
+ ✓ tests/integration/admin-ui-language-failures.test.ts (2 tests) 42ms
+ ✓ tests/unit/url-guard.test.ts (18 tests) 7ms
+ ✓ tests/unit/request-errors.test.ts (5 tests) 6ms
+ ✓ tests/integration/migration-0003.test.ts (4 tests) 34ms
+stdout | tests/integration/phase03-review-regressions.test.ts > independent Phase 3 acceptance regressions > readiness rejects enabled jobs without required runtime bindings
+{"ts":"2026-10-27T11:01:06.306Z","level":"info","msg":"http.request.received","requestId":"71035b56-8432-41c9-bde5-180329d0610f","http":{"method":"GET","path":"/health/ready"}}
+
+stdout | tests/integration/phase03-review-regressions.test.ts > independent Phase 3 acceptance regressions > readiness rejects enabled jobs without required runtime bindings
+{"ts":"2026-10-27T11:01:06.309Z","level":"debug","msg":"db.query.ok","requestId":"71035b56-8432-41c9-bde5-180329d0610f","durationMs":1,"rowCount":3}
+
+stderr | tests/integration/phase03-review-regressions.test.ts > independent Phase 3 acceptance regressions > readiness rejects enabled jobs without required runtime bindings
+{"ts":"2026-10-27T11:01:06.309Z","level":"warn","msg":"health.ready.not_ready","requestId":"71035b56-8432-41c9-bde5-180329d0610f","reasons":["jobs_config_invalid"]}
+
+stdout | tests/integration/phase03-review-regressions.test.ts > independent Phase 3 acceptance regressions > readiness rejects enabled jobs without required runtime bindings
+{"ts":"2026-10-27T11:01:06.310Z","level":"info","msg":"http.request.completed","requestId":"71035b56-8432-41c9-bde5-180329d0610f","status":503,"durationMs":4}
+
+stdout | tests/integration/phase03-review-regressions.test.ts > independent Phase 3 acceptance regressions > readiness rejects a malformed present jobs flag
+{"ts":"2026-10-27T11:01:06.313Z","level":"info","msg":"http.request.received","requestId":"01a2975e-f45b-4476-b7e5-2ff1ab437677","http":{"method":"GET","path":"/health/ready"}}
+
+stdout | tests/integration/phase03-review-regressions.test.ts > independent Phase 3 acceptance regressions > readiness rejects a malformed present jobs flag
+{"ts":"2026-10-27T11:01:06.315Z","level":"debug","msg":"db.query.ok","requestId":"01a2975e-f45b-4476-b7e5-2ff1ab437677","durationMs":2,"rowCount":3}
+
+stderr | tests/integration/phase03-review-regressions.test.ts > independent Phase 3 acceptance regressions > readiness rejects a malformed present jobs flag
+{"ts":"2026-10-27T11:01:06.315Z","level":"warn","msg":"health.ready.not_ready","requestId":"01a2975e-f45b-4476-b7e5-2ff1ab437677","reasons":["jobs_config_invalid"]}
+
+stdout | tests/integration/phase03-review-regressions.test.ts > independent Phase 3 acceptance regressions > readiness rejects a malformed present jobs flag
+{"ts":"2026-10-27T11:01:06.315Z","level":"info","msg":"http.request.completed","requestId":"01a2975e-f45b-4476-b7e5-2ff1ab437677","status":503,"durationMs":2}
+
+ ✓ tests/integration/phase03-review-regressions.test.ts (6 tests) 54ms
+ ✓ tests/unit/ui-language.test.ts (11 tests) 6ms
+ ✓ tests/unit/config.test.ts (10 tests) 7ms
+stdout | tests/integration/http.test.ts > GET /health > returns a healthy JSON summary
+{"ts":"2026-10-27T11:01:07.771Z","level":"info","msg":"http.request.received","requestId":"2110e3a9-725a-41e4-86da-081fc616c516","http":{"method":"GET","path":"/health"}}
+
+stdout | tests/integration/http.test.ts > GET /health > returns a healthy JSON summary
+{"ts":"2026-10-27T11:01:07.773Z","level":"info","msg":"http.request.completed","requestId":"2110e3a9-725a-41e4-86da-081fc616c516","status":200,"durationMs":2}
+
+stdout | tests/integration/http.test.ts > GET /health > does not include any secret inventory in the body
+{"ts":"2026-10-27T11:01:07.778Z","level":"info","msg":"http.request.received","requestId":"fb2b1815-0a2f-468d-a985-575e3a24e039","http":{"method":"GET","path":"/health"}}
+
+stdout | tests/integration/http.test.ts > GET /health > does not include any secret inventory in the body
+{"ts":"2026-10-27T11:01:07.778Z","level":"info","msg":"http.request.completed","requestId":"fb2b1815-0a2f-468d-a985-575e3a24e039","status":200,"durationMs":0}
+
+stdout | tests/integration/http.test.ts > GET /health/live > returns static liveness
+{"ts":"2026-10-27T11:01:07.782Z","level":"info","msg":"http.request.received","requestId":"a0532067-2ec8-41a0-843e-d7af538a5fc0","http":{"method":"GET","path":"/health/live"}}
+
+stdout | tests/integration/http.test.ts > GET /health/live > returns static liveness
+{"ts":"2026-10-27T11:01:07.783Z","level":"info","msg":"http.request.completed","requestId":"a0532067-2ec8-41a0-843e-d7af538a5fc0","status":200,"durationMs":1}
+
+stdout | tests/integration/http.test.ts > GET /health/ready > returns ready with the Phase 0/1A config surface and healthy schema
+{"ts":"2026-10-27T11:01:07.787Z","level":"info","msg":"http.request.received","requestId":"83c6bb88-5ab7-4800-a663-0c3e7f9fca57","http":{"method":"GET","path":"/health/ready"}}
+
+stdout | tests/integration/http.test.ts > GET /health/ready > returns ready with the Phase 0/1A config surface and healthy schema
+{"ts":"2026-10-27T11:01:07.789Z","level":"info","msg":"http.request.completed","requestId":"83c6bb88-5ab7-4800-a663-0c3e7f9fca57","status":200,"durationMs":3}
+
+stdout | tests/integration/http.test.ts > GET /health/ready > returns only status-like fields, never configuration details
+{"ts":"2026-10-27T11:01:07.792Z","level":"info","msg":"http.request.received","requestId":"e415b1d4-b06b-4b6f-ba8e-9efd79cd4f18","http":{"method":"GET","path":"/health/ready"}}
+
+stdout | tests/integration/http.test.ts > GET /health/ready > returns only status-like fields, never configuration details
+{"ts":"2026-10-27T11:01:07.793Z","level":"info","msg":"http.request.completed","requestId":"e415b1d4-b06b-4b6f-ba8e-9efd79cd4f18","status":200,"durationMs":1}
+
+stdout | tests/integration/http.test.ts > unknown routes > returns a safe JSON 404 with no stack or internals
+{"ts":"2026-10-27T11:01:07.796Z","level":"info","msg":"http.request.received","requestId":"a0f537a1-542f-42d7-a8da-81298d8889a9","http":{"method":"GET","path":"/definitely/not/here"}}
+
+stderr | tests/integration/http.test.ts > unknown routes > returns a safe JSON 404 with no stack or internals
+{"ts":"2026-10-27T11:01:07.797Z","level":"warn","msg":"http.request.client_error","requestId":"a0f537a1-542f-42d7-a8da-81298d8889a9","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/http.test.ts > unknown routes > returns a safe JSON 404 with no stack or internals
+{"ts":"2026-10-27T11:01:07.797Z","level":"info","msg":"http.request.completed","requestId":"a0f537a1-542f-42d7-a8da-81298d8889a9","status":404,"durationMs":1}
+
+stdout | tests/integration/http.test.ts > unknown routes > rejects unsupported methods with the same safe 404 (allowlist semantics)
+{"ts":"2026-10-27T11:01:07.800Z","level":"info","msg":"http.request.received","requestId":"b7c9270a-a479-4e14-8c7c-3e8969eccf30","http":{"method":"POST","path":"/health"}}
+
+stderr | tests/integration/http.test.ts > unknown routes > rejects unsupported methods with the same safe 404 (allowlist semantics)
+{"ts":"2026-10-27T11:01:07.800Z","level":"warn","msg":"http.request.client_error","requestId":"b7c9270a-a479-4e14-8c7c-3e8969eccf30","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/http.test.ts > unknown routes > rejects unsupported methods with the same safe 404 (allowlist semantics)
+{"ts":"2026-10-27T11:01:07.801Z","level":"info","msg":"http.request.completed","requestId":"b7c9270a-a479-4e14-8c7c-3e8969eccf30","status":404,"durationMs":1}
+
+stdout | tests/integration/http.test.ts > unknown routes > rejects a non-GET request to /health/live uniformly
+{"ts":"2026-10-27T11:01:07.804Z","level":"info","msg":"http.request.received","requestId":"6fdcc8c1-f2f8-41d5-9ea1-41ee2bb9a840","http":{"method":"DELETE","path":"/health/live"}}
+
+stdout | tests/integration/http.test.ts > unknown routes > rejects a non-GET request to /health/live uniformly
+{"ts":"2026-10-27T11:01:07.804Z","level":"info","msg":"http.request.completed","requestId":"6fdcc8c1-f2f8-41d5-9ea1-41ee2bb9a840","status":404,"durationMs":1}
+
+stderr | tests/integration/http.test.ts > unknown routes > rejects a non-GET request to /health/live uniformly
+{"ts":"2026-10-27T11:01:07.804Z","level":"warn","msg":"http.request.client_error","requestId":"6fdcc8c1-f2f8-41d5-9ea1-41ee2bb9a840","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/http.test.ts > error safety > attaches a correlation id header even on error responses
+{"ts":"2026-10-27T11:01:07.807Z","level":"info","msg":"http.request.received","requestId":"87512020-4327-43ce-bc5c-9c45c5868874","http":{"method":"GET","path":"/nope"}}
+
+stdout | tests/integration/http.test.ts > error safety > attaches a correlation id header even on error responses
+{"ts":"2026-10-27T11:01:07.807Z","level":"info","msg":"http.request.completed","requestId":"87512020-4327-43ce-bc5c-9c45c5868874","status":404,"durationMs":0}
+
+stderr | tests/integration/http.test.ts > error safety > attaches a correlation id header even on error responses
+{"ts":"2026-10-27T11:01:07.807Z","level":"warn","msg":"http.request.client_error","requestId":"87512020-4327-43ce-bc5c-9c45c5868874","code":"not_found","httpStatus":404}
+
+stdout | tests/integration/http.test.ts > error safety > honors a well-formed incoming x-request-id
+{"ts":"2026-10-27T11:01:07.810Z","level":"info","msg":"http.request.received","requestId":"integration-test-req-0001","http":{"method":"GET","path":"/health"}}
+
+stdout | tests/integration/http.test.ts > error safety > honors a well-formed incoming x-request-id
+{"ts":"2026-10-27T11:01:07.811Z","level":"info","msg":"http.request.completed","requestId":"integration-test-req-0001","status":200,"durationMs":1}
+
+ ✓ tests/integration/http.test.ts (10 tests) 61ms
+ ✓ tests/integration/phase03-v131-review-faults.test.ts (10 tests) 78ms
+ ✓ tests/integration/design-characterization.test.ts (2 tests) 59ms
+ ✓ tests/integration/ingestion-gate.test.ts (4 tests) 38ms
+ ✓ tests/integration/round11-counterexamples.test.ts (4 tests) 39ms
+ ✓ tests/unit/errors.test.ts (11 tests) 6ms
+ ✓ tests/unit/redaction.test.ts (31 tests) 6ms
+ ✓ tests/unit/d1-errors.test.ts (6 tests) 5ms
+ ✓ tests/unit/phase4-config.test.ts (8 tests) 5ms
+ ✓ tests/unit/callback-tokens.test.ts (9 tests) 5ms
+ ✓ tests/unit/authorization.test.ts (7 tests) 4ms
+ ✓ tests/unit/ids.test.ts (11 tests) 5ms
+ ✓ tests/integration/pixel-v125-review-regressions.test.ts (2 tests) 28ms
+stderr | tests/unit/queue.test.ts > queue handler (engine disabled — default environment) > retries every message instead of acknowledging uncertain work
+{"ts":"2026-10-27T11:01:15.866Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"disabled"}
+
+stderr | tests/unit/queue.test.ts > queue handler (engine disabled — default environment) > resolves for an empty batch
+{"ts":"2026-10-27T11:01:15.869Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"disabled"}
+
+stderr | tests/unit/queue.test.ts > queue handler (engine disabled — default environment) > does not mutate or inspect message bodies
+{"ts":"2026-10-27T11:01:15.870Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"disabled"}
+
+ ✓ tests/unit/queue.test.ts (3 tests) 15ms
+ ✓ tests/integration/posidon-round13-review.test.ts (6 tests) 73ms
+ ✓ tests/integration/independent-review.test.ts (2 tests) 37ms
+ ✓ tests/unit/jobs-producer.test.ts (3 tests) 6ms
+ ✓ tests/unit/timing-safe.test.ts (7 tests) 6ms
+ ✓ tests/unit/tehran-day.test.ts (4 tests) 4ms
+stdout | tests/unit/worker-fetch.test.ts > worker.fetch with invalid configuration > serves /health with safe defaults and no config echo
+{"ts":"2026-10-27T11:01:19.605Z","level":"info","msg":"http.request.received","requestId":"9844eee5-def3-4f05-a3ac-6b4bce9eaa7b","http":{"method":"GET","path":"/health"}}
+
+stderr | tests/unit/worker-fetch.test.ts > worker.fetch with invalid configuration > serves /health with safe defaults and no config echo
+{"ts":"2026-10-27T11:01:19.604Z","level":"warn","msg":"http.config_invalid_fallback","requestId":"9844eee5-def3-4f05-a3ac-6b4bce9eaa7b","issues":[{"field":"LOG_LEVEL","reason":"invalid_enum","note":"value must be one of: debug, info, warn, error"}]}
+{"ts":"2026-10-27T11:01:19.605Z","level":"warn","msg":"health.config_invalid_fallback","requestId":"9844eee5-def3-4f05-a3ac-6b4bce9eaa7b","issues":[{"field":"LOG_LEVEL","reason":"invalid_enum","note":"value must be one of: debug, info, warn, error"}]}
+
+stdout | tests/unit/worker-fetch.test.ts > worker.fetch with invalid configuration > serves /health with safe defaults and no config echo
+{"ts":"2026-10-27T11:01:19.606Z","level":"info","msg":"http.request.completed","requestId":"9844eee5-def3-4f05-a3ac-6b4bce9eaa7b","status":200,"durationMs":3}
+
+stdout | tests/unit/worker-fetch.test.ts > worker.fetch with invalid configuration > reports /health/ready as not_ready with a 503
+{"ts":"2026-10-27T11:01:19.608Z","level":"info","msg":"http.request.received","requestId":"c0ec3d99-82ac-42fd-a534-217afb7eae28","http":{"method":"GET","path":"/health/ready"}}
+
+stderr | tests/unit/worker-fetch.test.ts > worker.fetch with invalid configuration > reports /health/ready as not_ready with a 503
+{"ts":"2026-10-27T11:01:19.608Z","level":"warn","msg":"http.config_invalid_fallback","requestId":"c0ec3d99-82ac-42fd-a534-217afb7eae28","issues":[{"field":"LOG_LEVEL","reason":"invalid_enum","note":"value must be one of: debug, info, warn, error"}]}
+{"ts":"2026-10-27T11:01:19.608Z","level":"warn","msg":"health.ready.not_ready","requestId":"c0ec3d99-82ac-42fd-a534-217afb7eae28","reasons":["config_invalid"]}
+
+stdout | tests/unit/worker-fetch.test.ts > worker.fetch with invalid configuration > reports /health/ready as not_ready with a 503
+{"ts":"2026-10-27T11:01:19.609Z","level":"info","msg":"http.request.completed","requestId":"c0ec3d99-82ac-42fd-a534-217afb7eae28","status":503,"durationMs":2}
+
+stdout | tests/unit/worker-fetch.test.ts > worker.fetch with invalid configuration > never echoes invalid configuration values in the not_ready body
+{"ts":"2026-10-27T11:01:19.610Z","level":"info","msg":"http.request.received","requestId":"efdf6d4e-a203-4b34-8fd2-c170dfa78998","http":{"method":"GET","path":"/health/ready"}}
+
+stderr | tests/unit/worker-fetch.test.ts > worker.fetch with invalid configuration > never echoes invalid configuration values in the not_ready body
+{"ts":"2026-10-27T11:01:19.610Z","level":"warn","msg":"http.config_invalid_fallback","requestId":"efdf6d4e-a203-4b34-8fd2-c170dfa78998","issues":[{"field":"LOG_LEVEL","reason":"invalid_enum","note":"value must be one of: debug, info, warn, error"}]}
+{"ts":"2026-10-27T11:01:19.610Z","level":"warn","msg":"health.ready.not_ready","requestId":"efdf6d4e-a203-4b34-8fd2-c170dfa78998","reasons":["config_invalid"]}
+
+stdout | tests/unit/worker-fetch.test.ts > worker.fetch with invalid configuration > never echoes invalid configuration values in the not_ready body
+{"ts":"2026-10-27T11:01:19.611Z","level":"info","msg":"http.request.completed","requestId":"efdf6d4e-a203-4b34-8fd2-c170dfa78998","status":503,"durationMs":1}
+
+ ✓ tests/unit/worker-fetch.test.ts (3 tests) 11ms
+stdout | tests/unit/scheduled.test.ts > scheduled handler (engine disabled — default environment) > resolves without throwing for the blueprint cron schedule
+{"ts":"2026-10-27T11:01:20.294Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stdout | tests/unit/scheduled.test.ts > scheduled handler (engine disabled — default environment) > does not schedule follow-up work via waitUntil
+{"ts":"2026-10-27T11:01:20.297Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"0 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stdout | tests/unit/scheduled.test.ts > scheduled handler (engine disabled — default environment) > is a structured no-op for arbitrary cron expressions
+{"ts":"2026-10-27T11:01:20.298Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"17 3 * * 1","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+ ✓ tests/unit/scheduled.test.ts (3 tests) 6ms
+ ✓ tests/unit/phase3-config.test.ts (4 tests) 4ms
+ ✓ tests/unit/telegram-webhook-setup-worker.test.ts (2 tests) 6ms
+ ✓ tests/unit/clock.test.ts (4 tests) 4ms
+
+ Test Files  92 passed (92)
+      Tests  1150 passed (1150)
+   Start at  11:00:16
+   Duration  64.74s (transform 1.25s, setup 0ms, import 23.25s, tests 7.72s, environment 8ms)
+
+
+> pixel@1.4.0 test:telegram-setup
+> node --test scripts/telegram-webhook-setup.test.mjs
+
+✔ checks identity/status, registers shared secret, preserves pending updates and verifies (27.501971ms)
+✔ refuses to replace a different existing webhook (1.253236ms)
+✔ can safely rebind the same endpoint without dropping pending updates (1.069739ms)
+✔ rejects invalid config before network (0.228915ms)
+✔ invalid bot identity never registers webhook (0.424332ms)
+✔ token rejection is stable and never copies provider text (0.653075ms)
+✔ transport errors cannot expose the tokenized request URL (0.303604ms)
+✔ rejects oversized declared responses before parsing (0.778163ms)
+✔ rejects oversized streamed responses without a length header (0.660545ms)
+✔ requires explicit registration success (1.714099ms)
+✔ checks actual webhook URL and allowed update types after registration (0.643627ms)
+✔ default fetch keeps the global receiver required by the Worker runtime (0.508183ms)
+✔ network-body cleanup cannot mask a token rejection (0.270262ms)
+✔ manual redirect mode rejects 3xx without following or copying Location (0.239539ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 94.148529
+
+> pixel@1.4.0 test:secrets
+> node scripts/scan-secrets.selftest.mjs
+
+ok - every scanner pattern id is covered by a fixture
+ok - expected credential shapes are detected on their own line
+ok - detection works mid-document with correct line numbers
+ok - harmless placeholders are not detected
+ok - clean document produces zero findings
+ok - findings carry only pattern id and line number
+ok - formatted report never contains the secret value
+ok - CLI exits non-zero on a finding and never prints the value
+ok - CLI exits zero on a clean file
+ok - repo scan of tracked files stays clean
+
+secret scanner self-test passed: 10 checks, 0 failures.
+
+> pixel@1.4.0 scan:secrets
+> node scripts/scan-secrets.mjs
+
+secret scan passed: 369 files scanned, 0 findings.
+
+> pixel@1.4.0 check:versions
+> node scripts/check-versions.mjs
+
+version consistency passed: application version 1.4.0 and schema version 3 are consistent across all active configuration files.
+
+> pixel@1.4.0 build
+> wrangler deploy --dry-run --env="" --outdir dist
+
+
+ ⛅️ wrangler 4.147.0
+────────────────────
+Total Upload: 380.10 KiB / gzip: 75.65 KiB
+Your Worker has access to the following bindings:
+Binding                                            Resource                  
+env.DB (pixel-db-local)                            D1 Database               
+env.APP_VERSION ("1.4.0")                          Environment Variable      
+env.ENVIRONMENT ("development")                    Environment Variable      
+env.LOG_LEVEL ("info")                             Environment Variable      
+env.APP_COMMIT ("local-dev")                       Environment Variable      
+env.SCHEMA_VERSION ("3")                           Environment Variable      
+env.TELEGRAM_INGRESS_ENABLED ("false")             Environment Variable      
+env.JOBS_ENABLED ("false")                         Environment Variable      
+env.SOURCE_INGESTION_ENABLED ("false")             Environment Variable      
+env.TARGET_CHANNEL ("@pixellores")                 Environment Variable      
+
+--dry-run: exiting now.
+
+Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md

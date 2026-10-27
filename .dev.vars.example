@@ -16,7 +16,9 @@
 # locally only to exercise the engine against local D1 (no real queue is
 # needed for offline tests; dispatch fails closed without the JOBS binding).
 # JOBS_ENABLED=false
-# TARGET_CHANNEL=
+# Intended owner value since R1.10.5 (owner channel identity: pixel lores;
+# non-secret per ADR-0009): TARGET_CHANNEL=@pixellores
+# TARGET_CHANNEL=@pixellores
 
 # --- Secrets (names only; leave empty unless your phase requires them) ----------
 # Phase 2 formats (ADR-0024):

@@ -57,7 +57,7 @@ export interface PixelConfig {
    */
   readonly SCHEMA_VERSION: string;
   /**
-   * Target channel username (e.g. "@pixellort").
+   * Target channel username (e.g. "@pixellores").
    * Classified as non-secret config because the channel username is publicly
    * observable; decided in ADR-0009 (closed OD-001) — stays OUTSIDE
    * PixelSecrets and the future secret catalog.
@@ -164,7 +164,7 @@ export interface WorkerEnv {
    * AND the full Phase 2 configuration is valid.
    */
   readonly TELEGRAM_INGRESS_ENABLED?: string;
-  /** NON-SECRET target public channel username (e.g. "@pixellort") — ADR-0009. */
+  /** NON-SECRET target public channel username (e.g. "@pixellores") — ADR-0009. */
   readonly TARGET_CHANNEL?: string;
   /** SECRET — Telegram bot token. Never logged or echoed. */
   readonly BOT_TOKEN?: string;

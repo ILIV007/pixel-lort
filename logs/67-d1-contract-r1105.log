@@ -1,0 +1,10 @@
+
+ RUN  v4.1.11 /home/z/my-project/pixel-lort-pub
+
+ ✓ audit-tools/d1-contract/d1-terminal-contract.test.ts (4 tests) 29ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  11:02:23
+   Duration  1.28s (transform 355ms, setup 0ms, import 794ms, tests 29ms, environment 0ms)
+
