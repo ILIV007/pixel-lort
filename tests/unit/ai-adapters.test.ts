@@ -316,3 +316,127 @@ describe('Workers AI adapter — binding boundary', () => {
     expect(createGeminiAdapter(async () => new Response(null), 'k').provider).toBe('gemini');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 1.10.6.1 — the wall deadline must cover HEADERS *AND* BODY
+// (finding B). Receiving fast 200 headers must NOT end the deadline
+// protection: a stalled or slow body can never outlive the wall deadline.
+// Timings are deterministic-by-margin (deadline 40ms, late events 250ms+)
+// and assertions are outcome-kind-based, never wall-clock-based.
+// ---------------------------------------------------------------------------
+
+describe('Gemini adapter — wall deadline covers headers AND body (round 1.10.6.1, finding B)', () => {
+  const BASE = {
+    modelId: 'gemini-2.5-flash-lite',
+    messages: [{ role: 'user' as const, content: 'x' }],
+    maxOutputTokens: 768,
+  };
+  const SHORT_DEADLINE_MS = 40;
+
+  /** A 200 response whose body never enqueues and never closes. */
+  function hangingBody(): ReadableStream<Uint8Array> {
+    return new ReadableStream<Uint8Array>({
+      start() {
+        // intentionally inert: a stalled/hung body
+      },
+    });
+  }
+
+  /** A 200 body that enqueues+ closes (or errors) after `delayMs`. */
+  function lateBody(delayMs: number, error?: Error): ReadableStream<Uint8Array> {
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        setTimeout(() => {
+          if (error !== undefined) {
+            controller.error(error);
+            return;
+          }
+          controller.enqueue(new TextEncoder().encode('{"late":true}'));
+          controller.close();
+        }, delayMs);
+      },
+    });
+  }
+
+  it('B1: fast 200 headers + a body that never completes => typed deadline outcome', async () => {
+    const transport: AiHttpTransport = async () =>
+      new Response(hangingBody(), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    const adapter = createGeminiAdapter(transport, 'test-only-not-a-real-key');
+    const outcome = await adapter.complete({
+      ...BASE,
+      deadlineAtMs: Date.now() + SHORT_DEADLINE_MS,
+    });
+    expect(outcome).toEqual({ kind: 'deadline_exceeded' });
+  });
+
+  it('B2: a body arriving slowly across the deadline never surfaces as ok', async () => {
+    const transport: AiHttpTransport = async () => new Response(lateBody(250), { status: 200 });
+    const adapter = createGeminiAdapter(transport, 'test-only-not-a-real-key');
+    const outcome = await adapter.complete({
+      ...BASE,
+      deadlineAtMs: Date.now() + SHORT_DEADLINE_MS,
+    });
+    expect(outcome).toEqual({ kind: 'deadline_exceeded' });
+    // The late data is abandoned; flush past its arrival to prove no
+    // resurrection and no unhandled rejection.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(JSON.stringify(outcome)).not.toContain('late');
+  });
+
+  it('B3: a transport that ignores AbortSignal and never settles still cannot outlive the deadline', async () => {
+    const transport: AiHttpTransport = () => new Promise<Response>(() => undefined);
+    const adapter = createGeminiAdapter(transport, 'test-only-not-a-real-key');
+    const outcome = await adapter.complete({
+      ...BASE,
+      deadlineAtMs: Date.now() + SHORT_DEADLINE_MS,
+    });
+    expect(outcome).toEqual({ kind: 'deadline_exceeded' });
+  });
+
+  it('B4: body or transport rejecting AFTER the deadline won — no unhandled rejection', async () => {
+    // Case 1: the body read rejects late.
+    const lateErrorBodyTransport: AiHttpTransport = async () =>
+      new Response(lateBody(250, new Error('late stream boom')), { status: 200 });
+    const adapter = createGeminiAdapter(lateErrorBodyTransport, 'test-only-not-a-real-key');
+    const outcome = await adapter.complete({
+      ...BASE,
+      deadlineAtMs: Date.now() + SHORT_DEADLINE_MS,
+    });
+    expect(outcome).toEqual({ kind: 'deadline_exceeded' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // Case 2: the transport itself rejects late.
+    const lateRejectingTransport: AiHttpTransport = () =>
+      new Promise<Response>((_resolve, reject) => {
+        setTimeout(() => reject(new Error('late transport boom')), 250);
+      });
+    const lateAdapter = createGeminiAdapter(lateRejectingTransport, 'test-only-not-a-real-key');
+    const lateOutcome = await lateAdapter.complete({
+      ...BASE,
+      deadlineAtMs: Date.now() + SHORT_DEADLINE_MS,
+    });
+    expect(lateOutcome).toEqual({ kind: 'deadline_exceeded' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+
+  it('B5: the deadline really ABORTS the in-flight request signal (best-effort real cancellation)', async () => {
+    const seenSignals: AbortSignal[] = [];
+    const transport: AiHttpTransport = (_url, init) =>
+      new Promise<Response>(() => {
+        seenSignals.push(init.signal as AbortSignal);
+        // never settles; ignores the signal (the adapter must still abort it)
+      });
+    const adapter = createGeminiAdapter(transport, 'test-only-not-a-real-key');
+    const outcome = await adapter.complete({
+      ...BASE,
+      deadlineAtMs: Date.now() + SHORT_DEADLINE_MS,
+    });
+    expect(outcome).toEqual({ kind: 'deadline_exceeded' });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(seenSignals).toHaveLength(1);
+    expect(seenSignals[0]?.aborted).toBe(true);
+  });
+});

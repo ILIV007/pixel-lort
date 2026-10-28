@@ -14,6 +14,13 @@
  * - The response body is read with the shared bounded reader (strict byte
  *   cap + early Content-Length rejection + strict UTF-8), so a hostile or
  *   broken peer cannot force unbounded allocation.
+ * - The wall deadline covers HEADERS *AND* BODY (round 1.10.6.1): the
+ *   timer stays armed across the whole transport+body work, really aborts
+ *   the request signal (best-effort runtime cancellation), and an
+ *   independent race returns the typed deadline outcome even when the
+ *   transport/stream ignores the signal. Late rejections after the race
+ *   settled are absorbed (never unhandled). Timers are cleaned up on
+ *   success and failure.
  * - Native failures map to stable AiCallOutcome kinds. Raw response
  *   bodies, headers, URLs and the key NEVER cross this boundary.
  */
@@ -58,6 +65,10 @@ export class GeminiAdapter implements AiProviderPort {
     readonly maxOutputTokens: number;
     readonly deadlineAtMs: number;
   }): Promise<AiCallOutcome> {
+    // Clock contract: the deadline is an ABSOLUTE timestamp in the caller's
+    // clock domain (the service's injected clock — the system wall clock in
+    // production). This adapter measures against the system wall clock
+    // (Date.now) because REAL cancellation requires real timers.
     const remainingMs = input.deadlineAtMs - Date.now();
     if (remainingMs <= 0) {
       return { kind: 'deadline_exceeded' };
@@ -75,17 +86,26 @@ export class GeminiAdapter implements AiProviderPort {
       generationConfig: { maxOutputTokens: input.maxOutputTokens },
     });
 
-    // Real cancellation for the HTTP path: workerd fetch supports
-    // AbortSignal, so the wall deadline genuinely stops transport work.
+    // The wall deadline covers HEADERS *AND* BODY (round 1.10.6.1):
+    // receiving fast 200 headers must NOT end the deadline protection. The
+    // timer stays armed until the whole transport+body work settles; it
+    // really ABORTS the request signal (best-effort runtime cancellation)
+    // and independently fires the typed deadline race. If the transport or
+    // body stream ignores the signal, the race still enforces the deadline
+    // — the abandoned in-flight work is documented, never hidden.
     const abortController = new AbortController();
     let timerId: ReturnType<typeof setTimeout> | undefined;
-    if (remainingMs < 2_147_483_647) {
-      timerId = setTimeout(() => abortController.abort(), remainingMs);
-    }
+    const deadlineRace = new Promise<'deadline'>((resolve) => {
+      if (remainingMs < 2_147_483_647) {
+        timerId = setTimeout(() => {
+          abortController.abort();
+          resolve('deadline');
+        }, remainingMs);
+      }
+    });
 
-    let response: Response;
-    try {
-      response = await this.transport(url, {
+    const work = (async (): Promise<AiCallOutcome> => {
+      const response = await this.transport(url, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -95,6 +115,33 @@ export class GeminiAdapter implements AiProviderPort {
         redirect: 'error',
         signal: abortController.signal,
       });
+      if (response.status !== 200) {
+        const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
+        switch (response.status) {
+          case 404:
+            return { kind: 'model_unavailable', retryAfterMs };
+          case 429:
+            return { kind: 'quota_denied', retryAfterMs };
+          case 401:
+          case 403:
+            return { kind: 'auth_failed' };
+          default:
+            return { kind: 'transient', retryAfterMs };
+        }
+      }
+      const bodyText = await readBodyBounded(response);
+      if (bodyText === null) {
+        return { kind: 'transient' };
+      }
+      return interpretGeminiBody(bodyText);
+    })();
+
+    try {
+      const winner = await Promise.race([work, deadlineRace]);
+      if (winner === 'deadline') {
+        return { kind: 'deadline_exceeded' };
+      }
+      return winner;
     } catch (error) {
       // AbortError => the wall deadline fired (real cancellation);
       // anything else is a transport failure. Neither leaks URL/headers.
@@ -106,28 +153,10 @@ export class GeminiAdapter implements AiProviderPort {
       if (timerId !== undefined) {
         clearTimeout(timerId);
       }
+      // A late transport/body rejection after the race settled must never
+      // surface as an unhandled rejection; the outcome is already decided.
+      void work.catch(() => undefined);
     }
-
-    if (response.status !== 200) {
-      const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
-      switch (response.status) {
-        case 404:
-          return { kind: 'model_unavailable', retryAfterMs };
-        case 429:
-          return { kind: 'quota_denied', retryAfterMs };
-        case 401:
-        case 403:
-          return { kind: 'auth_failed' };
-        default:
-          return { kind: 'transient', retryAfterMs };
-      }
-    }
-
-    const bodyText = await readBodyBounded(response);
-    if (bodyText === null) {
-      return { kind: 'transient' };
-    }
-    return interpretGeminiBody(bodyText);
   }
 }
 
