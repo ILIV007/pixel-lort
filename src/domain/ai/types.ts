@@ -100,6 +100,7 @@ export interface AiAttemptRecord {
     | 'auth_failed'
     | 'deadline_exceeded'
     | 'skipped_shared_quota'
+    | 'skipped_provider_failed'
     | 'skipped_ineligible'
     | 'skipped_deadline'
     | 'invalid_output';

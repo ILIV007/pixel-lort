@@ -151,7 +151,9 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
     const deadlineAtMs = startedAt + AI_BOUNDS.totalWallDeadlineMs;
     const attempts: AiAttemptRecord[] = [];
     const skippedProviders = new Set<AiProvider>();
+    const sharedQuotaProviders = new Set<AiProvider>();
     const authFailedProviders = new Set<AiProvider>();
+    let providerCalls = 0;
     let knownRetryAfterMs = 0;
     let geminiSkippedIneligible = false;
 
@@ -226,8 +228,9 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
       return port;
     };
 
-    for (const [index, candidate] of candidates.entries()) {
-      if (attempts.length >= AI_BOUNDS.maxProviderAttempts) {
+    for (const candidate of candidates) {
+      // The ≤3 cap counts REAL provider calls; ledger skips do not.
+      if (providerCalls >= AI_BOUNDS.maxProviderAttempts) {
         break;
       }
       // The wall deadline stops further fallback work — a late
@@ -235,6 +238,16 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
       if (deps.clock.now() >= deadlineAtMs) {
         record(candidate, 'skipped_deadline', 0);
         break;
+      }
+      // A shared provider-bucket quota denial (or a provider auth/config
+      // failure) skips ALL remaining candidates of the SAME provider.
+      if (sharedQuotaProviders.has(candidate.provider)) {
+        record(candidate, 'skipped_shared_quota', 0);
+        continue;
+      }
+      if (authFailedProviders.has(candidate.provider)) {
+        record(candidate, 'skipped_provider_failed', 0);
+        continue;
       }
 
       // ---- Durable authorization BEFORE the attempt (no grant, no call).
@@ -247,15 +260,10 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
         });
         if (authorization.kind === 'denied') {
           record(candidate, 'quota_denied', 0);
+          // Same shared provider bucket: remaining same-provider candidates
+          // are futile and are skipped (and LEDGERED) at the loop top.
+          sharedQuotaProviders.add(candidate.provider);
           skippedProviders.add(candidate.provider);
-          if (candidate.provider === 'workers-ai') {
-            // Same shared provider bucket — remaining CF models are futile.
-            for (const later of candidates.slice(index + 1)) {
-              if (later.provider === 'workers-ai') {
-                record(later, 'skipped_shared_quota', 0);
-              }
-            }
-          }
           continue;
         }
         bucketDate = authorization.bucketDate;
@@ -266,7 +274,9 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
         return { kind: 'deferred', reason: 'budget_store_error', attempts };
       }
 
-      // ---- The authorized attempt.
+      // ---- The authorized attempt (counted against the cap even if the
+      // port throws — the attempt was made and stays charged).
+      providerCalls += 1;
       const attemptStartedAt = deps.clock.now();
       const messages: AiChatMessage[] = [
         { role: 'system', content: systemPrompt },
@@ -368,6 +378,7 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
         case 'quota_denied': {
           record(candidate, 'quota_denied', durationMs);
           skippedProviders.add(candidate.provider);
+          sharedQuotaProviders.add(candidate.provider);
           if (callOutcome.retryAfterMs !== undefined) {
             knownRetryAfterMs = Math.max(knownRetryAfterMs, callOutcome.retryAfterMs);
           }
@@ -454,6 +465,10 @@ function classifyExhausted(
     readonly sawQuotaDenial: boolean;
   },
 ): AiDeferredReason {
+  if (attempts.some((attempt) => attempt.outcome === 'skipped_deadline')) {
+    // The wall deadline stopped the ladder before an authorized attempt.
+    return 'deadline_exceeded';
+  }
   if (state.authFailedProviders.size > 0) {
     return 'provider_auth_failed';
   }
