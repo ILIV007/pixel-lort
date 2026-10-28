@@ -1,18 +1,27 @@
 # Roadmap
 
 Phase order follows blueprint §26 ("Roadmap implementation order"). Phases
-**0**, **1A**, **1B**, **2A**, and **2B** are marked complete; **Phase 3** is
-implemented and REVIEWED (code + tests + docs, application version 1.3.1 at
-the v1.3.1 review-correction release) and its engine was subsequently
-ACTIVATED on the provisioned Preview environment by the owner-authorized
-operational commit `57d6bd1` ("enable reviewed Phase 3 engine on provisioned
-Preview" — JOBS_ENABLED=true with both queue producers and the consumer,
-after migration 0003 was applied remotely; see the published Phase 3
-handoff and `docs/RUNBOOK_PHASE3_QUEUE_SETUP.md`). Local development
-defaults and production remain disabled/separate. **Phase 4** is implemented
-on `phase/04-source-ingestion` (application version 1.4.0, schema stays 3,
-ADR-0038/0039) with the new ingestion gate shipped disabled everywhere;
-everything else is pending and intentionally not started.
+**0**, **1A**, **2A**, and **2B** are marked complete; **Phase 1B is
+PARTIAL in a specific way**: the PREVIEW infrastructure is provisioned and
+deployed (owner-executed; see the "Phase 1B — Preview infrastructure
+provisioning" section at the end of this document), while PRODUCTION
+infrastructure stays intentionally unprovisioned until its release gate.
+**Phase 3** is implemented and REVIEWED (code + tests + docs, application
+version 1.3.1 at the v1.3.1 review-correction release) and its engine was
+subsequently ACTIVATED on the provisioned Preview environment by the
+owner-authorized operational commit `57d6bd1` ("enable reviewed Phase 3
+engine on provisioned Preview" — JOBS_ENABLED=true with both queue
+producers and the consumer, after migration 0003 was applied remotely; see
+the published Phase 3 handoff and `docs/RUNBOOK_PHASE3_QUEUE_SETUP.md`).
+Local development defaults and production remain disabled/separate.
+**Phase 4** is implemented on `phase/04-source-ingestion` (application
+version 1.4.0, schema stays 3, ADR-0038/0039) with the new ingestion gate
+shipped disabled everywhere. **Phase 6 is PARTIAL**: the Workers-AI-first
+ADAPTER FOUNDATION is implemented on the review branch, UNDER INDEPENDENT
+REVIEW (draft PR #11), and ships OFF everywhere with zero live inference —
+see the Phase 6 section. Everything else is pending and intentionally not
+started. Provisioned/deployed, implemented, reviewed, and activated are
+DISTINCT statuses; they are never conflated in this document.
 
 ## Phase 0 — product/config freeze + repository foundation ✅
 
@@ -77,16 +86,22 @@ everything else is pending and intentionally not started.
       (placeholder rejected, hexadecimal Git commit ID 7–64 required outside
       development) per ADR-0020.
 
-## Phase 1B — resource provisioning (owner-executed) ⬜
+## Phase 1B — resource provisioning (owner-executed) ◐ (PARTIAL — preview provisioned, production intentionally unprovisioned)
 
-- [ ] Owner-approved Cloudflare resource provisioning per ADR-0016 naming:
-      `pixel-db-production` / `pixel-db-preview` (and later KV/Queues/R2 in
-      their owning phases).
-- [ ] Replace the local D1 placeholder binding with real environment
-      bindings (preview/production configurations).
-- [ ] First remote migration application (`wrangler d1 migrations apply
-DB --remote`) after provisioning, by or with explicit approval of the
-      project owner.
+PREVIEW-side provisioning is DONE (owner-executed; the itemized record is
+the "Phase 1B — Preview infrastructure provisioning" section at the end of
+this document): isolated preview D1 (`pixel-db-preview`), the real preview
+binding, migration 0001 applied to remote preview, `pixel-preview`
+deployed and verified, and the GitHub repository connected through
+Cloudflare Workers Builds. Provisioned/deployed describes CLOUD RESOURCES,
+not product readiness. Production remains intentionally unprovisioned:
+
+- [ ] Owner-approved PRODUCTION Cloudflare resource provisioning per
+      ADR-0016 naming (`pixel-db-production`; KV/Queues/R2 in their owning
+      phases) — held until the production release gate.
+- [ ] Production environment bindings and first PRODUCTION remote
+      migration application (`wrangler d1 migrations apply DB --remote`),
+      by or with explicit approval of the project owner.
 - [ ] Repository layer for D1 access with idempotent writers (Phase 2+ work
       follows the schema boundary fixed in Phase 1A).
 - [ ] CI extension for migration dry-run checks, if still appropriate after
@@ -277,7 +292,12 @@ DESC, id ASC LIMIT 25`); overlapping crons produce duplicate REFERENCES
 
 Implemented per ADR-0038/0039 (application version **1.4.0**, schema **3** —
 no migration 0004 required). No push, no deploy, no remote migration, no
-source activation by this pass.
+source activation by this pass. The FREE-ingestion limitation and the
+full-poll gating remain OPEN (`NOT_READY_FOR_INGESTION_ON_FREE`, see
+`free-plan/`): no later round — including the AI deadline corrections of
+1.10.6.1 — lifts these gates; lifting them requires the accepted Free-safe
+design (`free-plan/FREE_SAFE_EXECUTION_DESIGN.md`) and an explicit owner
+decision.
 
 - [x] Source registry validation: the blueprint
       `pixel_source_registry_v1.json` is imported VERBATIM and Zod-validated
@@ -346,7 +366,18 @@ source activation by this pass.
 - [ ] Fingerprints, entity aliases, deterministic matching + thresholds.
 - [ ] AI adjudication path (compact claim sets) and decision persistence.
 
-## Phase 6 — AI adapters, prompt contracts and Persian editorial ◒ (PARTIAL — round 1.10.6, ADR-0041)
+_(The round 1.10.6 / 1.10.6.1 AI ADAPTER foundation does NOT complete any
+part of this phase: the story/claim/evidence engine, the editorial fact
+guard, and the durable AI caller remain future work — see the unchecked
+items in Phase 6.)_
+
+## Phase 6 — AI adapters, prompt contracts and Persian editorial ◒ (PARTIAL — adapter foundation implemented, UNDER INDEPENDENT REVIEW, OFF)
+
+Status of this phase in one sentence: the adapter FOUNDATION is
+implemented on the review branch, UNDER INDEPENDENT REVIEW (draft PR
+#11), and OFF everywhere (`AI_ENABLED="false"` in every environment, zero
+live inference). Green CI — or any correction round on top of the
+foundation, including 1.10.6.1 — is NOT full independent acceptance.
 
 - [x] Provider routing with fallbacks; Zod-validated semantic outputs.
       (Round 1.10.6: Workers-AI-first adapter foundation — versioned
@@ -358,12 +389,30 @@ source activation by this pass.
       gate; NO live inference has been performed or authorized.)
 - [x] Immutable prompt versions; Persian editorial drafts. (Round 1.10.6:
       pixel-news-draft-v1 contract with untrusted-data framing.)
+- [x] Bounded wall-deadline contract over the whole service path. (Round
+      1.10.6.1: the budget-authorization wait, the provider call, and the
+      post-success usage recording are ALL bounded by the same total wall
+      deadline via a small injectable primitive; a late authorization —
+      or one whose processing crosses the deadline — starts NO provider
+      work; late rejections are absorbed (never unhandled, never
+      resurrected); the Gemini adapter deadline covers HEADERS AND BODY
+      with real abort attempts and a race that cannot be bypassed by a
+      non-cooperating transport; non-cancellable D1 charges stay recorded
+      conservatively (no refunds, documented); usage recording stays
+      best-effort and never holds a successful draft hostage. Pinned by
+      permanent red-first tests A1–A5/B1–B5/U1–U3.)
 - [ ] Fact guard (evidence-id references alone do NOT prove a generated
       claim is true) — still FUTURE work.
 - [ ] Durable caller wiring (job types, cron/queue, admin surfaces) —
-      deliberately NOT in the adapter round.
+      deliberately NOT in the adapter rounds.
 - [ ] Story engine / Phase 5 adjudication consumption — NOT complete and
-      not claimed by round 1.10.6.
+      not claimed by rounds 1.10.6 or 1.10.6.1.
+
+Next path AFTER the 1.10.6.1 corrections close: return to the
+news/claim/evidence engine plan (Phase 5) and the real product path,
+with an INDEPENDENT owner decision on the Free-ingestion limitation (see
+the Phase 4 note and `free-plan/FREE_SAFE_EXECUTION_DESIGN.md`). Executing
+those phases is NOT part of the adapter correction rounds.
 
 ## Phase 7 — media engine and album publisher ⬜
 
@@ -412,6 +461,12 @@ source activation by this pass.
       phase (recorded during the Phase 1A correction pass).
 
 ### Phase 1B — Preview infrastructure provisioning
+
+_(PREVIEW-ONLY record: "provisioned/deployed" below describes CLOUD
+RESOURCES, not product readiness. It does NOT mean any product phase is
+implemented, reviewed, or activated — for example Phase 4 ingestion and
+the AI path ship disabled everywhere. Production stays unprovisioned by
+design; see the Phase 1B section above.)_
 
 - [x] Provision isolated D1 database `pixel-db-preview`.
 - [x] Add Wrangler `preview` environment and real D1 binding.
