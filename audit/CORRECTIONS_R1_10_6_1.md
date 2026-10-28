@@ -145,3 +145,53 @@ and full-poll gates remain OPEN and NOT_READY (untouched by this round).
   new DB tests this round).
 - Full-gate results for the delivered HEAD are recorded in the round
   delivery report (VERSION.json `evidence` block), not in this file.
+
+## H1 — Post-review hotfix: the expired-deadline path must also attach handlers
+
+Reproduced and reported by Posidon BEFORE closing the round; this change
+is a continuation of 1.10.6.1 (same round, same PR), not a new
+architecture round and not a reimplementation:
+
+- Defect: `awaitWithDeadline(Promise.reject(error), 100, 100)` returned
+  `timed_out` but left the already-rejected work promise with NO handler
+  attached — the expired path (`remainingMs <= 0`) returned before the
+  rejection contract could be honored, surfacing an `unhandledRejection`
+  (identically for a rejection arriving later; a later resolution had no
+  observer either).
+- Fix (bounded to `src/shared/time/deadline-wait.ts`): the expired path
+  now attaches settlement handlers to the work promise BEFORE returning
+  `timed_out` (the same absorb idiom the live race uses). An immediate or
+  later rejection is observed and absorbed — never unhandled, never
+  resurrecting the decided outcome; a later resolution cannot change the
+  decided result. No timer is scheduled in this path (unchanged); the
+  live-race path, typed results, clock contract, and every caller
+  behavior (draft-service authorization/provider/usage waits, both
+  adapters) are unchanged. The header contract text now states that
+  whole-lifetime handler attachment INCLUDES the already-expired
+  early-return path.
+- Permanent tests (`tests/unit/deadline-wait.test.ts`, NEW, X1..X3):
+  X1 expired + already-rejected, X2 expired + later rejection, X3 expired
+  - later resolution. All three assert `timed_out`, flush real turn
+    boundaries, and rely on the runtime failing the run on any unhandled
+    rejection. On the pre-fix HEAD the run was RED with exactly 2 unhandled
+    rejections (X1 and X2; X3 is a resurrection guard and was green there
+    too — a pure fulfillment is not observable from outside the primitive).
+    Post-fix: 3/3, exit 0.
+
+### H1 fresh measured counts (all gates re-run on the hotfix tree)
+
+- Product suite (`npm run check`): exit 0 — **97 files / 1222 tests, ALL
+  PASSING** (1219 prior + 3 new X-tests; +1 file). Includes lint, format,
+  typecheck, telegram-setup selftest, secret-scanner selftest, secret
+  scan, versions check, wrangler dry-run build.
+- DB subset (`npm run test:db`): unchanged — 23 files / 310 tests, exit 0.
+- Trace v3: 50/50 (3 files), exit 0. Design lab: 30/30 (2 files), exit 0,
+  cost-ledger BYTE-IDENTICAL (16 rows). Probe-plan validator: 21 checks /
+  0 failures, exit 0. D1 terminal contract: 4/4, exit 0.
+- Frozen manager probes: exit 1 = 1 failed / 3 passed — CE2 intentionally
+  historical red; frozen evidence untouched.
+- Scope: exactly THREE files changed by this hotfix — the primitive, the
+  new permanent test file, and this ledger. No migration, no schema or
+  config change, no VERSION.json bump (same round), no deploy, no
+  activation, no live inference, no Cloudflare operation, no workflow or
+  account change, no frozen-file edit, no force push.

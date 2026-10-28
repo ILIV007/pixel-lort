@@ -10,11 +10,14 @@
  *   new work from the (still pending) work promise.
  *
  * Rejection contract: handlers are attached to the work promise for its
- * WHOLE lifetime. A rejection arriving after the race settled (deadline
- * won) is observed and absorbed by this primitive — it can never surface
- * as an unhandled rejection and can never resurrect an already-decided
- * outcome. A rejection arriving while the race is live propagates to the
- * caller unchanged (e.g. budget-store infrastructure failure).
+ * WHOLE lifetime — including the already-expired early-return path, where
+ * settlement handlers are attached before the `timed_out` result is
+ * returned. A rejection arriving after the race settled (deadline won, or
+ * the deadline was already expired at call time) is observed and absorbed
+ * by this primitive — it can never surface as an unhandled rejection and
+ * can never resurrect an already-decided outcome. A rejection arriving
+ * while the race is live propagates to the caller unchanged (e.g.
+ * budget-store infrastructure failure).
  *
  * Clock contract (round 1.10.6.1): the caller's INJECTED clock owns
  * `nowMs`; production callers pass the same system wall clock the
@@ -50,6 +53,16 @@ export function awaitWithDeadline<T>(
 ): Promise<DeadlineWaitResult<T>> {
   const remainingMs = deadlineAtMs - nowMs;
   if (remainingMs <= 0) {
+    // Already expired: the result is `timed_out` and the caller must not
+    // start new work from the work promise. The rejection contract still
+    // holds in this path: settlement handlers are attached HERE (covering
+    // the already-settled case too) so an immediate or later rejection is
+    // observed and absorbed — never unhandled, never resurrecting the
+    // decided outcome.
+    void work.then(
+      () => undefined,
+      () => undefined,
+    );
     return Promise.resolve({ kind: 'timed_out' as const });
   }
   const schedule = options.scheduleTimeout ?? realTimeoutScheduler;
