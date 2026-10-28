@@ -19,6 +19,11 @@
 # Intended owner value since R1.10.5 (owner channel identity: pixel lores;
 # non-secret per ADR-0009): TARGET_CHANNEL=@pixellores
 # TARGET_CHANNEL=@pixellores
+# Phase 6 AI adapter gates (non-secret; ADR-0041). Ships OFF: with
+# AI_ENABLED=false the AI draft service never calls a provider.
+# AI_GEMINI_ENABLED also requires verified Free-tier eligibility.
+# AI_ENABLED=false
+# AI_GEMINI_ENABLED=false
 
 # --- Secrets (names only; leave empty unless your phase requires them) ----------
 # Phase 2 formats (ADR-0024):

@@ -50,6 +50,14 @@
     // chat ID; format-validated by src/shared/config/phase2.ts and currently
     // UNCONSUMED by any sending path (Phase 8 is FUTURE).
     "TARGET_CHANNEL": "@pixellores",
+    // Phase 6 AI adapter gates (non-secret; ADR-0041). FAIL-CLOSED: with
+    // AI_ENABLED "false" the AI draft service is the typed deferred
+    // `ai_disabled` outcome — ZERO provider calls, ZERO budget writes,
+    // ZERO binding access. AI_GEMINI_ENABLED additionally requires verified
+    // Free-tier eligibility (the versioned policy keeps it unverified this
+    // round), so the Gemini fallback stays OFF even if this flag were true.
+    "AI_ENABLED": "false",
+    "AI_GEMINI_ENABLED": "false",
   },
 
   // ---------------------------------------------------------------------------
@@ -114,8 +122,12 @@
   //   { "binding": "MEDIA", "bucket_name": "pixel-media-production" }  // preview: pixel-media-preview
   // ],
   //
-  // Phase 6 (AI adapters) — Workers AI binding:
-  // "ai": { "binding": "AI" }
+  // Phase 6 (AI adapters) — Workers AI binding: DECLARED in the preview
+  // environment below as configuration-as-code reconciliation of the
+  // owner-approved dashboard binding (round 1.10.6; ADR-0041). This
+  // declaration performs NO deploy and creates NO resource; a future
+  // reviewed deploy will preserve the already-added binding. Production
+  // remains future-only.
 
   // ---------------------------------------------------------------------------
   // Phase 1B — provisioned preview environment.
@@ -147,6 +159,12 @@
         // (ADR-0009). R1.10.5 owner channel identity: @pixellores
         // (https://t.me/pixellores). Format-validated; unconsumed today.
         "TARGET_CHANNEL": "@pixellores",
+        // Phase 6 AI adapter gates ship DISABLED on preview (ADR-0041):
+        // the AI draft service is the typed deferred `ai_disabled` outcome
+        // with zero provider calls. Activation is a separate reviewed
+        // owner procedure; no model is invoked by this declaration.
+        "AI_ENABLED": "false",
+        "AI_GEMINI_ENABLED": "false",
       },
       "d1_databases": [
         {
@@ -177,6 +195,17 @@
             "max_batch_timeout": 5,
           },
         ],
+      },
+      // Phase 6 — Workers AI binding (blueprint §4 binding name AI).
+      // Configuration-as-code reconciliation (round 1.10.6, ADR-0041): the
+      // binding was added to the LIVE pixel-preview Worker by the owner's
+      // authorized operator (dashboard configuration version 0ef009b9…,
+      // 100% Ready) — this repository pass mirrors that state so a FUTURE
+      // reviewed deploy preserves it. NO deploy, NO resource creation, and
+      // NO model invocation is authorized or performed by this change; the
+      // AI_ENABLED gate ships "false" above.
+      "ai": {
+        "binding": "AI",
       },
     },
   },
