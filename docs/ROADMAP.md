@@ -346,10 +346,24 @@ source activation by this pass.
 - [ ] Fingerprints, entity aliases, deterministic matching + thresholds.
 - [ ] AI adjudication path (compact claim sets) and decision persistence.
 
-## Phase 6 — AI adapters, prompt contracts and Persian editorial ⬜
+## Phase 6 — AI adapters, prompt contracts and Persian editorial ◒ (PARTIAL — round 1.10.6, ADR-0041)
 
-- [ ] Provider routing with fallbacks; Zod-validated semantic outputs.
-- [ ] Immutable prompt versions; Persian editorial drafts; fact guard.
+- [x] Provider routing with fallbacks; Zod-validated semantic outputs.
+      (Round 1.10.6: Workers-AI-first adapter foundation — versioned
+      ai-policy-v1 allowlist, fail-closed draft service, per-provider
+      budget authority on the existing `budgets` table (scope 'ai'),
+      bounded Gemini HTTP adapter, terminal typed refusals, typed
+      deferred outcomes. AI_ENABLED ships "false" everywhere; the Gemini
+      fallback additionally stays OFF behind the unverified-eligibility
+      gate; NO live inference has been performed or authorized.)
+- [x] Immutable prompt versions; Persian editorial drafts. (Round 1.10.6:
+      pixel-news-draft-v1 contract with untrusted-data framing.)
+- [ ] Fact guard (evidence-id references alone do NOT prove a generated
+      claim is true) — still FUTURE work.
+- [ ] Durable caller wiring (job types, cron/queue, admin surfaces) —
+      deliberately NOT in the adapter round.
+- [ ] Story engine / Phase 5 adjudication consumption — NOT complete and
+      not claimed by round 1.10.6.
 
 ## Phase 7 — media engine and album publisher ⬜
 
