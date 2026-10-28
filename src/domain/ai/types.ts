@@ -83,6 +83,7 @@ export type AiDeferredReason =
   | 'budget_store_error'
   | 'deadline_exceeded'
   | 'provider_unavailable'
+  | 'provider_auth_failed'
   | 'no_free_path';
 
 /** Sanitized attempt record — safe for logs and caller inspection. */
@@ -143,6 +144,7 @@ export type AiCallOutcome =
   | { readonly kind: 'model_unavailable'; readonly retryAfterMs?: number }
   | { readonly kind: 'quota_denied'; readonly retryAfterMs?: number }
   | { readonly kind: 'transient'; readonly retryAfterMs?: number }
+  | { readonly kind: 'auth_failed' }
   | { readonly kind: 'deadline_exceeded' };
 
 /** Provider-reported token usage (optional, clearly labelled, never invented). */
