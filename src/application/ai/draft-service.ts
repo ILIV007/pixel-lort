@@ -22,11 +22,18 @@
  *    if its independent eligibility/budget/key are valid. A provider
  *    content/safety refusal is a TERMINAL typed refusal — no model or
  *    provider hopping to bypass safety.
- * 5. Bounds: ≤3 provider attempts, ≤768 output tokens, and a TOTAL wall
- *    deadline (injected clock) that stops further fallback work and
- *    prevents a late authorization from starting a new call. Workers AI
- *    binding calls cannot be natively cancelled — a timed-out attempt is
- *    still charged (conservative, documented).
+ * 5. Bounds: ≤3 provider calls, ≤768 output tokens, and a TOTAL wall
+ *    deadline (injected clock) bounding EVERY await in this service path
+ *    (round 1.10.6.1): the durable budget-authorization wait, the provider
+ *    call itself, and the post-success usage recording. Authorization that
+ *    arrives after the deadline — or whose wait outlives it — starts NO
+ *    provider work: the clock is re-checked immediately after authorization
+ *    and before entering the provider port. D1 budget writes are NOT
+ *    cancellable: a charge that lands during or after a timed-out wait
+ *    stays recorded (conservative, no refunds, honest). Workers AI binding
+ *    calls cannot be natively cancelled — a timed-out attempt stays charged
+ *    (documented). Late rejections are absorbed by the deadline primitive
+ *    (never unhandled, never resurrected).
  * 6. Provider output is Zod-validated (schema + evidenceIds ⊆ request
  *    evidence); malformed/truncated/oversized/unknown-reference output is
  *    a rejected attempt — never a successful empty draft.
@@ -40,6 +47,7 @@
  */
 import { z } from 'zod';
 import type { Clock } from '../../shared/time/clock';
+import { awaitWithDeadline, type DeadlineTimeoutScheduler } from '../../shared/time/deadline-wait';
 import type { Logger } from '../../observability/logger';
 import type { DbExecutor } from '../../adapters/db/db-executor';
 import { authorizeAiRequestAttempt, recordAiUsage } from '../../adapters/db/ai-budget-store';
@@ -106,6 +114,14 @@ export interface AiDraftServiceDeps {
    * documented verification flips it. Injectable for deterministic tests.
    */
   readonly eligibility?: Readonly<Record<AiProvider, boolean>>;
+  /**
+   * Deadline scheduler for the bounded waits below (round 1.10.6.1).
+   * Production defaults to real setTimeout/clearTimeout; deterministic
+   * tests inject a manual scheduler and fire the deadline themselves. This
+   * does NOT change the clock contract: `clock` remains the source of
+   * `now()`; the scheduler only decides when the deadline callback fires.
+   */
+  readonly deadlineScheduler?: DeadlineTimeoutScheduler;
 }
 
 export interface AiDraftService {
@@ -228,6 +244,12 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
       return port;
     };
 
+    const deferredByDeadline = (candidate: Candidate): AiOutcome => {
+      record(candidate, 'skipped_deadline', deps.clock.now() - startedAt);
+      deps.logger.info('ai.draft.result', { kind: 'deferred', reason: 'deadline_exceeded' });
+      return { kind: 'deferred', reason: 'deadline_exceeded', attempts };
+    };
+
     for (const candidate of candidates) {
       // The ≤3 cap counts REAL provider calls; ledger skips do not.
       if (providerCalls >= AI_BOUNDS.maxProviderAttempts) {
@@ -251,13 +273,34 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
       }
 
       // ---- Durable authorization BEFORE the attempt (no grant, no call).
+      // The authorization wait itself is bounded by the SAME wall deadline
+      // (round 1.10.6.1): a stalled budget store must never hang the whole
+      // invocation. The D1 batch is NOT cancellable — a charge that lands
+      // after the deadline race stays recorded (conservative, no refund).
       let bucketDate: string;
       try {
-        const authorization = await authorizeAiRequestAttempt(deps.executor, {
-          provider: candidate.provider,
-          cap: AI_DAILY_REQUEST_ATTEMPT_CAPS[candidate.provider],
-          nowMs: deps.clock.now(),
-        });
+        // The remaining wall time is measured BEFORE the wait starts so a
+        // mid-wait clock jump cannot retroactively decide an in-flight
+        // store operation; the race bounds it from its true start.
+        const authWaitStartedAtMs = deps.clock.now();
+        const authorizationWait = await awaitWithDeadline(
+          authorizeAiRequestAttempt(deps.executor, {
+            provider: candidate.provider,
+            cap: AI_DAILY_REQUEST_ATTEMPT_CAPS[candidate.provider],
+            nowMs: authWaitStartedAtMs,
+          }),
+          deadlineAtMs,
+          authWaitStartedAtMs,
+          { scheduleTimeout: deps.deadlineScheduler },
+        );
+        if (authorizationWait.kind === 'timed_out') {
+          // The deadline fired while the authorization was pending. This is
+          // NEITHER a quota denial NOR a store error: no provider work may
+          // start, the possibly-late D1 charge stays (conservative), and
+          // late resolutions/rejections are absorbed by the primitive.
+          return deferredByDeadline(candidate);
+        }
+        const authorization = authorizationWait.value;
         if (authorization.kind === 'denied') {
           record(candidate, 'quota_denied', 0);
           // Same shared provider bucket: remaining same-provider candidates
@@ -274,8 +317,21 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
         return { kind: 'deferred', reason: 'budget_store_error', attempts };
       }
 
+      // ---- Post-authorization deadline guard: a grant that arrives in
+      // time but whose processing crosses the deadline must not start any
+      // provider work. The granted charge stays (no refund — the D1 write
+      // is not cancellable). The adapter's own internal guard is NEVER a
+      // substitute for this service-level contract.
+      if (deps.clock.now() >= deadlineAtMs) {
+        return deferredByDeadline(candidate);
+      }
+
       // ---- The authorized attempt (counted against the cap even if the
-      // port throws — the attempt was made and stays charged).
+      // port throws — the attempt was made and stays charged). The wait is
+      // raced against the wall deadline at the SERVICE level as well: a
+      // port that ignores its deadline contract cannot hang the invocation
+      // (the in-flight provider work may still complete runtime-side and
+      // stays charged — documented, conservative).
       providerCalls += 1;
       const attemptStartedAt = deps.clock.now();
       const messages: AiChatMessage[] = [
@@ -284,12 +340,29 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
       ];
       let callOutcome: Awaited<ReturnType<AiProviderPort['complete']>>;
       try {
-        callOutcome = await portFor(candidate.provider).complete({
-          modelId: candidate.modelId,
-          messages,
-          maxOutputTokens: AI_BOUNDS.maxOutputTokens,
+        const callWait = await awaitWithDeadline(
+          portFor(candidate.provider).complete({
+            modelId: candidate.modelId,
+            messages,
+            maxOutputTokens: AI_BOUNDS.maxOutputTokens,
+            deadlineAtMs,
+          }),
           deadlineAtMs,
-        });
+          // Bounded from the attempt's TRUE start: a clock jump inside the
+          // port call does not retroactively decide an in-flight call — the
+          // pinned contract records the real outcome and stops the ladder.
+          attemptStartedAt,
+          { scheduleTimeout: deps.deadlineScheduler },
+        );
+        if (callWait.kind === 'timed_out') {
+          record(candidate, 'deadline_exceeded', deps.clock.now() - attemptStartedAt);
+          deps.logger.info('ai.draft.result', {
+            kind: 'deferred',
+            reason: 'deadline_exceeded',
+          });
+          return { kind: 'deferred', reason: 'deadline_exceeded', attempts };
+        }
+        callOutcome = callWait.value;
       } catch {
         // A port throwing past its own mapping is a defensive transient.
         record(candidate, 'transient_failure', deps.clock.now() - attemptStartedAt);
@@ -349,16 +422,33 @@ export function createAiDraftService(deps: AiDraftServiceDeps): AiDraftService {
           if (callOutcome.usage?.outputTokens !== undefined) {
             usageEntry.outputTokens = callOutcome.usage.outputTokens;
           }
-          // Best-effort, non-authoritative usage recording; a storage
-          // failure here never fails the successful result.
+          // Best-effort, NON-authoritative usage recording, bounded by the
+          // SAME wall deadline (round 1.10.6.1): a stalled D1 write must
+          // never hold a successful draft hostage. Its failure or timeout
+          // NEVER revokes the durable authorization (no refunds), never
+          // starts another provider or fallback, and NEVER changes the
+          // outcome — the draft is already valid; recording is post-success
+          // bookkeeping. A late-finishing write may still land (the D1
+          // operation is not cancellable); its late rejection is absorbed.
           try {
-            await recordAiUsage(deps.executor, {
-              provider: candidate.provider,
-              bucketDate,
-              inputTokens: callOutcome.usage?.inputTokens,
-              outputTokens: callOutcome.usage?.outputTokens,
-              nowMs: deps.clock.now(),
-            });
+            const usageWaitStartedAtMs = deps.clock.now();
+            const usageWait = await awaitWithDeadline(
+              recordAiUsage(deps.executor, {
+                provider: candidate.provider,
+                bucketDate,
+                inputTokens: callOutcome.usage?.inputTokens,
+                outputTokens: callOutcome.usage?.outputTokens,
+                nowMs: usageWaitStartedAtMs,
+              }),
+              deadlineAtMs,
+              usageWaitStartedAtMs,
+              { scheduleTimeout: deps.deadlineScheduler },
+            );
+            if (usageWait.kind === 'timed_out') {
+              deps.logger.warn('ai.draft.usage_record_timeout', {
+                provider: candidate.provider,
+              });
+            }
           } catch {
             deps.logger.warn('ai.draft.usage_record_failed', { provider: candidate.provider });
           }

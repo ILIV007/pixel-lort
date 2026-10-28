@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { DbExecutor, DbQueryMeta, DbRows } from '../../src/adapters/db/db-executor';
+import type { AiBudgetAuthorization } from '../../src/adapters/db/ai-budget-store';
 import {
   createAiDraftService,
   type AiDraftServiceConfig,
@@ -444,5 +445,377 @@ describe('AI draft service — ladder, budget, and outcomes', () => {
       expect(outcome.draft.headlineFa).toBe('تیتر خبر');
       expect(JSON.stringify(outcome.draft)).not.toContain('hacked');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 1.10.6.1 — bounded wall-deadline contract (finding A + usage).
+//
+// Every await in the service path (budget authorization, provider call,
+// post-success usage recording) is bounded by the SAME total wall deadline.
+// A late authorization must never start provider work; late rejections must
+// never surface as unhandled rejections or resurrect a decided outcome. The
+// manual scheduler keeps every test deterministic: the deadline callback is
+// fired by the TEST, never by real wall time (clock contract: the injected
+// clock owns `now()`; the injected scheduler only decides when the deadline
+// callback fires — production wires real setTimeout/clearTimeout).
+// ---------------------------------------------------------------------------
+
+const CLOCK_START = 1_700_000_000_000;
+const WALL_DEADLINE_MS = 15_000; // = AI_BOUNDS.totalWallDeadlineMs (versioned policy)
+const DEADLINE_AT = CLOCK_START + WALL_DEADLINE_MS;
+const AUTHORIZED: AiBudgetAuthorization = { kind: 'authorized', bucketDate: '2023-11-14' };
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+interface ManualScheduler {
+  schedule: (callback: () => void, delayMs: number) => () => void;
+  fireAll: () => void;
+  pendingCount: () => number;
+  delays: () => number[];
+}
+
+function createManualScheduler(): ManualScheduler {
+  const pending = new Map<number, { callback: () => void; delayMs: number }>();
+  let nextId = 1;
+  return {
+    schedule(callback, delayMs) {
+      const id = nextId++;
+      pending.set(id, { callback, delayMs });
+      return () => {
+        pending.delete(id);
+      };
+    },
+    fireAll() {
+      const entries = [...pending.values()];
+      pending.clear();
+      for (const entry of entries) {
+        entry.callback();
+      }
+    },
+    pendingCount: () => pending.size,
+    delays: () => [...pending.values()].map((entry) => entry.delayMs),
+  };
+}
+
+/** Drain the microtask queue far enough for the service to reach its next await. */
+async function flushMicrotasks(times = 10): Promise<void> {
+  for (let index = 0; index < times; index++) {
+    await Promise.resolve();
+  }
+}
+
+function baseFakeExecutorShape() {
+  return {
+    async query() {
+      return { rows: [] as unknown[], meta: { durationMs: 0, changes: 0 } };
+    },
+    async first() {
+      return null;
+    },
+    async run() {
+      return { durationMs: 0, changes: 1 };
+    },
+  };
+}
+
+/** Executor whose authorization batch NEVER settles (finding A1). */
+function createNeverSettlingAuthExecutor(): DbExecutor & { batchCalls: number[] } {
+  const batchCalls: number[] = [];
+  const executor = {
+    ...baseFakeExecutorShape(),
+    batchCalls,
+    async batch(statements: readonly { sql: string }[]) {
+      batchCalls.push(statements.length);
+      return new Promise<readonly DbQueryMeta[]>(() => undefined);
+    },
+  };
+  return executor as DbExecutor & { batchCalls: number[] };
+}
+
+/** Executor whose authorization settles ONLY when the test releases it. */
+function createDeferredAuthExecutor(): {
+  executor: DbExecutor & { batchCalls: number[] };
+  authorization: ReturnType<typeof createDeferred<AiBudgetAuthorization>>;
+} {
+  const batchCalls: number[] = [];
+  const authorization = createDeferred<AiBudgetAuthorization>();
+  const executor = {
+    ...baseFakeExecutorShape(),
+    batchCalls,
+    batch(statements: readonly { sql: string }[]) {
+      batchCalls.push(statements.length);
+      return authorization.promise.then((): readonly DbQueryMeta[] => [
+        { durationMs: 0, changes: 1 },
+      ]);
+    },
+  };
+  return { executor: executor as DbExecutor & { batchCalls: number[] }, authorization };
+}
+
+/** Executor whose usage `run` NEVER settles (usage-recording contract). */
+function createHangingUsageExecutor(): DbExecutor & { batchCalls: number[] } {
+  const batchCalls: number[] = [];
+  const executor = {
+    ...baseFakeExecutorShape(),
+    batchCalls,
+    async run() {
+      return new Promise<DbQueryMeta>(() => undefined);
+    },
+    async batch(statements: readonly { sql: string }[]) {
+      batchCalls.push(statements.length);
+      return statements.map((): DbQueryMeta => ({ durationMs: 0, changes: 1 }));
+    },
+  };
+  return executor as DbExecutor & { batchCalls: number[] };
+}
+
+/** Executor whose usage `run` ALWAYS rejects (usage-recording contract). */
+function createRejectingUsageExecutor(): DbExecutor & { batchCalls: number[] } {
+  const batchCalls: number[] = [];
+  const executor = {
+    ...baseFakeExecutorShape(),
+    batchCalls,
+    async run(): Promise<DbQueryMeta> {
+      throw new Error('usage write failed');
+    },
+    async batch(statements: readonly { sql: string }[]) {
+      batchCalls.push(statements.length);
+      return statements.map((): DbQueryMeta => ({ durationMs: 0, changes: 1 }));
+    },
+  };
+  return executor as DbExecutor & { batchCalls: number[] };
+}
+
+/** Executor whose usage `run` settles ONLY when the test releases it. */
+function createDeferredUsageExecutor(usage: Promise<DbQueryMeta>): DbExecutor & {
+  batchCalls: number[];
+} {
+  const batchCalls: number[] = [];
+  const executor = {
+    ...baseFakeExecutorShape(),
+    batchCalls,
+    run(): Promise<DbQueryMeta> {
+      return usage;
+    },
+    async batch(statements: readonly { sql: string }[]) {
+      batchCalls.push(statements.length);
+      return statements.map((): DbQueryMeta => ({ durationMs: 0, changes: 1 }));
+    },
+  };
+  return executor as DbExecutor & { batchCalls: number[] };
+}
+
+describe('AI draft service — bounded authorization wait (round 1.10.6.1, finding A)', () => {
+  let clock: ReturnType<typeof createFakeClock>;
+  let cfPort: FakePort & AiProviderPort;
+
+  beforeEach(() => {
+    clock = createFakeClock();
+    cfPort = createFakePort('workers-ai');
+    // A scripted success makes any contract violation LOUD: a draft outcome
+    // (or a port call) where a typed deadline result is required fails hard.
+    cfPort.setOutcomes([{ kind: 'ok', rawText: VALID_DRAFT_JSON }]);
+  });
+
+  function buildServiceWith(executor: DbExecutor, scheduler: ManualScheduler) {
+    return createAiDraftService({
+      executor,
+      ports: { 'workers-ai': cfPort },
+      clock,
+      logger: silentLogger,
+      config: baseConfig(),
+      deadlineScheduler: scheduler.schedule,
+    });
+  }
+
+  it('A1: authorization that NEVER settles cannot hang the service — typed deadline result', async () => {
+    const executor = createNeverSettlingAuthExecutor();
+    const scheduler = createManualScheduler();
+    const service = buildServiceWith(executor, scheduler);
+
+    const pending = service.generateNewsDraft(VALID_REQUEST);
+    // The authorization started and the deadline timer is armed with the
+    // exact remaining wall time — deterministically, before any await.
+    expect(executor.batchCalls).toHaveLength(1);
+    expect(scheduler.pendingCount()).toBe(1);
+    expect(scheduler.delays()).toEqual([WALL_DEADLINE_MS]);
+
+    scheduler.fireAll(); // the wall deadline fires while authorization pends
+    const outcome = await pending;
+
+    expect(outcome).toMatchObject({ kind: 'deferred', reason: 'deadline_exceeded' });
+    expect(cfPort.calls).toHaveLength(0);
+    if (outcome.kind === 'deferred') {
+      expect(outcome.attempts.map((attempt) => attempt.outcome)).toEqual(['skipped_deadline']);
+    }
+  });
+
+  it('A2: authorization resolving AUTHORIZED after the deadline never starts a provider call', async () => {
+    const { executor, authorization } = createDeferredAuthExecutor();
+    const scheduler = createManualScheduler();
+    const service = buildServiceWith(executor, scheduler);
+
+    const pending = service.generateNewsDraft(VALID_REQUEST);
+    scheduler.fireAll(); // deadline wins while the authorization is pending
+    const outcome = await pending;
+
+    authorization.resolve(AUTHORIZED); // LATE grant — must be a no-op
+    await flushMicrotasks();
+
+    expect(outcome).toMatchObject({ kind: 'deferred', reason: 'deadline_exceeded' });
+    expect(cfPort.calls).toHaveLength(0); // no resurrection, no new provider work
+    expect(scheduler.pendingCount()).toBe(0);
+  });
+
+  it('A3: authorization REJECTING after the deadline — no unhandled rejection, no outcome change', async () => {
+    const { executor, authorization } = createDeferredAuthExecutor();
+    const scheduler = createManualScheduler();
+    const service = buildServiceWith(executor, scheduler);
+
+    const pending = service.generateNewsDraft(VALID_REQUEST);
+    scheduler.fireAll();
+    const outcome = await pending;
+
+    authorization.reject(new Error('late budget-store rejection')); // LATE failure
+    // An unhandled rejection here fails the whole test run; a short real
+    // flush proves the late rejection is observed and absorbed.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(outcome).toMatchObject({ kind: 'deferred', reason: 'deadline_exceeded' });
+    expect(cfPort.calls).toHaveLength(0);
+  });
+
+  it('A4: grant inside the deadline but the clock crosses it before the port — the final guard blocks the call', async () => {
+    const { executor, authorization } = createDeferredAuthExecutor();
+    const scheduler = createManualScheduler();
+    const service = buildServiceWith(executor, scheduler);
+
+    const pending = service.generateNewsDraft(VALID_REQUEST);
+    clock.setNow(DEADLINE_AT - 1); // granted JUST inside the deadline
+    authorization.resolve(AUTHORIZED);
+    clock.setNow(DEADLINE_AT + 5_000); // ...but the deadline passes before port entry
+    const outcome = await pending;
+
+    expect(outcome).toMatchObject({ kind: 'deferred', reason: 'deadline_exceeded' });
+    expect(cfPort.calls).toHaveLength(0); // the post-authorization guard held
+    if (outcome.kind === 'deferred') {
+      expect(outcome.attempts.map((attempt) => attempt.outcome)).toEqual(['skipped_deadline']);
+    }
+    // Exactly ONE authorization charge happened and NO refund exists — the
+    // non-cancellable D1 charge stays recorded (conservative, documented).
+    expect(executor.batchCalls).toHaveLength(1);
+  });
+
+  it('A5: an async budget-store rejection while the race is live stays budget_store_error — never quota, never deadline', async () => {
+    const batchCalls: number[] = [];
+    const executor = {
+      ...baseFakeExecutorShape(),
+      batchCalls,
+      async batch(statements: readonly { sql: string }[]) {
+        batchCalls.push(statements.length);
+        throw new Error('storage down (async)');
+      },
+    } as DbExecutor & { batchCalls: number[] };
+    const scheduler = createManualScheduler();
+    const service = buildServiceWith(executor, scheduler);
+
+    const outcome = await service.generateNewsDraft(VALID_REQUEST);
+
+    expect(outcome).toMatchObject({ kind: 'deferred', reason: 'budget_store_error' });
+    expect(cfPort.calls).toHaveLength(0);
+    expect(scheduler.pendingCount()).toBe(0); // the deadline timer was cancelled
+  });
+});
+
+describe('AI draft service — bounded usage recording (round 1.10.6.1, section 5)', () => {
+  let clock: ReturnType<typeof createFakeClock>;
+  let cfPort: FakePort & AiProviderPort;
+
+  beforeEach(() => {
+    clock = createFakeClock();
+    cfPort = createFakePort('workers-ai');
+    cfPort.setOutcomes([
+      { kind: 'ok', rawText: VALID_DRAFT_JSON, usage: { inputTokens: 10, outputTokens: 5 } },
+    ]);
+  });
+
+  function buildServiceWith(executor: DbExecutor, scheduler: ManualScheduler) {
+    return createAiDraftService({
+      executor,
+      ports: { 'workers-ai': cfPort },
+      clock,
+      logger: silentLogger,
+      config: baseConfig(),
+      deadlineScheduler: scheduler.schedule,
+    });
+  }
+
+  it('U1: a stalled usage recording never holds the successful draft hostage', async () => {
+    const executor = createHangingUsageExecutor();
+    const scheduler = createManualScheduler();
+    const service = buildServiceWith(executor, scheduler);
+
+    const pending = service.generateNewsDraft(VALID_REQUEST);
+    await flushMicrotasks();
+    // Authorization and provider call both completed; only the usage write
+    // is pending, and its deadline timer is armed.
+    expect(executor.batchCalls).toHaveLength(1);
+    expect(cfPort.calls).toHaveLength(1);
+    expect(scheduler.pendingCount()).toBe(1);
+
+    scheduler.fireAll();
+    const outcome = await pending;
+
+    expect(outcome.kind).toBe('draft');
+    if (outcome.kind === 'draft') {
+      expect(outcome.usage[0]).toMatchObject({
+        provider: 'workers-ai',
+        inputTokens: 10,
+        outputTokens: 5,
+      });
+    }
+  });
+
+  it('U2: a REJECTING usage recording never fails the draft and never refunds the authorization', async () => {
+    const executor = createRejectingUsageExecutor();
+    const scheduler = createManualScheduler();
+    const service = buildServiceWith(executor, scheduler);
+
+    const outcome = await service.generateNewsDraft(VALID_REQUEST);
+
+    expect(outcome.kind).toBe('draft');
+    expect(executor.batchCalls).toHaveLength(1); // the durable charge stands; no refund path exists
+    expect(scheduler.pendingCount()).toBe(0); // the deadline timer was cancelled with the rejection
+  });
+
+  it('U3: a usage write finishing after its deadline is a no-op — no new work, no unhandled rejection', async () => {
+    const usage = createDeferred<DbQueryMeta>();
+    const executor = createDeferredUsageExecutor(usage.promise);
+    const scheduler = createManualScheduler();
+    const service = buildServiceWith(executor, scheduler);
+
+    const pending = service.generateNewsDraft(VALID_REQUEST);
+    await flushMicrotasks();
+    scheduler.fireAll();
+    const outcome = await pending;
+
+    expect(outcome.kind).toBe('draft');
+    usage.resolve({ durationMs: 0, changes: 1 }); // LATE completion — must be a no-op
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(cfPort.calls).toHaveLength(1); // no new provider work, no fallback
   });
 });
