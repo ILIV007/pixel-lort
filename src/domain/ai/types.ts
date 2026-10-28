@@ -97,6 +97,8 @@ export interface AiAttemptRecord {
     | 'transient_failure'
     | 'model_unavailable'
     | 'quota_denied'
+    | 'auth_failed'
+    | 'deadline_exceeded'
     | 'skipped_shared_quota'
     | 'skipped_ineligible'
     | 'skipped_deadline'

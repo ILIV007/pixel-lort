@@ -74,8 +74,19 @@ export interface PixelSecrets {
   readonly BOT_TOKEN: string;
   readonly WEBHOOK_SECRET: string;
   readonly OWNER_TELEGRAM_ID: string;
-  readonly GEMINI_API_KEY: string;
-  readonly GROQ_API_KEY: string;
+  /**
+   * CONDITIONAL (owner round 1.10.6 amendment): the Workers-AI-only path
+   * does NOT require a Gemini key. Optional — used only when the Gemini
+   * fallback is separately gated on (AI_GEMINI_ENABLED) AND its Free-tier
+   * eligibility is verified in a later round.
+   */
+  readonly GEMINI_API_KEY?: string;
+  /**
+   * NOT part of the current active policy (owner round 1.10.6 amendment):
+   * Groq is not a supported provider in the versioned AI policy and no
+   * path requires this key. Kept as an optional future-secret name only.
+   */
+  readonly GROQ_API_KEY?: string;
   readonly YOUTUBE_API_KEY: string;
   readonly REDDIT_CLIENT_ID: string;
   readonly REDDIT_CLIENT_SECRET: string;
@@ -172,4 +183,37 @@ export interface WorkerEnv {
   readonly WEBHOOK_SECRET?: string;
   /** SECRET — owner Telegram numeric user ID (bootstrap identity). Never logged. */
   readonly OWNER_TELEGRAM_ID?: string;
+  // ---------------------------------------------------------------------------
+  // Phase 6 configuration (AI adapters — ADR-0041). FAIL-CLOSED: with the
+  // flags off (the shipped default everywhere) the AI draft service is the
+  // typed deferred `ai_disabled` outcome with ZERO provider calls, ZERO
+  // budget writes, and ZERO binding access. Native binding details stay at
+  // the adapter boundary; the domain never imports SDK types.
+  // ---------------------------------------------------------------------------
+  /**
+   * NON-SECRET AI feature flag ('true' | 'false'; default 'false'). Gates
+   * the whole AI draft service (ADR-0041). Validated by
+   * src/shared/config/phase6.ts.
+   */
+  readonly AI_ENABLED?: string;
+  /**
+   * NON-SECRET Gemini fallback operator gate ('true' | 'false'; default
+   * 'false'). Requires verified Free-tier eligibility in addition to the
+   * flag; the versioned policy keeps that eligibility UNVERIFIED in this
+   * round, so the Gemini path stays OFF even when this flag is 'true'.
+   */
+  readonly AI_GEMINI_ENABLED?: string;
+  /**
+   * Workers AI binding (blueprint §4 binding name AI). Optional: only
+   * present where wrangler.jsonc declares it (preview — configuration-as-
+   * code reconciliation of the owner-approved dashboard binding). With
+   * AI_ENABLED off this binding is never accessed.
+   */
+  readonly AI?: Ai;
+  /**
+   * SECRET — Gemini API key (conditional; the Workers-AI-only path does
+   * NOT require it). Values exist only via `wrangler secret put` or a
+   * git-ignored `.dev.vars` file; never logged, echoed, or serialized.
+   */
+  readonly GEMINI_API_KEY?: string;
 }

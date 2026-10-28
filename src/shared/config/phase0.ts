@@ -158,15 +158,17 @@ export const FUTURE_SECRET_CATALOG: readonly FutureSecretDescriptor[] = [
   },
   {
     name: 'GEMINI_API_KEY',
-    required: true,
+    required: false,
     phase: 6,
-    description: 'Gemini API key for extraction and editorial tasks.',
+    description:
+      'Conditional Gemini API key (owner round 1.10.6 amendment): the Workers-AI-only path does NOT require it; used only by the separately gated Gemini fallback.',
   },
   {
     name: 'GROQ_API_KEY',
-    required: true,
+    required: false,
     phase: 6,
-    description: 'Groq API key for fallback model routing.',
+    description:
+      'NOT part of the current active policy (owner round 1.10.6 amendment): Groq is not a supported provider in the versioned AI policy; optional future-secret name only.',
   },
   {
     name: 'GITHUB_TOKEN',
