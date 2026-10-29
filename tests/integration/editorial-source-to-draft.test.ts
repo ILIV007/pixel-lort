@@ -36,11 +36,24 @@ import { findJobById, claimJob } from '../../src/adapters/db/job-store';
 
 const NOW = 1_760_000_000_000;
 const SOURCE_ID = 'src-test-official';
-const VALID_DRAFT_JSON = JSON.stringify({
-  headlineFa: 'تیتر آزمایشی خبر',
-  summaryFa: 'خلاصهٔ آزمایشی خبر بر اساس شواهد ارائه‌شده.',
-  claims: [],
-});
+/**
+ * Default provider fixture (R1.11.1): the artificial draft carries ONE
+ * REAL artificial claim whose evidenceId references the REQUEST input.
+ * The id is extracted from the user prompt's evidence header — the same
+ * id the handler passed — so the fixture is traceable to the actual
+ * request, never a fabricated reference.
+ */
+const EVIDENCE_HEADER_RE = /شواهد غیرقابل‌اعتماد — شناسه: ([^\n]+)\n<<<SHAHED_SHOROO>>>/;
+function buildTracedDraftJson(userContent: string | undefined): string {
+  const evidenceId =
+    (userContent !== undefined ? EVIDENCE_HEADER_RE.exec(userContent)?.[1] : null) ??
+    'missing-evidence-id';
+  return JSON.stringify({
+    headlineFa: 'تیتر آزمایشی خبر',
+    summaryFa: 'خلاصهٔ آزمایشی خبر بر اساس شواهد ارائه‌شده.',
+    claims: [{ text: 'استودیوی آزمایشی از عرضهٔ نسخهٔ جدید خبر داد.', evidenceIds: [evidenceId] }],
+  });
+}
 
 interface ProviderCall {
   readonly modelId: string;
@@ -65,7 +78,7 @@ function createFakePort(
 function wrapExecutor(
   inner: DbExecutor,
   hooks: {
-    readonly onBatch?: (statements: readonly { sql: string }[]) => void;
+    readonly onBatch?: (statements: readonly { sql: string }[]) => void | Promise<void>;
     readonly onRun?: (statement: { sql: string }) => void;
   },
 ): DbExecutor {
@@ -77,7 +90,7 @@ function wrapExecutor(
       return inner.run(statement);
     },
     batch: async (statements) => {
-      hooks.onBatch?.(statements);
+      await hooks.onBatch?.(statements);
       return inner.batch(statements);
     },
   };
@@ -103,6 +116,10 @@ function createHarness(options?: {
   workersAiBindingPresent?: boolean;
   failBatchesMatching?: (statements: readonly { sql: string }[]) => boolean;
   budgetStoreBroken?: boolean;
+  /** Runs AGAINST THE RAW executor right BEFORE the editorial commit batch
+   *  (R1.11.1 regression hook): the handler has already read the item; the
+   *  commit batch has not executed yet — the demonstrated race window. */
+  mutateBeforeEditorialCommit?: (raw: DbExecutor) => Promise<void>;
 }): Harness {
   const clock = fixedClock(NOW);
   const lines: string[] = [];
@@ -115,9 +132,11 @@ function createHarness(options?: {
   let script: (
     callIndex: number,
     input: Parameters<AiProviderPort['complete']>[0],
-  ) => AiCallOutcome = () => ({
+  ) => AiCallOutcome = (_callIndex, input) => ({
     kind: 'ok',
-    rawText: VALID_DRAFT_JSON,
+    rawText: buildTracedDraftJson(
+      input.messages.find((message) => message.role === 'user')?.content,
+    ),
     usage: { inputTokens: 42, outputTokens: 17 },
   });
 
@@ -131,8 +150,14 @@ function createHarness(options?: {
     }
   };
   const executor = wrapExecutor(rawExecutor, {
-    onBatch: (statements) => {
+    onBatch: async (statements) => {
       throwIfBudgetBroken(statements);
+      if (
+        options?.mutateBeforeEditorialCommit !== undefined &&
+        statements.some((statement) => statement.sql.includes('INSERT INTO stories'))
+      ) {
+        await options.mutateBeforeEditorialCommit(rawExecutor);
+      }
       if (options?.failBatchesMatching?.(statements)) {
         throw new Error('injected_mid_commit_failure');
       }
@@ -423,12 +448,23 @@ describe('scenario 1 — one news → story + source_report + evidence + ai_run 
     const document = JSON.parse(draftRow!.document_json) as {
       headlineFa: string;
       sourceReport: { sourceItemId: string; stance: string };
-      modelClaims: { status: string }[];
+      modelClaims: { status: string; evidenceIds: string[] }[];
     };
     expect(document.sourceReport).toMatchObject({ sourceItemId: 'item-1', stance: 'mentions' });
-    const facts = JSON.parse(draftRow!.facts_json) as { status: string }[];
+    // R1.11.1 positive-fixture contract: the model claim is traceable to
+    // the REQUEST evidence id (the source item itself) — never fabricated.
+    expect(document.modelClaims.length).toBeGreaterThanOrEqual(1);
+    for (const modelClaim of document.modelClaims) {
+      expect(modelClaim.status).toBe('unverified');
+      expect(modelClaim.evidenceIds).toContain('item-1');
+    }
+    const facts = JSON.parse(draftRow!.facts_json) as {
+      status: string;
+      evidenceIds: string[];
+    }[];
     for (const fact of facts) {
       expect(fact.status).toBe('unverified');
+      expect(fact.evidenceIds).toContain('item-1');
     }
     const warnings = JSON.parse(draftRow!.warnings_json) as string[];
     expect(warnings).toContain('model_output_unverified');
@@ -641,6 +677,11 @@ describe('scenario 5 — stale generation/lease has zero unauthorized effect', (
       jobId,
       generation: claim.generation,
       fenceNowMs: harness.clock.now(), // lease_until < now → fence fails
+      snapshot: {
+        sourceItemId: 'item-5',
+        sourceId: SOURCE_ID,
+        contentHash: hash,
+      },
       story: {
         id: 'edst_stale',
         storyKey: 'editorial.story:stale',
@@ -698,7 +739,6 @@ describe('scenario 5 — stale generation/lease has zero unauthorized effect', (
         createdBy: 'stale',
         createdAt: harness.clock.now(),
       },
-      sourceItemId: 'item-5',
     });
     expect(staleAttempt.fenceLost).toBe(true);
     expect(await rowCount(harness.rawExecutor, 'stories')).toBe(0);
@@ -1109,5 +1149,350 @@ describe('typed reference failures (snapshot identity)', () => {
     });
     expect(result).toEqual({ kind: 'rejected', reason: 'source_item_missing' });
     expect(await rowCount(harness.rawExecutor, 'jobs')).toBe(0);
+  });
+});
+
+describe('R1.11.1 corrections (Posidon correctness review) — commit-time snapshot', () => {
+  it('a source_item mutated at the commit boundary commits NOTHING and dead-letters distinctly', async () => {
+    const harness = createHarness({
+      mutateBeforeEditorialCommit: async (raw) => {
+        // The R1.11.1 race: the handler has ALREADY read + hash-checked
+        // the item; right before the atomic commit batch the stored
+        // title + content_hash change under it.
+        await raw.run({
+          sql: 'UPDATE source_items SET title = ?, content_hash = ? WHERE id = ?',
+          params: ['تیتر تغییر یافته پیش از ثبت', await sha256Hex('mutated-snapshot'), 'item-snap'],
+        });
+      },
+    });
+    await seedSource(harness.rawExecutor);
+    await seedItem(harness.rawExecutor, {
+      id: 'item-snap',
+      title: 'خبر تغییر همزمان',
+      body: 'متن آیتمی که درست پیش از commit تغییر می‌کند.',
+    });
+    await enqueueEditorialPrepareDraft({
+      engine: harness.engine,
+      executor: harness.rawExecutor,
+      sourceItemId: 'item-snap',
+    });
+
+    const outcomes = await runPipeline(harness);
+    // DISTINCT terminal outcome — not success, not the fenceLost retry.
+    expect(outcomes).toEqual(['ack:job_dead_lettered']);
+    const job = await harness.rawExecutor.first<{ status: string; last_error: string }>({
+      sql: "SELECT status, last_error FROM jobs WHERE type = 'editorial.prepare_draft'",
+    });
+    expect(job!.status).toBe('dead_letter');
+    expect(job!.last_error).toBe('editorial_snapshot_changed');
+
+    // ZERO editorial effects and zero fake processed for the STALE snapshot.
+    expect(await rowCount(harness.rawExecutor, 'stories')).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'claims')).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'evidence')).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(0);
+    const item = await harness.rawExecutor.first<{ processing_status: string }>({
+      sql: 'SELECT processing_status FROM source_items WHERE id = ?',
+      params: ['item-snap'],
+    });
+    expect(item!.processing_status).toBe('new');
+
+    // The provider call DID happen and stays charged — never refunded.
+    expect(harness.providerCalls).toHaveLength(1);
+    expect(await readAiBudget(harness.rawExecutor, { provider: 'workers-ai', nowMs: NOW })).toBe(1);
+    // The REAL run is recorded honestly as failed with the editorial code.
+    const aiRun = await harness.rawExecutor.first<{ status: string; error_code: string }>({
+      sql: 'SELECT status, error_code FROM ai_runs',
+    });
+    expect(aiRun).toMatchObject({ status: 'failed', error_code: 'editorial_snapshot_changed' });
+  });
+
+  it('store-level: a held fence with a changed snapshot no-ops every statement (snapshotChanged)', async () => {
+    const harness = createHarness();
+    await seedSource(harness.rawExecutor);
+    const hash = await seedItem(harness.rawExecutor, {
+      id: 'item-store-snap',
+      title: 'خبر آداپتر',
+    });
+    const enqueue = await enqueueEditorialPrepareDraft({
+      engine: harness.engine,
+      executor: harness.rawExecutor,
+      sourceItemId: 'item-store-snap',
+    });
+    const jobId = enqueue.kind === 'created' ? enqueue.jobId : '';
+    const claim = await claimJob(harness.rawExecutor, jobId, harness.clock.now(), 2 * 60 * 1000);
+    expect(claim.kind).toBe('claimed');
+    if (claim.kind !== 'claimed') return;
+
+    const commitInput = {
+      jobId,
+      generation: claim.generation,
+      fenceNowMs: harness.clock.now(),
+      story: {
+        id: 'edst_store_snap',
+        storyKey: 'editorial.story:store-snap',
+        workingHeadline: null as string | null,
+        createdAt: harness.clock.now(),
+      },
+      claim: {
+        id: 'edcl_store_snap',
+        storyId: 'edst_store_snap',
+        claimType: 'source_report',
+        subject: 's',
+        predicate: 'reported',
+        objectText: 'o',
+        confidence: 0,
+        status: 'unverified',
+        createdAt: harness.clock.now(),
+      },
+      evidence: {
+        id: 'edev_store_snap',
+        claimId: 'edcl_store_snap',
+        sourceItemId: 'item-store-snap',
+        stance: 'mentions',
+        confidence: 0,
+        excerpt: 'e',
+        createdAt: harness.clock.now(),
+      },
+      aiRun: {
+        id: 'edai_store_snap',
+        task: 'news_draft',
+        provider: 'workers-ai',
+        model: 'm',
+        promptVersion: 'p',
+        inputHash: 'h',
+        status: 'succeeded',
+        latencyMs: 1,
+        inputTokens: null as number | null,
+        outputTokens: null as number | null,
+        errorCode: null as string | null,
+        errorMessage: null as string | null,
+        createdAt: harness.clock.now(),
+        completedAt: harness.clock.now(),
+      },
+      draft: {
+        id: 'eddr_store_snap',
+        storyId: 'edst_store_snap',
+        status: 'ready',
+        language: 'fa',
+        layout: 'news_v1',
+        title: 't',
+        documentJson: '{}',
+        factsJson: '[]',
+        warningsJson: '[]',
+        aiRunId: 'edai_store_snap',
+        version: 1,
+        createdBy: 'test',
+        createdAt: harness.clock.now(),
+      },
+    };
+
+    // The item's content_hash changed AFTER the handler's (simulated) read:
+    // the snapshot predicate no-ops EVERY statement — zero rows land.
+    const stale = await commitEditorialResult(harness.rawExecutor, {
+      ...commitInput,
+      snapshot: {
+        sourceItemId: 'item-store-snap',
+        sourceId: SOURCE_ID,
+        contentHash: await sha256Hex('a-different-snapshot'),
+      },
+    });
+    expect(stale).toMatchObject({
+      draftInserted: false,
+      storyInserted: false,
+      sourceItemProcessed: false,
+      fenceLost: false,
+      snapshotChanged: true,
+    });
+    expect(await rowCount(harness.rawExecutor, 'stories')).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'claims')).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'evidence')).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'ai_runs')).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(0);
+    const itemAfterStale = await harness.rawExecutor.first<{ processing_status: string }>({
+      sql: 'SELECT processing_status FROM source_items WHERE id = ?',
+      params: ['item-store-snap'],
+    });
+    expect(itemAfterStale!.processing_status).toBe('new');
+
+    // Positive control: the SAME batch with the TRUE snapshot commits.
+    const fresh = await commitEditorialResult(harness.rawExecutor, {
+      ...commitInput,
+      snapshot: {
+        sourceItemId: 'item-store-snap',
+        sourceId: SOURCE_ID,
+        contentHash: hash,
+      },
+    });
+    expect(fresh).toMatchObject({
+      draftInserted: true,
+      storyInserted: true,
+      sourceItemProcessed: true,
+      fenceLost: false,
+      snapshotChanged: false,
+    });
+    expect(await rowCount(harness.rawExecutor, 'stories')).toBe(1);
+    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(1);
+    const itemAfterFresh = await harness.rawExecutor.first<{ processing_status: string }>({
+      sql: 'SELECT processing_status FROM source_items WHERE id = ?',
+      params: ['item-store-snap'],
+    });
+    expect(itemAfterFresh!.processing_status).toBe('processed');
+  });
+});
+
+describe('R1.11.1 corrections (Posidon correctness review) — full-input byte cap', () => {
+  it('a 20000-byte body is rejected BEFORE the provider: typed, zero provider, zero charge', async () => {
+    const harness = createHarness();
+    await seedSource(harness.rawExecutor);
+    const body = 'a'.repeat(20000);
+    await seedItem(harness.rawExecutor, { id: 'item-cap-ascii', title: 'خبر بدنهٔ بزرگ', body });
+    await enqueueEditorialPrepareDraft({
+      engine: harness.engine,
+      executor: harness.rawExecutor,
+      sourceItemId: 'item-cap-ascii',
+    });
+
+    const outcomes = await runPipeline(harness);
+    expect(outcomes).toEqual(['ack:job_dead_lettered']);
+    const job = await harness.rawExecutor.first<{ status: string; last_error: string }>({
+      sql: "SELECT status, last_error FROM jobs WHERE type = 'editorial.prepare_draft'",
+    });
+    expect(job!.status).toBe('dead_letter');
+    expect(job!.last_error).toBe('editorial_input_invalid');
+    expect(harness.providerCalls).toHaveLength(0);
+    expect(await readAiBudget(harness.rawExecutor, { provider: 'workers-ai', nowMs: NOW })).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'ai_runs')).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(0);
+    // The stored source_item text is never rewritten by the rejection.
+    const item = await harness.rawExecutor.first<{ title: string; body_excerpt: string | null }>({
+      sql: 'SELECT title, body_excerpt FROM source_items WHERE id = ?',
+      params: ['item-cap-ascii'],
+    });
+    expect(item!.title).toBe('خبر بدنهٔ بزرگ');
+    expect(item!.body_excerpt).toBe(body);
+  });
+
+  it('a multi-byte Persian body over the byte cap is rejected even though chars truncate fine', async () => {
+    const harness = createHarness();
+    await seedSource(harness.rawExecutor);
+    // 8300 Persian chars = 16600 UTF-8 bytes > 16384 — the OLD order
+    // (truncate to 4000 code units FIRST) measured only 8000 bytes and
+    // PASSED this input to the provider. The byte cap must catch it.
+    await seedItem(harness.rawExecutor, {
+      id: 'item-cap-fa',
+      title: 'خبر چندبایتی',
+      body: 'ف'.repeat(8300),
+    });
+    await enqueueEditorialPrepareDraft({
+      engine: harness.engine,
+      executor: harness.rawExecutor,
+      sourceItemId: 'item-cap-fa',
+    });
+
+    const outcomes = await runPipeline(harness);
+    expect(outcomes).toEqual(['ack:job_dead_lettered']);
+    const job = await harness.rawExecutor.first<{ status: string; last_error: string }>({
+      sql: "SELECT status, last_error FROM jobs WHERE type = 'editorial.prepare_draft'",
+    });
+    expect(job!.last_error).toBe('editorial_input_invalid');
+    expect(harness.providerCalls).toHaveLength(0);
+    expect(await readAiBudget(harness.rawExecutor, { provider: 'workers-ai', nowMs: NOW })).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(0);
+  });
+
+  it('exactly AT the byte cap (16384) passes with a truncated, traceable excerpt', async () => {
+    // title 'T' + '\n\n' + body(16381) = 16384 bytes — allowed, and the
+    // DRAFT still carries the bounded 4000-code-unit excerpt with its
+    // explicit truncation warning (the transparent separate contract).
+    const atCap = createHarness();
+    await seedSource(atCap.rawExecutor);
+    const atCapBody = 'a'.repeat(16381);
+    await seedItem(atCap.rawExecutor, { id: 'item-cap-at', title: 'T', body: atCapBody });
+    await enqueueEditorialPrepareDraft({
+      engine: atCap.engine,
+      executor: atCap.rawExecutor,
+      sourceItemId: 'item-cap-at',
+    });
+    expect(await runPipeline(atCap)).toEqual(['ack:job_completed']);
+    expect(atCap.providerCalls).toHaveLength(1);
+    expect(await readAiBudget(atCap.rawExecutor, { provider: 'workers-ai', nowMs: NOW })).toBe(1);
+    // The stored text stays complete; the DRAFT carries the bounded excerpt.
+    const atCapItem = await atCap.rawExecutor.first<{ body_excerpt: string | null }>({
+      sql: 'SELECT body_excerpt FROM source_items WHERE id = ?',
+      params: ['item-cap-at'],
+    });
+    expect(atCapItem!.body_excerpt).toBe(atCapBody);
+    const atCapDraft = await atCap.rawExecutor.first<{ warnings_json: string }>({
+      sql: 'SELECT warnings_json FROM drafts',
+    });
+    expect(JSON.parse(atCapDraft!.warnings_json)).toContain('excerpt_truncated');
+  });
+
+  it('exactly ONE byte over the cap (16385) is rejected before any provider work', async () => {
+    const over = createHarness();
+    await seedSource(over.rawExecutor);
+    await seedItem(over.rawExecutor, { id: 'item-cap-over', title: 'T', body: 'a'.repeat(16382) });
+    await enqueueEditorialPrepareDraft({
+      engine: over.engine,
+      executor: over.rawExecutor,
+      sourceItemId: 'item-cap-over',
+    });
+    expect(await runPipeline(over)).toEqual(['ack:job_dead_lettered']);
+    const overJob = await over.rawExecutor.first<{ last_error: string }>({
+      sql: "SELECT last_error FROM jobs WHERE type = 'editorial.prepare_draft'",
+    });
+    expect(overJob!.last_error).toBe('editorial_input_invalid');
+    expect(over.providerCalls).toHaveLength(0);
+    expect(await readAiBudget(over.rawExecutor, { provider: 'workers-ai', nowMs: NOW })).toBe(0);
+    expect(await rowCount(over.rawExecutor, 'drafts')).toBe(0);
+  });
+});
+
+describe('R1.11.1 corrections (Posidon correctness review) — traced-claim guard', () => {
+  it('a schema-valid draft with claims=[] is terminal at the editorial boundary, never ready', async () => {
+    const harness = createHarness();
+    harness.setScript(() => ({
+      kind: 'ok',
+      rawText: JSON.stringify({
+        headlineFa: 'تیتر بدون ادعا',
+        summaryFa: 'خلاصه بدون ادعا.',
+        claims: [],
+      }),
+      usage: { inputTokens: 11, outputTokens: 5 },
+    }));
+    await seedSource(harness.rawExecutor);
+    await seedItem(harness.rawExecutor, { id: 'item-empty-claims', title: 'خبر بدون ادعا' });
+    await enqueueEditorialPrepareDraft({
+      engine: harness.engine,
+      executor: harness.rawExecutor,
+      sourceItemId: 'item-empty-claims',
+    });
+
+    const outcomes = await runPipeline(harness);
+    // The general AI schema still accepts empty claims (other callers are
+    // unchanged) — the EDITORIAL boundary rejects the result instead of
+    // committing a ready draft, and the outcome is TERMINAL (the identical
+    // input would deterministically repeat — no retry storm).
+    expect(outcomes).toEqual(['ack:job_dead_lettered']);
+    const job = await harness.rawExecutor.first<{ status: string; last_error: string }>({
+      sql: "SELECT status, last_error FROM jobs WHERE type = 'editorial.prepare_draft'",
+    });
+    expect(job!.status).toBe('dead_letter');
+    expect(job!.last_error).toBe('editorial_no_traced_claim');
+    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(0);
+    expect(await rowCount(harness.rawExecutor, 'stories')).toBe(0);
+    const item = await harness.rawExecutor.first<{ processing_status: string }>({
+      sql: 'SELECT processing_status FROM source_items WHERE id = ?',
+      params: ['item-empty-claims'],
+    });
+    expect(item!.processing_status).toBe('new');
+    // The REAL provider run is recorded as `invalid`; the charge stays.
+    expect(harness.providerCalls).toHaveLength(1);
+    expect(await readAiBudget(harness.rawExecutor, { provider: 'workers-ai', nowMs: NOW })).toBe(1);
+    const aiRun = await harness.rawExecutor.first<{ status: string; error_code: string }>({
+      sql: 'SELECT status, error_code FROM ai_runs',
+    });
+    expect(aiRun).toMatchObject({ status: 'invalid', error_code: 'editorial_no_traced_claim' });
   });
 });

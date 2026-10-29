@@ -3,7 +3,7 @@ import {
   EditorialPrepareDraftPayloadSchema,
   parseJobPayload,
 } from '../../src/domain/jobs/payloads';
-import { JOB_TYPES, isJobErrorCode } from '../../src/domain/jobs/job-types';
+import { JOB_ERROR_CODES, JOB_TYPES, isJobErrorCode } from '../../src/domain/jobs/job-types';
 import {
   isPausedByPolicy,
   policyExcludedTypes,
@@ -23,6 +23,7 @@ import {
 import {
   buildAiEvidenceInput,
   buildDraftDocument,
+  buildFullEvidenceText,
   buildMentionsEvidence,
   buildSourceReportClaim,
   buildTraceableExcerpt,
@@ -252,6 +253,29 @@ describe('conservative mapping (ADR-0042 §2)', () => {
     });
     expect(oversized.rejected).toBe('oversized');
   });
+
+  it('composes the FULL evidence input from the SAME title+body source as the excerpt', () => {
+    // R1.11.1: the byte cap is measured on buildFullEvidenceText BEFORE any
+    // truncation; it must be the exact uncut composition of the excerpt —
+    // the excerpt is a PREFIX (plus the ellipsis) of the full text:
+    // truncation never changes the composition, only the length.
+    const samples = [
+      { title: 'تیتر', body_excerpt: 'بدنهٔ خبر' },
+      { title: 'تیتر', body_excerpt: null },
+      { title: '  حاشیه‌ها بریده می‌شوند  ', body_excerpt: '  بدنه  ' },
+      { title: '', body_excerpt: '' },
+      { title: 'x'.repeat(5000), body_excerpt: 'y'.repeat(5000) },
+    ];
+    for (const sample of samples) {
+      const full = buildFullEvidenceText(sample);
+      const excerpt = buildTraceableExcerpt(sample);
+      if (excerpt.truncated) {
+        expect(full.startsWith(excerpt.text.slice(0, -1))).toBe(true);
+      } else {
+        expect(excerpt.text).toBe(full);
+      }
+    }
+  });
 });
 
 describe('AI outcome mapping (ADR-0042 §5)', () => {
@@ -418,8 +442,18 @@ describe('editorial error codes are stable and safe', () => {
       'editorial_snapshot_mismatch',
       'editorial_input_invalid',
       'editorial_ai_refused',
+      // R1.11.1 (Posidon correctness review): distinct terminal outcomes.
+      'editorial_snapshot_changed',
+      'editorial_no_traced_claim',
     ]) {
       expect(isJobErrorCode(code)).toBe(true);
     }
+  });
+
+  it('keeps the two R1.11.1 outcomes distinct from the fence-loss and pre-read codes', () => {
+    expect(new Set(JOB_ERROR_CODES).size).toBe(JOB_ERROR_CODES.length); // no duplicates
+    expect(JOB_ERROR_CODES.indexOf('editorial_snapshot_changed')).toBeGreaterThan(
+      JOB_ERROR_CODES.indexOf('editorial_snapshot_mismatch'),
+    );
   });
 });
