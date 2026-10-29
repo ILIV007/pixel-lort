@@ -153,6 +153,14 @@ export interface WorkerEnv {
    */
   readonly SOURCE_INGESTION_ENABLED?: string;
   /**
+   * NON-SECRET editorial feature flag ('true' | 'false'; default 'false').
+   * Gates the `editorial.prepare_draft` job type ONLY (Phase 5A,
+   * ADR-0042 §3). While OFF the type is losslessly policy-paused
+   * (ADR-0040 semantics): no attempt burn, no poison, no writes. It never
+   * implies AI activation — `AI_ENABLED` stays an independent gate.
+   */
+  readonly EDITORIAL_ENABLED?: string;
+  /**
    * Queues producer binding for the jobs queue (blueprint §4 binding name).
    * Optional: only present where wrangler.jsonc declares it (preview).
    * Carries bounded job REFERENCES only — never payloads.

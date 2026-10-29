@@ -16,6 +16,10 @@
 # locally only to exercise the engine against local D1 (no real queue is
 # needed for offline tests; dispatch fails closed without the JOBS binding).
 # JOBS_ENABLED=false
+# Phase 5A editorial source→draft gate (non-secret; ADR-0042). Ships OFF:
+# editorial.prepare_draft work is losslessly policy-paused while off; the
+# AI service keeps its own independent gates.
+# EDITORIAL_ENABLED=false
 # Intended owner value since R1.10.5 (owner channel identity: pixel lores;
 # non-secret per ADR-0009): TARGET_CHANNEL=@pixellores
 # TARGET_CHANNEL=@pixellores

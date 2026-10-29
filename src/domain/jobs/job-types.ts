@@ -58,11 +58,17 @@ export function isJobStatus(value: string): value is JobStatus {
 
 /**
  * Registered job types. ONLY implemented handlers are registered
- * (ADR-0036 §7, ADR-0038 §1): the Phase 3 maintenance heartbeat plus the
- * Phase 4 source poll (registered ONLY while the ingestion gate is on —
- * an unregistered type can never be created or executed, ADR-0036 §7).
+ * (ADR-0036 §7, ADR-0038 §1): the Phase 3 maintenance heartbeat, the
+ * Phase 4 source poll (registered ONLY while the ingestion gate is on),
+ * and the Phase 5A editorial prepare-draft (registered ONLY while the
+ * editorial gate is on — an unregistered type can never be created or
+ * executed, ADR-0036 §7; the gate-off pause is LOSSLESS per ADR-0040/0042).
  */
-export const JOB_TYPES = ['jobs.maintenance_heartbeat', 'sources.fetch_poll'] as const;
+export const JOB_TYPES = [
+  'jobs.maintenance_heartbeat',
+  'sources.fetch_poll',
+  'editorial.prepare_draft',
+] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];
 
@@ -97,6 +103,14 @@ export const JOB_ERROR_CODES = [
   // source-state effects and returns this stable RECOVERABLE code; the
   // engine's own retry bookkeeping (retry_wait/last_error) carries it.
   'ingestion_capability_unresolved',
+  // Phase 5A editorial (ADR-0042) — stable, safe, authored constants.
+  // The handler maps AI/identity failures onto these; the engine's fenced
+  // bookkeeping carries them into retry_wait/dead_letter/last_error.
+  'editorial_source_item_missing',
+  'editorial_source_missing',
+  'editorial_snapshot_mismatch',
+  'editorial_input_invalid',
+  'editorial_ai_refused',
 ] as const;
 
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];

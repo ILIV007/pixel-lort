@@ -35,18 +35,22 @@ import { PAYLOAD_SCHEMAS } from './payloads';
 import type { JobHandlerRegistry } from './handler';
 
 /** Named configuration gates that can hold a job type (code-defined). */
-export type PolicyGateName = 'ingestion_gate';
+export type PolicyGateName = 'ingestion_gate' | 'editorial_gate';
 
 /**
  * Per-invocation gate snapshot. `ingestionGateOn` mirrors the strictly
- * parsed `SOURCE_INGESTION_ENABLED` flag; an engine constructed without an
- * explicit snapshot (`createJobsEngine` direct harnesses) behaves as if
- * every gate is ON: no pause or scan exclusion. The new distinct
- * handler_misconfigured behavior still applies; whole-engine byte-equivalence
- * is not claimed.
+ * parsed `SOURCE_INGESTION_ENABLED` flag; `editorialGateOn` mirrors the
+ * strictly parsed `EDITORIAL_ENABLED` flag (ADR-0042). Both flags are
+ * OPTIONAL for backward compatibility with direct offline harnesses:
+ * an engine constructed without an explicit snapshot (`createJobsEngine`
+ * direct harnesses) behaves as if every gate is ON: no pause or scan
+ * exclusion. The new distinct handler_misconfigured behavior still
+ * applies; whole-engine byte-equivalence is not claimed.
  */
 export interface JobsPolicyGates {
   readonly ingestionGateOn: boolean;
+  /** ADR-0042: absent (offline harnesses) behaves as ON — no pause. */
+  readonly editorialGateOn?: boolean;
 }
 
 /** One enablement-registry entry: which gate holds the job type. */
@@ -60,7 +64,16 @@ export interface JobEnablementEntry {
  */
 export const JOB_ENABLEMENT_POLICY: ReadonlyMap<string, JobEnablementEntry> = new Map([
   ['sources.fetch_poll', { gate: 'ingestion_gate' }],
+  ['editorial.prepare_draft', { gate: 'editorial_gate' }],
 ]);
+
+/** True iff the named gate is OFF under the snapshot (absent = ON). */
+function isGateOff(gate: PolicyGateName, gates: JobsPolicyGates): boolean {
+  if (gate === 'ingestion_gate') {
+    return !gates.ingestionGateOn;
+  }
+  return gates.editorialGateOn === false;
+}
 
 /** Disabled-by-policy test: listed in the registry AND its gate is off. */
 export function isPausedByPolicy(jobType: string, gates: JobsPolicyGates): boolean {
@@ -68,7 +81,7 @@ export function isPausedByPolicy(jobType: string, gates: JobsPolicyGates): boole
   if (entry === undefined) {
     return false;
   }
-  return entry.gate === 'ingestion_gate' && !gates.ingestionGateOn;
+  return isGateOff(entry.gate, gates);
 }
 
 /**
@@ -78,7 +91,7 @@ export function isPausedByPolicy(jobType: string, gates: JobsPolicyGates): boole
 export function policyExcludedTypes(gates: JobsPolicyGates): readonly string[] {
   const excluded: string[] = [];
   for (const [type, entry] of JOB_ENABLEMENT_POLICY.entries()) {
-    if (entry.gate === 'ingestion_gate' && !gates.ingestionGateOn) {
+    if (isGateOff(entry.gate, gates)) {
       excluded.push(type);
     }
   }

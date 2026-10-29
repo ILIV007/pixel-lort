@@ -44,6 +44,12 @@
     // activated by this pass; the operator runbook documents the reviewed
     // activation procedure (gate + explicit per-source enablement).
     "SOURCE_INGESTION_ENABLED": "false",
+    // Phase 5A editorial source→draft gate (non-secret; ADR-0042). Gates
+    // the editorial.prepare_draft job type ONLY — never the jobs engine,
+    // never AI activation. Ships "false" everywhere: while off, editorial
+    // work is losslessly policy-paused (pre-claim ack, zero attempt burn,
+    // zero writes) and the AI service keeps its own independent gates.
+    "EDITORIAL_ENABLED": "false",
     // Target public channel username — NON-SECRET configuration (ADR-0009).
     // R1.10.5 owner channel identity: pixel lores / @pixellores
     // (https://t.me/pixellores). Not credential material; never a numeric
@@ -155,6 +161,11 @@
         // activation is a post-review operator procedure (runbook Phase 4).
         // The reviewed Phase 3 engine behavior is preserved unchanged.
         "SOURCE_INGESTION_ENABLED": "false",
+        // Phase 5A editorial source→draft gate ships DISABLED on preview
+        // (ADR-0042): activation is a post-review owner procedure. While
+        // off, editorial.prepare_draft work is losslessly policy-paused;
+        // AI_ENABLED stays an independent fail-closed gate.
+        "EDITORIAL_ENABLED": "false",
         // Target public channel username — NON-SECRET configuration
         // (ADR-0009). R1.10.5 owner channel identity: @pixellores
         // (https://t.me/pixellores). Format-validated; unconsumed today.
