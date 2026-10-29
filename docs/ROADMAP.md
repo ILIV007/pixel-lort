@@ -25,13 +25,18 @@ ADR-0042 addendum — implemented, UNDER INDEPENDENT REVIEW; Phase 5C-1
 durable fingerprints + candidate discovery — R1.13, ADR-0043 —
 implemented, UNDER INDEPENDENT REVIEW; Phase 5C-2 conservative candidate
 assessment — R1.14, ADR-0043 addendum — implemented, UNDER INDEPENDENT
-REVIEW)**: the FIRST
+REVIEW; Phase 5C-3 exact-content draft reuse with preserved provenance —
+R1.15, ADR-0043 addendum — implemented, UNDER INDEPENDENT REVIEW)**: the FIRST
 integrated local source→draft vertical path (`editorial.prepare_draft`)
 ships OFF everywhere behind its own fail-closed `EDITORIAL_ENABLED` gate
 with zero live inference, Phase 5B adds the limited Evidence Guard
 report on the same path, and Phase 5C-1 adds durable multi-owner story
 fingerprints with a bounded, honest candidate-discovery report — NO
-merge, NO truth verification — and Phase 5C-2 adds the pure, versioned
+merge, NO truth verification — Phase 5C-2 adds the pure, versioned
+candidate-ASSESSMENT derived only from those discovery signals, and
+Phase 5C-3 adds VERIFIED exact-content draft reuse with preserved
+provenance (the copied news costs no second inference; one stable result
+per exact content enforced in SQL) —
 candidate-ASSESSMENT derived only from those discovery signals — NO
 merge, NO truth verification, NEVER an unrelatedness conclusion — see
 the Phase 5 section. Everything else is
@@ -377,7 +382,7 @@ decision.
       normalization/security suites. Measured final-tree totals in the
       Phase 4 handoff.
 
-## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery and Phase 5C-2 conservative candidate-assessment implemented, UNDER INDEPENDENT REVIEW, OFF)
+## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery, Phase 5C-2 conservative candidate-assessment and Phase 5C-3 exact-content draft reuse with preserved provenance implemented, UNDER INDEPENDENT REVIEW, OFF)
 
 - [x] **Phase 5A (R1.11, ADR-0042): the FIRST integrated local source→draft
       path — ACCEPTED OFFLINE by independent review (R1.12 round ruling; the
@@ -483,6 +488,40 @@ decision.
       nothing, replay byte-stability, historical absent/foreign handling);
       demo extended to the three required pairs + a solo item. All gates
       stay OFF; free ingestion/full-poll stays NOT_READY.
+- [x] **Phase 5C-3 (R1.15, ADR-0043 addendum): EXACT-CONTENT draft reuse
+      with preserved provenance — explicitly NOT a merge, NOT truth, NOT
+      source independence** — when the FULL title+body composition of a
+      second item is exactly identical, the item VERIFIEDLY reuses the
+      existing stable draft result: a replay fast-path (one indexed
+      attachment read), then reuse from the SAME content_hash lookup the
+      discovery already produced (zero extra probes) where every candidate
+      must BOTH still own a usable ready draft AND REALLY equal the
+      arriving full composed text byte-exact through at least one attached
+      reference item (the fingerprint is only the locator; numbers,
+      negations, units, Persian/Latin digits and truncation-equal excerpts
+      are never equated), then a fenced reuse commit (the item's OWN
+      deterministic source_report claim + mentions evidence + processed
+      flip under the job fence + snapshot predicate + target-validity
+      predicate) that ADDS the second provenance and NEVER rewrites the
+      reused draft/story/report documents — confidence/trust untouched, NO
+      ai_runs row (no provider call happened). Every normal commit
+      additionally writes the group-unique exact-content anchor
+      (`sc1:<digest>`, no story suffix): a concurrent second commit of the
+      same exact content collides on the PRIMARY KEY, the WHOLE batch
+      rolls back with a typed `contentTaken` outcome, the loser's REAL
+      provider run stays recorded and charged (never presented as used),
+      and its bounded retry resolves into verified reuse — AT MOST ONE
+      stable result per exact content, enforced in SQL on schema 3 (no
+      migration). Honest limits recorded: the ≤9-row probe page bounds
+      reuse visibility (overflow logged); pre-R1.13 (non-sc1) historical
+      stories are never consulted (NO backfill); exactly-once provider
+      behavior is NOT claimed; replay of first and reused items stays
+      free. Sequential identical-content items cost ZERO provider calls.
+      Proven by unit contracts, 15 REAL-D1 acceptance tests (registered in
+      test:db), and the rewritten demo (`npm run demo:story-candidates`,
+      now five artificial items with per-path provider-call and local SQL
+      proxy cost tables). All gates stay OFF; free ingestion/full-poll
+      stays NOT_READY.
 - [ ] Story MERGING, entity aliases, semantic/deterministic matching with
       thresholds (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate
       discovery + conservative observation assessment — merging remains

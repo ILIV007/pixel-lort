@@ -222,3 +222,32 @@ Telegram.
   versioned, cross-validated observation record instead of raw signals —
   the boundary of THIS round: no merge, no story union, no evidence move,
   no confidence raise, no gate change.
+
+## Addendum — Phase 5C-3 (R1.15): exact-content draft REUSE with preserved provenance (still no merge)
+
+### Context
+
+Phases 5C-1/5C-2 made the pipeline REPORT relations between candidates; nothing changed behavior. The product now needs one concrete outcome: when the FULL title+body composition of a second item is EXACTLY identical, the copied news must not cost a second inference or produce a duplicate draft — while every source's trail survives. Similar titles, shared URLs, and translations stay OUT of this path; semantic merging, NER, embeddings, and Fact Guard remain out of scope.
+
+### Decision
+
+1. **Replay fast-path (one indexed read).** `findEditorialSourceAttachment` proves — via `evidence(source_item_id)` → `source_report` claim — whether the item ALREADY carries its durable provenance relation (the atomic reuse commit guarantees claim + evidence + processed flip landed together). Success with zero writes, zero provider involvement. (Documented behavior evolution: an item whose attachment outlived its draft's readiness now reads honestly as "work durably done" instead of bounded-retry dead-lettering.)
+
+2. **Verified reuse BEFORE any provider work, from the ALREADY-produced lookup.** The reuse decision consumes the SAME `content_hash` lookup outcome the R1.13 discovery produced — zero extra probes. Each candidate story must (a) still own a usable `ready` draft at the pipeline's draft version, and (b) REALLY equal the arriving item's FULL composed text — byte-exact `buildFullEvidenceText` equality through at least one attached reference item read via the story's `source_report` claims' evidence. The fingerprint is ONLY the locator; the DECISION is the byte-exact comparison. Numbers, negations, units, punctuation, Persian/Latin digits are never equated; truncation-point "equal excerpts" with different full texts never reuse; a corrupt fingerprint can never cause a wrong reuse. The representative is the FIRST candidate passing BOTH checks in the probe's deterministic order — never "the first discovery candidate" alone; the ≤9-row probe bound and its overflow are recorded honestly (stories beyond the probe page are not consulted this round).
+
+3. **Fenced REUSE commit — provenance ADDED, never substituted.** On a verified target, the item's OWN deterministic `source_report` claim (`sourceReportClaimId(story, item)`, subject = the item's OWN source name, confidence 0, unverified) + its OWN `mentions` evidence + its processed flip land in ONE atomic batch under the job fence, the item's snapshot predicate, AND the target-validity predicate (the target story's usable ready draft must still exist INSIDE the batch). The reused draft/story/discovery/assessment/guard documents are NEVER rewritten; the old draft's claims are never reattributed; confidence/trust never move; NO `ai_runs` row exists because NO provider call happens (a provider that never ran is never fabricated).
+
+4. **Group uniqueness IN SQL under concurrency.** Every normal commit additionally writes the exact-content GROUP anchor `(kind='content_hash', value='sc1:<digest>')` — no story suffix — with the own-row replay guard and the usual fence+snapshot predicates. The `(kind, value)` PRIMARY KEY makes the anchor unique across ALL stories: a concurrent second commit of the same exact content collides and the WHOLE batch rolls back (D1 batch = transaction) with ZERO effects. The store classifies this typed `contentTaken` outcome via the existing D1 error classifier (raw message inspected for classification only, never surfaced); the handler records the loser's REAL provider run (standalone fenced insert — charged, honest, referenced by NO draft, never presented as used) and returns a bounded recoverable retry whose next generation finds the winner and reuses. Exactly-once provider behavior is NOT claimed; at most ONE stable result per exact content IS enforced in SQL.
+
+### What this never claims (and the recorded limits)
+
+- Reuse is NOT a semantic story merge (the story keeps its snapshot identity; `merged_into_story_id` stays untouched), NOT a same-event proof, NOT truth verification, NOT source independence.
+- Historical stories WITHOUT `sc1` content fingerprints are never consulted (NO backfill — pre-R1.13 results untouched); R1.13-era story-scoped fingerprints ARE reusable after byte verification. Pre-5C-3 stories/drafts are never rewritten or merged.
+- The anchor is derived from the committing item's OWN text (never from a stored fingerprint), so corrupt fingerprints cannot block honest items; the anchor is permanent this round (no supersession) — a future draft-lifecycle phase must revisit anchor semantics explicitly.
+- The reuse probe is bounded by the SAME ≤9-row discovery probe page; overflow and any beyond-page miss are logged, never hidden. Concurrent lookups may still both miss (lookup-moment blindness, unchanged from R1.13) — the ANCHOR then resolves the race at commit time.
+
+### Consequences
+
+- The copy costs nothing: sequential identical-content items consume ZERO provider calls and ZERO charges; concurrent racers may both pay, and BOTH real costs stay durably recorded.
+- One stable result per exact content is now a SQL-guaranteed property of the path, with both (or all) provenances retrievable as ordinary typed rows.
+- SQL delta (all index/PK-driven, measured as LOCAL proxy in the demo): reuse path = +1 attachment read + ≤2 verification reads per probed candidate + a 3-statement fenced batch; normal path = +1 anchor statement in the existing batch; contentTaken path = +1 classification read + 1 standalone `ai_runs` insert.
