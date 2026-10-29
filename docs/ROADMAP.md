@@ -522,6 +522,46 @@ decision.
       now five artificial items with per-path provider-call and local SQL
       proxy cost tables). All gates stay OFF; free ingestion/full-poll
       stays NOT_READY.
+- [x] **Phase 5C-3 CORRECTION (R1.15.1, v1.10.1): exact-content reuse
+      correctness — three independent Posidon counterexamples fixed INSIDE
+      the existing contract (no new capability, no redesign, schema 3
+      untouched)** — recorded 3 failed / 15 skipped RED on the 1.10.0
+      baseline, green after: **(P1)** the replay fast-path succeeds ONLY on
+      a PROVABLE relation — the story's ready draft must still carry the
+      IMMUTABLE document basis (sourceReport + evidenceGuard snapshot
+      identity) that byte-verifies the CURRENT full composed text; a NEW
+      snapshot of an already-attached item is never acknowledged by the OLD
+      attachment and takes its own honest path (old provenance untouched,
+      never reattributed); same-snapshot replay stays free and
+      side-effect-free, now PROVEN through a REAL re-claimed handler
+      execution (enqueue=existing alone never exercised the fast-path
+      handler); **(P2)** the reuse equality basis moved from mutable
+      source_items rows to the DRAFT RESULT'S OWN immutable record
+      (untruncated documents compare against `sourceReport.excerptText`;
+      truncated ones through the guard-hash IDENTITY BRIDGE to the original
+      reference row), and the compared basis — the exact `document_json`
+      bytes AND the original reference-row identity as read — is carried
+      INTO the reuse commit's SQL predicate on ALL reuse artifacts (never a
+      JS re-read): a reference mutated between verification and commit
+      yields ZERO effects with the typed `targetInvalid` retry (the
+      reviewer's `claims=1` assertion unweakened), and a reference mutated
+      BEFORE verification is refused by the immutable basis (regression
+      recorded); **(P3)** the group anchor's owner is resolved by ONE
+      parameterized PK point read on `(kind,value)` INDEPENDENT of the ≤9-row
+      discovery probe page (no LIMIT growth, no unbounded scan) — a valid
+      ready owner outside the probe page reuses with ZERO new provider
+      calls; when the anchor exists but NO candidate verifies, the handler
+      returns the new typed PERMANENT `editorial_exact_content_blocked`
+      BEFORE any provider work — the paid provider→conflict→retry cycle is
+      never entered, and no anchor is ever taken over or deleted; real-race
+      semantics unchanged (both providers may run, the loser's REAL run
+      stays recorded and charged, the anchor PK rollback contract is
+      untouched). Documented assertion-basis change (sanctioned): the reuse
+      decision verifies the draft's immutable document record, so seeded
+      historical reuse-target drafts carry the PRODUCTION document shape;
+      `'{}'` foreign shapes are honestly NOT reusable. Suite now 20 REAL-D1
+      tests + 19 unit tests; full gate re-run green (110 files / 1489
+      tests); version 1.10.1; no Phase-5-completion claim.
 - [ ] Story MERGING, entity aliases, semantic/deterministic matching with
       thresholds (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate
       discovery + conservative observation assessment — merging remains

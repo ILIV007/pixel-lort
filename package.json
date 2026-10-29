@@ -1,6 +1,6 @@
 {
   "name": "pixel",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "private": true,
   "description": "Pixel — Persian-language autonomous Telegram gaming editorial agent for the pixel lores channel (@pixellores). Cloudflare Workers foundation.",
   "type": "module",
