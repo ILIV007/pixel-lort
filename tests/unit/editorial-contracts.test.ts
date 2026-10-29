@@ -38,6 +38,10 @@ import {
   type CandidateDiscoveryReport,
 } from '../../src/domain/editorial/candidate-discovery';
 import {
+  buildCandidateAssessmentReport,
+  type CandidateAssessmentReport,
+} from '../../src/domain/editorial/candidate-assessment';
+import {
   classifyAiOutcome,
   observeAiRun,
 } from '../../src/application/editorial/prepare-draft-handler';
@@ -67,6 +71,11 @@ const NO_CANDIDATES_REPORT: CandidateDiscoveryReport = buildCandidateDiscoveryRe
   storyId: 'edst_test_story',
   lookups: [],
   matches: [],
+});
+
+/** Its deterministic assessment (R1.14) — zero entries, nothing concluded. */
+const NO_CANDIDATES_ASSESSMENT: CandidateAssessmentReport = buildCandidateAssessmentReport({
+  discovery: NO_CANDIDATES_REPORT,
 });
 
 describe('editorial payload contract (ADR-0042 §2)', () => {
@@ -257,6 +266,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
       },
       evidenceGuard: GUARD_REPORT,
       candidateDiscovery: NO_CANDIDATES_REPORT,
+      candidateAssessment: NO_CANDIDATES_ASSESSMENT,
     });
     expect(document.title).toBe('تیتر مدل');
     expect(document.document.schemaVersion).toBe(1);
@@ -290,6 +300,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
       },
       evidenceGuard: GUARD_REPORT,
       candidateDiscovery: NO_CANDIDATES_REPORT,
+      candidateAssessment: NO_CANDIDATES_ASSESSMENT,
     });
     // The report rides INSIDE document_json, byte-for-byte the one built
     // for THIS draft; schemaVersion stays 1 (additive contract extension).
@@ -304,6 +315,34 @@ describe('conservative mapping (ADR-0042 §2)', () => {
     expect(document.document.modelClaims).toHaveLength(
       document.document.evidenceGuard.claims.length,
     );
+  });
+
+  it('embeds the versioned candidate-assessment report additively (R1.14, 5C-2)', () => {
+    const document = buildDraftDocument({
+      sourceItemId: ITEM_ID,
+      sourceName: 'منبع رسمی',
+      excerpt,
+      semanticDraft: {
+        headlineFa: 'تیتر مدل',
+        summaryFa: 'خلاصه مدل',
+        claims: [{ text: 'ادعای مدل', evidenceIds: [ITEM_ID] }],
+      },
+      evidenceGuard: GUARD_REPORT,
+      candidateDiscovery: NO_CANDIDATES_REPORT,
+      candidateAssessment: NO_CANDIDATES_ASSESSMENT,
+    });
+    expect(document.document.candidateAssessment).toBe(NO_CANDIDATES_ASSESSMENT);
+    expect(document.document.schemaVersion).toBe(1);
+    expect(document.document.candidateAssessment.assessmentVersion).toBe(1);
+    expect(document.document.candidateAssessment.observation).toBe('no_candidates_observed');
+    expect(document.document.candidateAssessment.entries).toEqual([]);
+    expect(document.document.candidateAssessment.unrelatednessConcluded).toBe(false);
+    expect(document.document.candidateAssessment.limitations).toContain('not_same_event_proof');
+    expect(document.document.candidateAssessment.unassessed).toEqual([
+      'same_event',
+      'truth',
+      'source_independence',
+    ]);
   });
 
   it('flags oversized AI snippets via the byte-level handler check path', () => {

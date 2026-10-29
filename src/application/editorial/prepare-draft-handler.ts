@@ -115,6 +115,7 @@ import {
   planFingerprintLookups,
 } from '../../domain/editorial/story-fingerprints';
 import { buildCandidateDiscoveryReport } from '../../domain/editorial/candidate-discovery';
+import { buildCandidateAssessmentReport } from '../../domain/editorial/candidate-assessment';
 import type { Logger } from '../../observability/logger';
 
 /** Deferred AI reasons that map onto the engine's recoverable retry path. */
@@ -352,6 +353,21 @@ export function createEditorialPrepareDraftHandler(
       overflow: candidateDiscovery.lookup.overflowObserved,
     });
 
+    // ---- 5.6 R1.14 (Phase 5C-2) CONSERVATIVE candidate assessment — a
+    //          PURE, deterministic derivation of the discovery report
+    //          above (same lookup moment, zero new lookups, zero new SQL,
+    //          zero provider involvement): what was ACTUALLY OBSERVED
+    //          about each candidate's relation (full content composite
+    //          equality / shared URL / shared weak title / several
+    //          signals), with every real reason kept, correlated signals
+    //          never counted as independent confirmations, no confidence
+    //          or threshold, and `unrelatednessConcluded` fixed false —
+    //          absence of signals is NEVER a negative proof. It rides
+    //          INSIDE document_json of the SAME fenced commit.
+    const candidateAssessment = buildCandidateAssessmentReport({
+      discovery: candidateDiscovery,
+    });
+
     // ---- 6. The EXISTING AI service (real gates: flag, budget authority,
     //         allowlist ladder, wall deadline, output validation).
     const aiStartedAtMs = nowMs();
@@ -461,6 +477,7 @@ export function createEditorialPrepareDraftHandler(
       semanticDraft: outcome.draft,
       evidenceGuard,
       candidateDiscovery,
+      candidateAssessment,
     });
     const now = nowMs();
 

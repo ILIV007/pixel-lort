@@ -16,6 +16,7 @@ import { createEditorialPrepareDraftHandler } from '../../src/application/editor
 import { createAiDraftService } from '../../src/application/ai/draft-service';
 import type { AiCallOutcome, AiProviderPort } from '../../src/domain/ai/types';
 import { readCandidateDiscoveryReport } from '../../src/domain/editorial/candidate-discovery';
+import { readCandidateAssessmentReport } from '../../src/domain/editorial/candidate-assessment';
 import { readEvidenceGuardReport } from '../../src/domain/editorial/evidence-guard';
 import {
   FINGERPRINT_LOOKUP_ROW_LIMIT,
@@ -23,20 +24,34 @@ import {
 } from '../../src/domain/editorial/story-fingerprints';
 
 /**
- * R1.13 (Phase 5C-1) OFFLINE demo runner: THREE artificial news items from
- * three different sources — one RELATED pair (the same stored canonical_url,
- * different texts/titles) and one UNRELATED item — through the SAME real
- * editorial path (real engine, real budget authority, real fenced commit;
- * artificial provider port, zero network, zero live AI).
+ * R1.13+R1.14 (Phase 5C-1/5C-2) OFFLINE demo runner: SEVEN artificial news
+ * items from seven different sources — THREE related pairs plus one
+ * unrelated item — through the SAME real editorial path (real engine, real
+ * budget authority, real fenced commit; artificial provider port, zero
+ * network, zero live AI):
+ *
+ * - one pair with IDENTICAL content (title+body; different ids/sources/URLs)
+ *   → the content_hash composite digest AND the weak title signal are
+ *   observed → `full_content_equality_observed` (all reasons kept) — a
+ *   text observation, NOT truth confirmation, NOT source independence;
+ * - one pair sharing ONLY the stored URL (different texts/titles)
+ *   → `shared_url_observed`;
+ * - one pair sharing ONLY the normalized title (different bodies/URLs)
+ *   → the WEAK `shared_title_observed` signal;
+ * - one fully unrelated item → zero candidates, and the assessment's
+ *   `unrelatednessConcluded` stays FALSE — never "definitely unrelated".
  *
  * It prints the SAFE summary: storyIds, per-draft candidate observation,
- * matchedSignals, candidate counts, the honest scope caps, and the proof
- * that NOTHING merged (3 independent stories, confidence 0 everywhere) —
- * plus the LOCAL D1 cost table (statements / execution-API calls / rows
- * returned), with the R1.13 fingerprint delta (≤3 pre-provider lookups +
- * ≤3 in-batch inserts per item) called out. These are LOCAL PROXY metrics
- * (ADR-0042 §8) — NOT Cloudflare billing counters, and this demo does NOT
- * resolve the NOT_READY status of Free ingestion/full-poll.
+ * matchedSignals, the R1.14 assessment verdicts + observed reasons + the
+ * preserved discovery limits, candidate counts, the honest scope caps, and
+ * the proof that NOTHING merged (7 independent stories, confidence 0
+ * everywhere) — plus the LOCAL D1 cost table (statements / execution-API
+ * calls / rows returned), with the R1.13 fingerprint delta (≤3 pre-provider
+ * lookups + ≤3 in-batch inserts per item) called out and the R1.14 delta
+ * explicitly ZERO (the assessment rides inside the existing document_json).
+ * These are LOCAL PROXY metrics (ADR-0042 §8) — NOT Cloudflare billing
+ * counters, and this demo does NOT resolve the NOT_READY status of Free
+ * ingestion/full-poll.
  *
  * Run standalone with: `npm run demo:story-candidates`.
  */
@@ -45,7 +60,15 @@ const NOW = 1_760_000_000_000;
 const SOURCE_A = 'src-demo-alpha';
 const SOURCE_B = 'src-demo-beta';
 const SOURCE_C = 'src-demo-gamma';
+const SOURCE_D = 'src-demo-delta';
+const SOURCE_E = 'src-demo-epsilon';
+const SOURCE_F = 'src-demo-zeta';
+const SOURCE_G = 'src-demo-eta';
 const SHARED_URL = 'https://example.com/demo/shared-event';
+const IDENTICAL_TITLE = 'دمو: تیتر محتوای کاملاً یکسان';
+const IDENTICAL_BODY =
+  'بدنهٔ کاملاً یکسان دمو برای بررسی برابری کامل محتوا بین دو منبع مستقل مصنوعی.';
+const SHARED_TITLE_ONLY = 'دمو: تیتر مشترک فقط در عنوان';
 
 /** Counting executor: the local D1 proxy metric, WITH rows returned. */
 function createCountingExecutor(inner: DbExecutor): DbExecutor & {
@@ -107,6 +130,10 @@ describe('story candidates demo — offline three-source runner', () => {
       [SOURCE_A, 'دموی منبع آلفا'],
       [SOURCE_B, 'دموی منبع بتا'],
       [SOURCE_C, 'دموی منبع گاما'],
+      [SOURCE_D, 'دموی منبع دلتا'],
+      [SOURCE_E, 'دموی منبع اپسیلون'],
+      [SOURCE_F, 'دموی منبع زتا'],
+      [SOURCE_G, 'دموی منبع اتا'],
     ] as const) {
       await rawExecutor.run({
         sql: `INSERT INTO sources (id, name, connector, lane, trust_tier, enabled, interval_seconds,
@@ -131,10 +158,38 @@ describe('story candidates demo — offline three-source runner', () => {
         url: SHARED_URL,
       },
       {
-        id: 'demo-cand-solo',
+        id: 'demo-cand-p1',
         sourceId: SOURCE_C,
-        title: 'دمو: خبر کاملاً مستقل گاما',
-        body: 'بدنهٔ دموی خبر مستقل؛ هیچ سیگنال مشترکی با دو خبر دیگر ندارد.',
+        title: IDENTICAL_TITLE,
+        body: IDENTICAL_BODY,
+        url: 'https://example.com/demo/identical-c',
+      },
+      {
+        id: 'demo-cand-p2',
+        sourceId: SOURCE_D,
+        title: IDENTICAL_TITLE,
+        body: IDENTICAL_BODY,
+        url: 'https://example.com/demo/identical-d',
+      },
+      {
+        id: 'demo-cand-t1',
+        sourceId: SOURCE_E,
+        title: SHARED_TITLE_ONLY,
+        body: 'بدنهٔ نخست زوج عنوانی با محتوای ویژهٔ منبع اپسیلون.',
+        url: 'https://example.com/demo/title-e',
+      },
+      {
+        id: 'demo-cand-t2',
+        sourceId: SOURCE_F,
+        title: SHARED_TITLE_ONLY,
+        body: 'بدنهٔ دوم زوج عنوانی با محتوای کاملاً متفاوت منبع زتا.',
+        url: 'https://example.com/demo/title-f',
+      },
+      {
+        id: 'demo-cand-solo',
+        sourceId: SOURCE_G,
+        title: 'دمو: خبر کاملاً مستقل اتا',
+        body: 'بدنهٔ دموی خبر مستقل؛ هیچ سیگنال مشترکی با بقیهٔ خبرها ندارد.',
         url: 'https://example.com/demo/solo',
       },
     ];
@@ -253,7 +308,9 @@ describe('story candidates demo — offline three-source runner', () => {
       const document = JSON.parse(latest!.document_json) as Record<string, unknown>;
       const guardRead = readEvidenceGuardReport(document);
       const discoveryRead = readCandidateDiscoveryReport(document);
+      const assessmentRead = readCandidateAssessmentReport(document);
       expect(discoveryRead.kind).toBe('candidate_discovery_v1');
+      expect(assessmentRead.kind).toBe('candidate_assessment_v1');
       if (discoveryRead.kind !== 'candidate_discovery_v1') return;
 
       summaryItems.push({
@@ -269,6 +326,23 @@ describe('story candidates demo — offline three-source runner', () => {
         })),
         counts: discoveryRead.report.counts,
         candidatesTruncated: discoveryRead.report.candidatesTruncated,
+        assessment:
+          assessmentRead.kind === 'candidate_assessment_v1'
+            ? {
+                observation: assessmentRead.report.observation,
+                entries: assessmentRead.report.entries.map((entry) => ({
+                  storyId: entry.storyId,
+                  verdict: entry.verdict,
+                  verdictReasons: entry.verdictReasons,
+                })),
+                unrelatednessConcluded: assessmentRead.report.unrelatednessConcluded,
+                unassessed: assessmentRead.report.unassessed,
+                discoveryLimits: {
+                  candidatesTruncated: assessmentRead.report.discoveryLimits.candidatesTruncated,
+                  overflowObserved: assessmentRead.report.discoveryLimits.overflowObserved,
+                },
+              }
+            : { kind: assessmentRead.kind },
         sqlDelta: {
           statements: after.statements - before.statements,
           apiCalls: after.apiCalls - before.apiCalls,
@@ -287,11 +361,13 @@ describe('story candidates demo — offline three-source runner', () => {
     });
 
     const summary = {
-      demo: 'R1.13 story candidates — three artificial sources, ZERO network/AI',
+      demo: 'R1.14 story candidates + conservative assessment — seven artificial sources, ZERO network/AI',
       scopeCaps: {
         probeRowsPerLookup: FINGERPRINT_LOOKUP_ROW_LIMIT,
         maxCandidates: STORY_CANDIDATES_MAX,
         indexNamespace: 'sc1',
+        assessmentNote:
+          'R1.14 adds ZERO statements: the assessment rides inside the existing document_json',
       },
       items: summaryItems,
       totals: {
@@ -312,20 +388,68 @@ describe('story candidates demo — offline three-source runner', () => {
         'Free ingestion/full-poll remain NOT_READY.',
     };
     // eslint-disable-next-line no-console
-    console.log('\n=== R1.13 STORY-CANDIDATES DEMO (safe summary) ===');
+    console.log('\n=== R1.14 STORY-CANDIDATES + ASSESSMENT DEMO (safe summary) ===');
     // eslint-disable-next-line no-console
     console.log(JSON.stringify(summary, null, 2));
 
-    // The demo's OWN assertions: the related pair discovered, the solo item
-    // honestly empty, and NOTHING merged anywhere.
+    // The demo's OWN assertions: each pair observed EXACTLY the signals it
+    // shares, the solo items honestly empty, and NOTHING merged anywhere.
     const a1 = summaryItems[0]!;
     const a2 = summaryItems[1]!;
-    const solo = summaryItems[2]!;
+    const p1 = summaryItems[2]!;
+    const p2 = summaryItems[3]!;
+    const t1 = summaryItems[4]!;
+    const t2 = summaryItems[5]!;
+    const solo = summaryItems[6]!;
     expect(a1['observation']).toBe('no_candidates_observed');
     expect(a2['observation']).toBe('candidates_observed');
     expect(a2['candidates']).toEqual([{ storyId: a1['storyId'], matchedSignals: ['url'] }]);
+    expect(a2['assessment']).toMatchObject({
+      entries: [
+        {
+          storyId: a1['storyId'],
+          verdict: 'shared_url_observed',
+          verdictReasons: ['url_fingerprint_match'],
+        },
+      ],
+      unrelatednessConcluded: false,
+    });
+    expect(p1['observation']).toBe('no_candidates_observed');
+    expect(p2['observation']).toBe('candidates_observed');
+    expect(p2['candidates']).toEqual([
+      { storyId: p1['storyId'], matchedSignals: ['content_hash', 'title_key'] },
+    ]);
+    expect(p2['assessment']).toMatchObject({
+      entries: [
+        {
+          storyId: p1['storyId'],
+          verdict: 'full_content_equality_observed',
+          verdictReasons: ['content_hash_fingerprint_match', 'title_key_fingerprint_match'],
+        },
+      ],
+      unrelatednessConcluded: false,
+      unassessed: ['same_event', 'truth', 'source_independence'],
+    });
+    expect(t1['observation']).toBe('no_candidates_observed');
+    expect(t2['observation']).toBe('candidates_observed');
+    expect(t2['candidates']).toEqual([{ storyId: t1['storyId'], matchedSignals: ['title_key'] }]);
+    expect(t2['assessment']).toMatchObject({
+      entries: [
+        {
+          storyId: t1['storyId'],
+          verdict: 'shared_title_observed',
+          verdictReasons: ['title_key_fingerprint_match'],
+        },
+      ],
+      unrelatednessConcluded: false,
+    });
     expect(solo['observation']).toBe('no_candidates_observed');
-    expect(summary.noMergeProof.stories).toBe(3);
+    expect(solo['assessment']).toMatchObject({
+      observation: 'no_candidates_observed',
+      entries: [],
+      unrelatednessConcluded: false,
+    });
+    expect(summary.noMergeProof.stories).toBe(7);
     expect(summary.noMergeProof.allClaimConfidencesZero).toBe(true);
   });
 });

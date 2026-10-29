@@ -25,6 +25,7 @@ import type { AiSemanticDraft } from '../ai/types';
 import { EDITORIAL_DRAFT_VERSION } from './identity';
 import type { EvidenceGuardReport } from './evidence-guard';
 import type { CandidateDiscoveryReport } from './candidate-discovery';
+import type { CandidateAssessmentReport } from './candidate-assessment';
 
 /** Fixed draft layout id for this phase's renderer contract. */
 export const EDITORIAL_DRAFT_LAYOUT = 'news_v1' as const;
@@ -164,6 +165,16 @@ export const EDITORIAL_DRAFT_WARNINGS = [
  * `schemaVersion` stays 1) of the SAME `document_json`. It is a proposal
  * of possibly-related previously-indexed stories at the lookup moment —
  * candidate discovery ONLY, never a merge, never truth verification.
+ *
+ * R1.14 (Phase 5C-2): the caller MUST also pass the candidate-ASSESSMENT
+ * report — the pure, deterministic, conservative classification derived
+ * from THIS draft's OWN discovery report (possibly with zero entries and
+ * `unrelatednessConcluded: false`) — embedded as one more ADDITIVE
+ * versioned field (`assessmentVersion` inside; `schemaVersion` stays 1)
+ * of the SAME `document_json` and the SAME fenced atomic commit. It says
+ * what was actually OBSERVED about the candidates' relation — never a
+ * same-event proof, never truth, never source independence, never a
+ * merge.
  */
 export function buildDraftDocument(input: {
   readonly sourceItemId: string;
@@ -174,6 +185,9 @@ export function buildDraftDocument(input: {
   /** R1.13: the versioned candidate-discovery report (required — every
    * new draft carries one, even an honest "nothing observed"). */
   readonly candidateDiscovery: CandidateDiscoveryReport;
+  /** R1.14: the versioned candidate-ASSESSMENT derived from THIS draft's
+   * discovery report (required — every new draft carries one). */
+  readonly candidateAssessment: CandidateAssessmentReport;
 }): {
   readonly layout: typeof EDITORIAL_DRAFT_LAYOUT;
   readonly title: string;
@@ -196,6 +210,7 @@ export function buildDraftDocument(input: {
     }[];
     readonly evidenceGuard: EvidenceGuardReport;
     readonly candidateDiscovery: CandidateDiscoveryReport;
+    readonly candidateAssessment: CandidateAssessmentReport;
   };
   readonly facts: readonly {
     readonly text: string;
@@ -232,6 +247,7 @@ export function buildDraftDocument(input: {
       modelClaims,
       evidenceGuard: input.evidenceGuard,
       candidateDiscovery: input.candidateDiscovery,
+      candidateAssessment: input.candidateAssessment,
     },
     facts: modelClaims.map((claim) => ({
       text: claim.text,
