@@ -21,11 +21,15 @@ ADAPTER FOUNDATION is implemented on the review branch, UNDER INDEPENDENT
 REVIEW (draft PR #11), and ships OFF everywhere with zero live inference —
 see the Phase 6 section. **Phase 5 is PARTIAL in a bounded way (Phase 5A
 ACCEPTED offline — R1.12 ruling; Phase 5B Evidence Guard v1 — R1.12,
-ADR-0042 addendum — implemented, UNDER INDEPENDENT REVIEW)**: the FIRST
+ADR-0042 addendum — implemented, UNDER INDEPENDENT REVIEW; Phase 5C-1
+durable fingerprints + candidate discovery — R1.13, ADR-0043 —
+implemented, UNDER INDEPENDENT REVIEW)**: the FIRST
 integrated local source→draft vertical path (`editorial.prepare_draft`)
 ships OFF everywhere behind its own fail-closed `EDITORIAL_ENABLED` gate
-with zero live inference, and Phase 5B adds the limited Evidence Guard
-report on the same path — see the Phase 5 section. Everything else is
+with zero live inference, Phase 5B adds the limited Evidence Guard
+report on the same path, and Phase 5C-1 adds durable multi-owner story
+fingerprints with a bounded, honest candidate-discovery report — NO
+merge, NO truth verification — see the Phase 5 section. Everything else is
 pending and intentionally not
 started. Provisioned/deployed, implemented, reviewed, and activated are
 DISTINCT statuses; they are never conflated in this document.
@@ -368,7 +372,7 @@ decision.
       normalization/security suites. Measured final-tree totals in the
       Phase 4 handoff.
 
-## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1 implemented, UNDER INDEPENDENT REVIEW, OFF)
+## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1 and Phase 5C-1 fingerprints/candidate-discovery implemented, UNDER INDEPENDENT REVIEW, OFF)
 
 - [x] **Phase 5A (R1.11, ADR-0042): the FIRST integrated local source→draft
       path — ACCEPTED OFFLINE by independent review (R1.12 round ruling; the
@@ -402,17 +406,48 @@ decision.
       `unresolved_requires_further_verification` (NEVER false); invalid
       references/snapshot identities are distinct failures. The versioned
       report (`guardVersion: 1`, snapshot identity, sorted stable
-      reasonCodes, fixed limitations, `unassessedFields:
-[headlineFa, summaryFa]`) rides INSIDE `drafts.document_json` by the
+      reasonCodes, fixed limitations, `unassessedFields: [headlineFa, summaryFa]`) rides INSIDE `drafts.document_json` by the
       SAME fenced atomic commit — ZERO new SQL statements, schema stays 3,
       no migration. Replay stays free (no provider call, no charge,
       byte-identical document); pre-5B drafts read honestly as `absent`
       (no backfill); `ready` still means only "a draft is stored" — NO path
       to validated/auto_approved/published was added. All gates stay OFF;
       free ingestion/full-poll stays NOT_READY.
-- [ ] Fingerprints, entity aliases, deterministic matching + thresholds.
-      (Explicitly OUT of Phase 5A: similar/identical titles are never
-      merged; one snapshot = one story.)
+- [x] **Phase 5C-1 (R1.13, ADR-0043): durable story fingerprints + LIMITED
+      candidate discovery — explicitly NOT a merge** — pure, versioned,
+      collision-safe fingerprints (≤3 signals per stored item: the stored
+      `canonical_url` VERBATIM; a `content_hash` digest of the FULL
+      title+body composition that is INDEPENDENT of sourceItemId/sourceId;
+      a weak `title_key` under the ONE limited normalization NFC +
+      whitespace collapse + trim — never case folding, never Persian–Latin
+      digit, negation, or unit equivalence). Index rows are story-scoped
+      (`sc1:<64-hex digest>:<storyId>` on the EXISTING
+      `story_fingerprints(kind,value)` PK — NO new DDL, schema stays 3):
+      MANY stories can share one digest while every (story, signal) stays
+      one row, and no write ever replaces another owner (plain fenced
+      INSERT..SELECT with a NOT EXISTS own-row guard — never INSERT OR
+      REPLACE). The `editorial.prepare_draft` handler performs AT MOST 3
+      parameterized prefix-range lookups (≤9-row probe each) AFTER
+      validation/reuse and BEFORE any provider work; the outcome is a
+      versioned `candidateDiscovery` report (typed reader with REAL v1
+      invariant validation — `absent`/`unsupported_version`/`malformed`
+      stay distinct) riding INSIDE `document_json` next to `evidenceGuard`
+      by the SAME fenced atomic batch (≤3 extra INSERT statements, same
+      fence AND snapshot predicates — a lost fence or changed snapshot
+      writes NO draft AND NO fingerprint). Honest boundaries: candidates
+      are a PROPOSAL at the lookup moment — equal URL/text/title NEVER
+      proves one event or independent sources; nothing merges, no trust/
+      confidence raise, no duplicate marking; overflow is recorded (9-row
+      probe, ≤8 candidates reported with an explicit truncation flag);
+      nothing found reads `no_candidates_observed` (never "unique story");
+      only `sc1`-indexed stories are covered (NO historical backfill);
+      concurrent commits may not see each other (exactly-once discovery
+      NOT claimed); a lookup DB error maps to the engine's typed bounded
+      retry with ZERO provider calls. Replay stays free; all gates stay
+      OFF; free ingestion/full-poll stays NOT_READY.
+- [ ] Story MERGING, entity aliases, semantic/deterministic matching with
+      thresholds (Phase 5C-1 provides ONLY fingerprints + candidate
+      discovery — merging remains explicitly future).
 - [ ] AI adjudication path (compact claim sets) and decision persistence.
 
 _(The round 1.10.6 / 1.10.6.1 AI ADAPTER foundation does NOT complete any
