@@ -19,12 +19,14 @@ version 1.4.0, schema stays 3, ADR-0038/0039) with the new ingestion gate
 shipped disabled everywhere. **Phase 6 is PARTIAL**: the Workers-AI-first
 ADAPTER FOUNDATION is implemented on the review branch, UNDER INDEPENDENT
 REVIEW (draft PR #11), and ships OFF everywhere with zero live inference —
-see the Phase 6 section. **Phase 5 is PARTIAL in a bounded way (Phase 5A,
-R1.11, ADR-0042)**: the FIRST integrated local source→draft vertical path
-(`editorial.prepare_draft`) is implemented on the same review branch,
-UNDER INDEPENDENT REVIEW, and ships OFF everywhere behind its own
-fail-closed `EDITORIAL_ENABLED` gate with zero live inference — see the
-Phase 5 section. Everything else is pending and intentionally not
+see the Phase 6 section. **Phase 5 is PARTIAL in a bounded way (Phase 5A
+ACCEPTED offline — R1.12 ruling; Phase 5B Evidence Guard v1 — R1.12,
+ADR-0042 addendum — implemented, UNDER INDEPENDENT REVIEW)**: the FIRST
+integrated local source→draft vertical path (`editorial.prepare_draft`)
+ships OFF everywhere behind its own fail-closed `EDITORIAL_ENABLED` gate
+with zero live inference, and Phase 5B adds the limited Evidence Guard
+report on the same path — see the Phase 5 section. Everything else is
+pending and intentionally not
 started. Provisioned/deployed, implemented, reviewed, and activated are
 DISTINCT statuses; they are never conflated in this document.
 
@@ -366,10 +368,13 @@ decision.
       normalization/security suites. Measured final-tree totals in the
       Phase 4 handoff.
 
-## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A source→draft path implemented, UNDER INDEPENDENT REVIEW, OFF)
+## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1 implemented, UNDER INDEPENDENT REVIEW, OFF)
 
 - [x] **Phase 5A (R1.11, ADR-0042): the FIRST integrated local source→draft
-      path** — the `editorial.prepare_draft` durable job type on the
+      path — ACCEPTED OFFLINE by independent review (R1.12 round ruling; the
+      offline acceptance covers the implemented surface: code + tests +
+      docs; it is NOT a deployment/activation approval and the gate stays
+      OFF)** — the `editorial.prepare_draft` durable job type on the
       EXISTING engine with the independent fail-closed `EDITORIAL_ENABLED`
       gate (shipped "false" everywhere; gate off = the ADR-0040 lossless
       policy pause), deterministic versioned identity per item snapshot,
@@ -385,6 +390,26 @@ decision.
       the ten-scenario D1 integration suite, unit contracts, and the
       offline demo runner (`npm run demo:editorial`). NOT deployed, NOT
       activated, zero live inference.
+- [x] **Phase 5B (R1.12, ADR-0042 addendum): Evidence Guard v1 — a LIMITED
+      evidence control, explicitly NOT the full Fact Guard** — a pure,
+      deterministic evaluator (no SQL/network/SDK/model call/clock) judges
+      every model claim stored in a draft against the SAME verified source
+      snapshot and the SAME traceable excerpt that produced it: reference
+      validity, non-empty text, evidence-vs-snapshot identity, and direct
+      textual match. Typed outcomes stay honest: `direct_text_observed` is
+      a text-presence observation (NEVER verified/confirmed);
+      paraphrase/translation/truncation are
+      `unresolved_requires_further_verification` (NEVER false); invalid
+      references/snapshot identities are distinct failures. The versioned
+      report (`guardVersion: 1`, snapshot identity, sorted stable
+      reasonCodes, fixed limitations, `unassessedFields:
+[headlineFa, summaryFa]`) rides INSIDE `drafts.document_json` by the
+      SAME fenced atomic commit — ZERO new SQL statements, schema stays 3,
+      no migration. Replay stays free (no provider call, no charge,
+      byte-identical document); pre-5B drafts read honestly as `absent`
+      (no backfill); `ready` still means only "a draft is stored" — NO path
+      to validated/auto_approved/published was added. All gates stay OFF;
+      free ingestion/full-poll stays NOT_READY.
 - [ ] Fingerprints, entity aliases, deterministic matching + thresholds.
       (Explicitly OUT of Phase 5A: similar/identical titles are never
       merged; one snapshot = one story.)
@@ -428,8 +453,11 @@ foundation, including 1.10.6.1 — is NOT full independent acceptance.
       best-effort and never holds a successful draft hostage. Pinned by
       permanent red-first tests A1–A5/B1–B5/U1–U3.)
 - [ ] Fact guard (evidence-id references alone do NOT prove a generated
-      claim is true) — still FUTURE work. (Phase 5A keeps every
-      model-proposed claim `unverified` inside document_json/facts_json.)
+      claim is true) — still FUTURE work. (Phase 5B's Evidence Guard v1 is
+      a BOUNDED text-presence check over the draft's own claims — direct
+      observation is not verification and unresolved is not false; full
+      semantic Fact Guard remains future.) Phase 5A/5B keep every
+      model-proposed claim `unverified` inside document_json/facts_json.
 - [x] Durable caller wiring (job types, cron/queue, admin surfaces) —
       Phase 5A (R1.11, ADR-0042) added the FIRST durable caller: the
       `editorial.prepare_draft` job type on the existing engine (bounded

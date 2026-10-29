@@ -176,6 +176,64 @@ empty-claims terminal path) and `editorial-contracts.test.ts` (codes,
 composition parity). As of R1.11.1: contracts 32 tests, integration suite
 27 tests, demo unchanged with its traceable claim.
 
+## R1.12 Phase 5B addendum — Evidence Guard v1 (bounded, honest, additive)
+
+Scope ruling (Posidon R1.12): Phase 5A is ACCEPTED (offline). Phase 5B adds
+a LIMITED, REAL Evidence Guard — NOT the full Fact Guard. Phase 5A's
+architecture, gates, and contracts are NOT redesigned.
+
+1. **Pure evaluator (`src/domain/editorial/evidence-guard.ts`).** No SQL,
+   no network, no SDK, no model call, no clock — deterministic and offline
+   like the mapper. Per model claim it checks: reference existence/validity,
+   non-empty text, evidence-vs-snapshot identity, and direct textual match
+   against the SAME traceable excerpt that produced the draft. Typed
+   outcomes: `direct_text_observed` (a text-presence observation ONLY —
+   never verified/confirmed/supported), `unresolved_requires_further_
+verification` (paraphrase/translation/truncation — NEVER false),
+   `invalid_reference_or_snapshot`, `not_evaluated_identity_invalid`.
+   No fuzzy similarity, no multi-word heuristics, no semantic extraction,
+   no NER/translator/inference engine.
+2. **One limited, explicit normalization** (unit-tested): NFC + Unicode
+   whitespace collapse + trim. NO case folding, NO digit conversion
+   (Persian ۰-۹ never equals Latin 0-9), NO Arabic/Persian letter-variant
+   unification, NO punctuation stripping, NO negation handling, NO unit
+   conversion — two different statements can never become equal through it.
+3. **Versioned report stored WITH the draft.** `guardVersion: 1`, snapshot
+   identity, per-claim index (claims[i] ↔ document.modelClaims[i]) and
+   sorted stable reasonCodes, fixed limitation labels
+   (`excerpt_scope_only`, `direct_text_is_not_truth`, `no_semantic_analysis`,
+   `headline_summary_unassessed`), explicit `unassessedFields:
+[headlineFa, summaryFa]`, honest counts. The report rides INSIDE
+   `drafts.document_json` as an additive field (document `schemaVersion`
+   stays 1) written by the SAME fenced atomic commit — **zero new SQL
+   statements, zero new tables, zero migration** (schema stays 3). The
+   fence/snapshot-predicate/atomicity protections carry the report: a lost
+   fence or a changed snapshot writes NO draft and therefore NO report.
+4. **Versioned reader, honest history.** `readEvidenceGuardReport`:
+   `guard_v1` / `absent` (pre-5B drafts — honest absence, NO automatic
+   backfill) / `unsupported_version` / `malformed`. Old or unversioned
+   payloads are NEVER displayed as a current guard result. `ready` still
+   means only "a draft is stored"; the guard adds NO path to
+   validated/auto_approved/published.
+5. **Replay stays free.** The pre-AI stable-result path is untouched; the
+   report is re-derived deterministically but never rewritten, and replay
+   never calls the provider or charges the budget. No new AI call is added
+   for claim judgment; the general AI output schema, provider ladder,
+   quotas, and retry behavior are unchanged; all AI/editorial/ingestion
+   gates stay OFF.
+6. **Not a Fact Guard.** Multi-evidence, aggregation, semantic support,
+   truth determination, and auto-approval remain future phases. A repeated
+   story, model consensus, an evidenceId, or a quote NEVER implies
+   verification.
+
+Proof additions: `tests/unit/evidence-guard.test.ts` (24 tests — the round's
+acceptance cases 1–7 + determinism + reader contracts) and
+`tests/integration/evidence-guard-persistence.test.ts` (7 tests over real
+workerd D1 — acceptance 8 stored-and-reread, 9 snapshot-race/expired-lease
+zero-effect with zero reports, 10 free byte-stable replay, 4b honest
+historical reads). As of R1.12: contracts 33 tests, 5A integration suite 27
+tests (green), demo updated to print the guard section.
+
 ## Proof
 
 - `tests/unit/editorial-contracts.test.ts` — payload strictness, identity
