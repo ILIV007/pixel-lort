@@ -23,13 +23,18 @@ see the Phase 6 section. **Phase 5 is PARTIAL in a bounded way (Phase 5A
 ACCEPTED offline — R1.12 ruling; Phase 5B Evidence Guard v1 — R1.12,
 ADR-0042 addendum — implemented, UNDER INDEPENDENT REVIEW; Phase 5C-1
 durable fingerprints + candidate discovery — R1.13, ADR-0043 —
-implemented, UNDER INDEPENDENT REVIEW)**: the FIRST
+implemented, UNDER INDEPENDENT REVIEW; Phase 5C-2 conservative candidate
+assessment — R1.14, ADR-0043 addendum — implemented, UNDER INDEPENDENT
+REVIEW)**: the FIRST
 integrated local source→draft vertical path (`editorial.prepare_draft`)
 ships OFF everywhere behind its own fail-closed `EDITORIAL_ENABLED` gate
 with zero live inference, Phase 5B adds the limited Evidence Guard
 report on the same path, and Phase 5C-1 adds durable multi-owner story
 fingerprints with a bounded, honest candidate-discovery report — NO
-merge, NO truth verification — see the Phase 5 section. Everything else is
+merge, NO truth verification — and Phase 5C-2 adds the pure, versioned
+candidate-ASSESSMENT derived only from those discovery signals — NO
+merge, NO truth verification, NEVER an unrelatedness conclusion — see
+the Phase 5 section. Everything else is
 pending and intentionally not
 started. Provisioned/deployed, implemented, reviewed, and activated are
 DISTINCT statuses; they are never conflated in this document.
@@ -372,7 +377,7 @@ decision.
       normalization/security suites. Measured final-tree totals in the
       Phase 4 handoff.
 
-## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1 and Phase 5C-1 fingerprints/candidate-discovery implemented, UNDER INDEPENDENT REVIEW, OFF)
+## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery and Phase 5C-2 conservative candidate-assessment implemented, UNDER INDEPENDENT REVIEW, OFF)
 
 - [x] **Phase 5A (R1.11, ADR-0042): the FIRST integrated local source→draft
       path — ACCEPTED OFFLINE by independent review (R1.12 round ruling; the
@@ -445,9 +450,43 @@ decision.
       NOT claimed); a lookup DB error maps to the engine's typed bounded
       retry with ZERO provider calls. Replay stays free; all gates stay
       OFF; free ingestion/full-poll stays NOT_READY.
+- [x] **Phase 5C-2 (R1.14, ADR-0043 addendum): conservative, durable
+      candidate ASSESSMENT — explicitly NOT a merge and NEVER an
+      unrelatedness conclusion** — a PURE, deterministic evaluator derives
+      a versioned `candidateAssessment` report (`assessmentVersion: 1`)
+      from the SAME draft's `candidateDiscovery` signals at the lookup
+      moment: per candidate, exactly what was OBSERVED —
+      `full_content_equality_observed` ONLY when the versioned
+      `content_hash` fingerprint (the FULL title+body composite, NOT the
+      snapshot hash) is really shared; `shared_url_observed` (same stored
+      URL value only); `shared_title_observed` (the WEAK limited
+      normalization; NO fuzzy matching, translation, or digit conversion);
+      `multiple_signals_observed` with ALL real reasons kept and
+      correlated signals NEVER counted as independent confirmations. The
+      report states its basis (discovery signals at the lookup moment,
+      candidate data NOT re-fetched/validated), keeps `unassessed:
+[same_event, truth, source_independence]`, preserves discovery
+      truncation/overflow/coverage limits verbatim, carries
+      `unrelatednessConcluded: false` FIXED — no candidate, invalid
+      report, or missing information never becomes "definitely
+      unrelated" — and adds NO confidence, probability, score, or
+      threshold. It rides INSIDE `document_json` next to
+      `candidateDiscovery` by the SAME fenced atomic commit with ZERO new
+      SQL statements/execution calls (schema stays 3); replay stays free
+      and byte-identical; pre-5C-2 drafts read `absent` (no backfill);
+      `absent`/`unsupported_version`/`malformed` stay distinct; the typed
+      reader validates the REAL v1 invariants INCLUDING cross-validation
+      against the sibling discovery (mirrored candidates 1:1, verdicts
+      re-derived, limits preserved). Acceptance tests (unit + REAL workerd
+      D1: the three observed relations, Persian-vs-Latin digits NOT
+      equated, batch statement-shape proof, snapshot/lease races write
+      nothing, replay byte-stability, historical absent/foreign handling);
+      demo extended to the three required pairs + a solo item. All gates
+      stay OFF; free ingestion/full-poll stays NOT_READY.
 - [ ] Story MERGING, entity aliases, semantic/deterministic matching with
-      thresholds (Phase 5C-1 provides ONLY fingerprints + candidate
-      discovery — merging remains explicitly future).
+      thresholds (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate
+      discovery + conservative observation assessment — merging remains
+      explicitly future).
 - [ ] AI adjudication path (compact claim sets) and decision persistence.
 
 _(The round 1.10.6 / 1.10.6.1 AI ADAPTER foundation does NOT complete any

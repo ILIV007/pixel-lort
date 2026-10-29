@@ -1,11 +1,11 @@
 # ADR-0043: Phase 5C-1 — durable story fingerprints + limited candidate discovery (no merge)
 
-- **Status:** Implemented on the review branch (R1.13; under independent Posidon review — NOT deployment, activation, or live-inference approval)
-- **Phase:** 5C-1 (the bounded first slice of Phase 5C story matching)
+- **Status:** Implemented on the review branch (R1.13; under independent Posidon review — NOT deployment, activation, or live-inference approval). **R1.14 (Phase 5C-2) addendum appended — the conservative candidate ASSESSMENT, same honesty boundary.**
+- **Phase:** 5C-1 (the bounded first slice of Phase 5C story matching); **5C-2 addendum: R1.14**
 - **Date:** 2026-10-29
-- **App at delivery:** 1.8.0 candidate; **schema stays 3** (migrations 0001–0004 untouched — ZERO DDL)
-- **Instruction:** Posidon R1.13 (`NEXT_GLM_R1.13_Story-Candidates.md`)
-- **Base:** `b29fcf00efa25fa08b9346327289904dbba5c6fb` (R1.12.1 delivery HEAD)
+- **App at delivery:** 1.8.0 candidate (5C-1); **1.9.0 candidate (5C-2 addendum)**; **schema stays 3** (migrations 0001–0004 untouched — ZERO DDL)
+- **Instruction:** Posidon R1.13 (`NEXT_GLM_R1.13_Story-Candidates.md`); **R1.14 instruction (Phase 5C-2, inline)**
+- **Base:** `b29fcf00efa25fa08b9346327289904dbba5c6fb` (R1.12.1 delivery HEAD); **5C-2 base: `10045296423097a1af8f85d0d77fd70c90cce98e` (R1.13.1 delivery HEAD)**
 
 ## Context
 
@@ -115,3 +115,110 @@ discovery is NOT claimed (`lookup_moment_visibility`).
   (local proxy only, NOT Cloudflare billing).
 - All gates stay OFF everywhere; `ready` still means only "a draft is
   stored"; free ingestion/full-poll stay NOT_READY.
+
+## Addendum — Phase 5C-2 (R1.14): the conservative, durable candidate ASSESSMENT (still no merge)
+
+### Context
+
+Discovery says WHICH candidates were found and WHY (which signals matched).
+It does not yet say, in one honest place, WHAT WAS ACTUALLY OBSERVED about
+each candidate's relation. R1.14 orders exactly that — a decisive,
+conservative, traceable classification stored with the draft — WITHOUT any
+new query surface and WITHOUT semantic adjudication (still NOT entity
+aliasing, NOT NER, NOT embedding, NOT the merge layer, NOT truth
+verification).
+
+### Decision
+
+#### 1. A PURE derivation of the discovery report — zero new SQL
+
+`src/domain/editorial/candidate-assessment.ts` builds
+`candidateAssessment` (`assessmentVersion: 1`) from the SAME draft's
+`candidateDiscovery` report ALONE: no lookups, no re-fetch, no
+re-validation of candidate data, no clock, no randomness, no provider
+involvement. It is built before the provider call and persisted INSIDE
+`drafts.document_json` next to `candidateDiscovery` by the SAME fenced
+atomic commit (fence + snapshot predicates untouched — a lost fence or a
+changed snapshot writes NO draft AND NO assessment). Added SQL cost: ZERO
+statements, ZERO execution calls. The document `schemaVersion` stays 1.
+
+#### 2. The four verdicts — and what they never claim
+
+`assessCandidateSignals` classifies the deduplicated matched-signal kinds
+with a fixed, tested precedence:
+
+| observed signals             | verdict                          | never claims                                    |
+| ---------------------------- | -------------------------------- | ----------------------------------------------- |
+| includes `content_hash`      | `full_content_equality_observed` | truth, one event, source independence           |
+| ≥2 signals (no content hash) | `multiple_signals_observed`      | independent confirmations (all reasons kept)    |
+| only `url`                   | `shared_url_observed`            | one event, one content version                  |
+| only `title_key`             | `shared_title_observed`          | more than the WEAK limited normalization allows |
+
+The `content_hash` signal is the versioned FULL title+body composite
+digest — deliberately NOT the `source_items.content_hash` snapshot
+identity. Identical content co-occurs with the title signal by
+construction; the verdict names the strongest observed relation while
+`verdictReasons` preserves EVERY real reason in signal-priority order.
+NO confidence, probability, score, or threshold exists anywhere.
+
+#### 3. The report's explicit honesty statements
+
+`basis: 'candidate_discovery_v1_signals_at_lookup_moment'`;
+`unrelatednessConcluded: false` (FIXED — no candidate, an invalid or
+foreign report, or missing information NEVER becomes "definitely
+unrelated"); `unassessed: ['same_event', 'truth', 'source_independence']`;
+`limitations` fixed seven labels (`candidate_only_not_merge`,
+`not_truth_verification`, `not_same_event_proof`,
+`not_source_independence_proof`,
+`signals_not_independent_confirmations`,
+`discovery_data_not_refetched_or_validated`, `title_signal_is_weak`);
+and `discoveryLimits` preserving the sibling's
+truncation/overflow/coverage verbatim. Empty discovery reads
+`no_candidates_observed` with zero entries — never a negative proof.
+
+#### 4. The typed reader cross-validates the sibling (no contradictory copies)
+
+The assessment carries NO copy of the candidate list or the signals — its
+entries are a minimal projection (`storyId`, `verdict`,
+`verdictReasons`). `readCandidateAssessmentReport` validates the REAL v1
+invariants: a VALID `candidate_discovery_v1` sibling must exist in the
+same document (an assessment without its basis, or next to a
+foreign/malformed sibling, is `malformed`); story/snapshot/observation
+must mirror the sibling exactly; entries must mirror the sibling's
+candidates 1:1 in the same ascending order; each verdict is RE-DERIVED
+from the sibling's matched signals and each `verdictReasons` sequence
+must equal the sibling's reason codes; the single count, the fixed
+limitation/unassessed sets, and the preserved limits are all exact.
+`absent` (pre-5C-2 drafts — no backfill), `unsupported_version`, and
+`malformed` stay distinct; none of them ever means "unrelated". The
+reader is a shape/invariant validator — NOT authenticity, NOT semantic
+support.
+
+#### 5. Tests and demo
+
+Acceptance tests only (no fabricated historical red→green): 36 unit tests
+(verdict derivation incl. the identical-content co-occurrence rule,
+byte-identical determinism, round-trips of every builder shape, a
+25-case mutation table incl. empty-sibling cases) and 9 REAL workerd D1
+integration tests (the three observed relations on the real pipeline;
+Persian-vs-Latin digits NOT equated — no new equivalence; the commit
+batch statement-shape proof of zero new SQL; snapshot race and expired
+lease writing nothing; replay byte-stability; historical absent/foreign
+handling). `npm run demo:story-candidates` now runs SEVEN artificial
+items: the three required pairs (identical content →
+`full_content_equality_observed` with both reasons; only shared URL →
+`shared_url_observed`; only shared title → the weak
+`shared_title_observed`) plus a solo item — printing story/candidate ids,
+observed signals, verdicts, limits, and the no-merge proof (7 stories,
+confidence 0 everywhere), zero network, zero live inference, zero
+Telegram.
+
+### Consequences
+
+- A draft now carries not only WHO it might be about (candidates) and WHY
+  (signals) but WHAT WAS OBSERVED about the relation — with the limits of
+  that observation stated in the same report.
+- The future merge/adjudication layer receives a conservative,
+  versioned, cross-validated observation record instead of raw signals —
+  the boundary of THIS round: no merge, no story union, no evidence move,
+  no confidence raise, no gate change.
