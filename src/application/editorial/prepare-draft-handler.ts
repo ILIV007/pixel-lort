@@ -88,6 +88,7 @@ import {
   buildTraceableExcerpt,
   EDITORIAL_CREATED_BY,
 } from '../../domain/editorial/mapper';
+import { buildEvidenceGuardReport } from '../../domain/editorial/evidence-guard';
 import type { Logger } from '../../observability/logger';
 
 /** Deferred AI reasons that map onto the engine's recoverable retry path. */
@@ -338,6 +339,32 @@ export function createEditorialPrepareDraftHandler(
     // ---- 7b. Commit path: conservative story + source_report claim +
     //          mentions evidence + real ai_runs row + READY draft +
     //          source_item→processed — ONE fenced atomic batch.
+    //
+    //          R1.12 (Phase 5B): BEFORE building the document, the PURE
+    //          Evidence Guard v1 evaluator judges EVERY model claim of the
+    //          validated draft against the SAME verified snapshot identity
+    //          and the SAME traceable excerpt that produced it. The report
+    //          is deterministic, versioned, honest (direct-text observation
+    //          is never "verified"; paraphrase/translation stay unresolved;
+    //          headline/summary are recorded unassessed) and travels INSIDE
+    //          document_json of the SAME fenced commit — zero new SQL
+    //          statements, zero extra rounds, and it can never outlive the
+    //          draft it describes (a lost fence/snapshot writes nothing).
+    const evidenceGuard = buildEvidenceGuardReport({
+      snapshot: {
+        sourceItemId: item.id,
+        contentHash: item.content_hash,
+      },
+      evidence: {
+        evidenceId: snippet.id,
+        excerptText: excerpt.text,
+        excerptTruncated: excerpt.truncated,
+      },
+      draftClaims: outcome.draft.claims,
+      draftHeadlineFa: outcome.draft.headlineFa,
+      draftSummaryFa: outcome.draft.summaryFa,
+      draftSourceItemId: item.id,
+    });
     const storyId = await storyIdForSnapshot(item.id, item.content_hash);
     const claimId = await sourceReportClaimId(storyId, item.id);
     const evidenceId = await mentionsEvidenceId(claimId, item.id);
@@ -353,6 +380,7 @@ export function createEditorialPrepareDraftHandler(
       sourceName: source.name,
       excerpt,
       semanticDraft: outcome.draft,
+      evidenceGuard,
     });
     const now = nowMs();
 

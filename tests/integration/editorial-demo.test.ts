@@ -19,6 +19,7 @@ import { enqueueEditorialPrepareDraft } from '../../src/application/editorial/en
 import { createEditorialPrepareDraftHandler } from '../../src/application/editorial/prepare-draft-handler';
 import { createAiDraftService } from '../../src/application/ai/draft-service';
 import type { AiCallOutcome, AiProviderPort } from '../../src/domain/ai/types';
+import { readEvidenceGuardReport } from '../../src/domain/editorial/evidence-guard';
 
 /**
  * Phase 5A OFFLINE demo/test runner (ADR-0042 §7): the SAME real path as
@@ -33,6 +34,13 @@ import type { AiCallOutcome, AiProviderPort } from '../../src/domain/ai/types';
  *   artificial headlineFa/summaryFa, provider attempts — plus the LOCAL D1
  *   statement/execution-API counts of one news path (a LOCAL PROXY metric
  *   per ADR-0042 §8 — NOT an official Cloudflare billing figure).
+ *
+ * R1.12 (Phase 5B): the summary ALSO prints the honest Evidence Guard v1
+ * result that traveled inside the same draft — per-claim outcomes
+ * (direct_text_observed / unresolved_requires_further_verification), the
+ * fixed limitations, and the explicitly unassessed fields. The guard is a
+ * deterministic text-presence check ONLY: direct observation is never
+ * "verified", unresolved is never "false".
  *
  * This runner creates NO public endpoint, NO send channel, and NO live
  * inference. Run it standalone with: `npm run demo:editorial`.
@@ -119,7 +127,14 @@ describe('editorial demo — offline source→draft runner', () => {
               'استودیوی نمونه از انتشار به‌روزرسانی بزرگ بازی نمونه خبر داد؛ این به‌روزرسانی بخش داستانی تازه و بهبود عملکرد را به همراه دارد.',
             claims: [
               {
-                text: 'به‌روزرسانی بزرگ بازی نمونه منتشر شده است.',
+                // ONE claim quotes the evidence VERBATIM → the guard's
+                // direct-text observation (an observation, NOT verification).
+                text: 'به‌روزرسانی بزرگ بازی نمونه با بخش داستانی تازه و بهبود عملکرد در دسترس قرار گرفت.',
+                evidenceIds: [ITEM_ID],
+              },
+              {
+                // ONE PARAPHRASE → honestly unresolved, never "false".
+                text: 'نسخهٔ تازهٔ بازی نمونه منتشر شد و کیفیت آن بهتر شده است.',
                 evidenceIds: [ITEM_ID],
               },
             ],
@@ -212,6 +227,10 @@ describe('editorial demo — offline source→draft runner', () => {
       document_json: string;
     }>({ sql: 'SELECT id, status, title, document_json FROM drafts' });
     const document = JSON.parse(draftRow!.document_json) as { summaryFa: string };
+    // R1.12: the typed guard reader — the SAME report the draft carries.
+    const guardRead = readEvidenceGuardReport(JSON.parse(draftRow!.document_json));
+    expect(guardRead.kind).toBe('guard_v1');
+    const guard = guardRead.kind === 'guard_v1' ? guardRead.report : null;
     const budgetRow = await rawExecutor.first<{ requests: number }>({
       sql: "SELECT requests FROM budgets WHERE scope = 'ai'",
     });
@@ -227,6 +246,19 @@ describe('editorial demo — offline source→draft runner', () => {
       draftStatus: draftRow!.status,
       headlineFa: draftRow!.title,
       summaryFa: document.summaryFa,
+      evidenceGuard: {
+        guardVersion: guard!.guardVersion,
+        evaluationStatus: guard!.evaluationStatus,
+        claims: guard!.claims.map((claim) => ({
+          claimIndex: claim.claimIndex,
+          status: claim.status,
+          reasonCodes: claim.reasonCodes,
+        })),
+        counts: guard!.counts,
+        limitations: guard!.limitations,
+        unassessedFields: guard!.unassessedFields,
+        excerptTruncated: guard!.evidence.excerptTruncated,
+      },
       providerAttempts,
       chargedAiAttempts: budgetRow?.requests ?? 0,
       localD1Statements: stats.statements,
@@ -242,5 +274,19 @@ describe('editorial demo — offline source→draft runner', () => {
     expect(summary.draftStatus).toBe('ready');
     expect(summary.providerAttempts).toBe(1);
     expect(summary.chargedAiAttempts).toBe(1);
+    // R1.12: the guard rode inside the SAME draft; the verbatim claim is
+    // an observation, the paraphrase stays unresolved — never verified.
+    expect(summary.evidenceGuard.claims.map((claim) => claim.status)).toEqual([
+      'direct_text_observed',
+      'unresolved_requires_further_verification',
+    ]);
+    expect(summary.evidenceGuard.counts).toEqual({
+      total: 2,
+      directTextObserved: 1,
+      unresolvedRequiresFurtherVerification: 1,
+      invalidReferenceOrSnapshot: 0,
+      notEvaluatedIdentityInvalid: 0,
+    });
+    expect(summary.evidenceGuard.unassessedFields).toEqual(['headlineFa', 'summaryFa']);
   });
 });

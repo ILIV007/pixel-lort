@@ -30,6 +30,10 @@ import {
   EDITORIAL_AI_SNIPPET_MAX_CHARS,
 } from '../../src/domain/editorial/mapper';
 import {
+  buildEvidenceGuardReport,
+  type EvidenceGuardReport,
+} from '../../src/domain/editorial/evidence-guard';
+import {
   classifyAiOutcome,
   observeAiRun,
 } from '../../src/application/editorial/prepare-draft-handler';
@@ -38,6 +42,20 @@ import type { AiOutcome } from '../../src/domain/ai/types';
 const ITEM_ID = 'item-0001';
 const HASH = 'a'.repeat(64);
 const HASH2 = 'b'.repeat(64);
+
+/** A deterministic guard report for the composition tests (R1.12, 5B). */
+const GUARD_REPORT: EvidenceGuardReport = buildEvidenceGuardReport({
+  snapshot: { sourceItemId: ITEM_ID, contentHash: HASH },
+  evidence: {
+    evidenceId: ITEM_ID,
+    excerptText: 'متن شاهد آزمایشی',
+    excerptTruncated: false,
+  },
+  draftClaims: [{ text: 'ادعای مدل', evidenceIds: [ITEM_ID] }],
+  draftHeadlineFa: 'تیتر مدل',
+  draftSummaryFa: 'خلاصه مدل',
+  draftSourceItemId: ITEM_ID,
+});
 
 describe('editorial payload contract (ADR-0042 §2)', () => {
   it('registers editorial.prepare_draft as a known job type', () => {
@@ -225,6 +243,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
         summaryFa: 'خلاصه مدل',
         claims: [{ text: 'ادعای مدل', evidenceIds: [ITEM_ID] }],
       },
+      evidenceGuard: GUARD_REPORT,
     });
     expect(document.title).toBe('تیتر مدل');
     expect(document.document.schemaVersion).toBe(1);
@@ -244,6 +263,33 @@ describe('conservative mapping (ADR-0042 §2)', () => {
     expect(document.warnings).toContain('model_output_unverified');
     expect(document.warnings).toContain('single_source_report');
     expect(document.warnings).toContain('fact_guard_pending');
+  });
+
+  it('embeds the versioned Evidence Guard report additively (R1.12, 5B)', () => {
+    const document = buildDraftDocument({
+      sourceItemId: ITEM_ID,
+      sourceName: 'منبع رسمی',
+      excerpt,
+      semanticDraft: {
+        headlineFa: 'تیتر مدل',
+        summaryFa: 'خلاصه مدل',
+        claims: [{ text: 'ادعای مدل', evidenceIds: [ITEM_ID] }],
+      },
+      evidenceGuard: GUARD_REPORT,
+    });
+    // The report rides INSIDE document_json, byte-for-byte the one built
+    // for THIS draft; schemaVersion stays 1 (additive contract extension).
+    expect(document.document.evidenceGuard).toBe(GUARD_REPORT);
+    expect(document.document.schemaVersion).toBe(1);
+    expect(document.document.evidenceGuard.guardVersion).toBe(1);
+    expect(document.document.evidenceGuard.snapshot).toEqual({
+      sourceItemId: ITEM_ID,
+      contentHash: HASH,
+    });
+    // Report/claim index correspondence with the stored document.
+    expect(document.document.modelClaims).toHaveLength(
+      document.document.evidenceGuard.claims.length,
+    );
   });
 
   it('flags oversized AI snippets via the byte-level handler check path', () => {

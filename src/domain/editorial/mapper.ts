@@ -23,6 +23,7 @@
 
 import type { AiSemanticDraft } from '../ai/types';
 import { EDITORIAL_DRAFT_VERSION } from './identity';
+import type { EvidenceGuardReport } from './evidence-guard';
 
 /** Fixed draft layout id for this phase's renderer contract. */
 export const EDITORIAL_DRAFT_LAYOUT = 'news_v1' as const;
@@ -147,12 +148,21 @@ export const EDITORIAL_DRAFT_WARNINGS = [
  * Build the draft persistence shape from the validated AI output and the
  * traceable excerpt. Model claims are kept with `status:'unverified'` and
  * their evidence references — NEVER promoted into durable claims.
+ *
+ * R1.12 (Phase 5B): the caller MUST pass the Evidence Guard v1 report
+ * computed by the pure evaluator for THIS draft — it is embedded as an
+ * ADDITIVE versioned field of `document_json` (guardVersion inside;
+ * `schemaVersion` stays 1) and stored by the SAME fenced atomic commit.
+ * The report's `claims[i]` corresponds to `document.modelClaims[i]`
+ * (and `facts[i]`) by index — the document holds the texts, the report
+ * holds the honest per-claim outcomes.
  */
 export function buildDraftDocument(input: {
   readonly sourceItemId: string;
   readonly sourceName: string;
   readonly excerpt: TraceableExcerpt;
   readonly semanticDraft: AiSemanticDraft;
+  readonly evidenceGuard: EvidenceGuardReport;
 }): {
   readonly layout: typeof EDITORIAL_DRAFT_LAYOUT;
   readonly title: string;
@@ -173,6 +183,7 @@ export function buildDraftDocument(input: {
       readonly evidenceIds: readonly string[];
       readonly status: 'unverified';
     }[];
+    readonly evidenceGuard: EvidenceGuardReport;
   };
   readonly facts: readonly {
     readonly text: string;
@@ -207,6 +218,7 @@ export function buildDraftDocument(input: {
         truncated: input.excerpt.truncated,
       },
       modelClaims,
+      evidenceGuard: input.evidenceGuard,
     },
     facts: modelClaims.map((claim) => ({
       text: claim.text,
