@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
 import { applyMigrations } from '../helpers/migrations';
-import { createDbExecutor, type DbExecutor } from '../../src/adapters/db/db-executor';
+import {
+  createDbExecutor,
+  type DbExecutor,
+  type DbStatement,
+} from '../../src/adapters/db/db-executor';
 import { fixedClock } from '../../src/shared/time/clock';
 import { createLogger } from '../../src/observability/logger';
 import { createJobsEngine, type JobsEngine } from '../../src/application/jobs/engine';
@@ -27,6 +31,7 @@ import {
 import {
   buildCandidateDiscoveryReport,
   readCandidateDiscoveryReport,
+  type CandidateDiscoveryReport,
 } from '../../src/domain/editorial/candidate-discovery';
 import { storyIdForSnapshot, storyKeyForSnapshot } from '../../src/domain/editorial/identity';
 
@@ -89,6 +94,13 @@ function createHarness(options?: {
   editorialGateOn?: boolean;
   mutateBeforeEditorialCommit?: (raw: DbExecutor) => Promise<void>;
   failBatchesMatching?: (statements: readonly { sql: string }[]) => boolean;
+  /** R1.13.1: capture the REAL fingerprint lookup statements the shipped
+   * handler sends, so tests can EXPLAIN the exact SQL with the exact binds. */
+  captureLookupStatements?: DbStatement[];
+  /** R1.13.1: work INSIDE the provider-call window — after the caller's
+   * lookup and BEFORE the caller's commit (the honest interleaving point
+   * of the pipeline). */
+  onProviderCall?: (evidenceId: string) => Promise<void>;
 }): Harness {
   const clock = fixedClock(NOW);
   const logger = createLogger({ level: 'error', clock });
@@ -101,6 +113,12 @@ function createHarness(options?: {
 
   const executor = wrapExecutor(rawExecutor, {
     onQuery: (statement) => {
+      if (
+        options?.captureLookupStatements !== undefined &&
+        statement.sql.includes('FROM story_fingerprints')
+      ) {
+        options.captureLookupStatements.push(statement);
+      }
       if (failLookups(statement.sql)) {
         throw new Error('injected_candidate_lookup_failure');
       }
@@ -125,6 +143,9 @@ function createHarness(options?: {
       const userContent = input.messages.find((message) => message.role === 'user')?.content;
       const evidenceId =
         /شناسه: ([^\n]+)\n<<<SHAHED_SHOROO>>/.exec(userContent ?? '')?.[1] ?? 'missing-id';
+      if (options?.onProviderCall !== undefined) {
+        await options.onProviderCall(evidenceId);
+      }
       const outcome: AiCallOutcome = {
         kind: 'ok',
         rawText: JSON.stringify({
@@ -554,6 +575,270 @@ describe('R1.13 — bounded, honest candidate lookup at scale', () => {
     expect(read.report.counts.candidatesReported).toBe(8);
     expect(read.report.candidatesTruncated).toBe(true);
     expect(read.report.candidates).toHaveLength(8);
+  });
+});
+
+describe('R1.13.1 — deterministic bounded selection under overflow (Posidon finding)', () => {
+  const SHARED_TITLE_R131 = 'عنوان مشترک برای قطعیت انتخاب در سرریز';
+  // Ascending story ids — the value suffix makes index-value order equal
+  // to this order, so the FIRST 9 values and the LAST 9 are different sets.
+  const ASCENDING = Array.from(
+    { length: 12 },
+    (_, index) => `edst_r131_${String(index).padStart(2, '0')}`,
+  );
+
+  /** Seed N stories owning ONE shared title_key digest, in the given order. */
+  async function seedTitleOwners(executor: DbExecutor, storyIds: readonly string[]): Promise<void> {
+    const plans = await buildStoryFingerprints({
+      storyId: 'digest-probe',
+      canonicalUrl: null,
+      fullEvidenceText: SHARED_TITLE_R131,
+      title: SHARED_TITLE_R131,
+    });
+    const digest = plans.find((plan) => plan.kind === 'title_key')!.digest;
+    for (const storyId of storyIds) {
+      await executor.run({
+        sql: `INSERT INTO stories (id, story_key, status, trust_status, content_type, priority,
+                confidence, working_headline, first_seen_at, last_evidence_at, version,
+                created_at, updated_at)
+              VALUES (?, ?, 'discovered', 'unknown', 'industry', 50, 0, NULL, ?, ?, 1, ?, ?)`,
+        params: [storyId, `pre-${storyId}`, NOW, NOW, NOW, NOW],
+      });
+      await executor.run({
+        sql: `INSERT INTO story_fingerprints (story_id, kind, value, created_at)
+              VALUES (?, 'title_key', ?, ?)`,
+        params: [storyId, `sc1:${digest}:${storyId}`, NOW],
+      });
+    }
+  }
+
+  /** Run a 13th same-title item through the REAL pipeline, read its report. */
+  async function runThirteenthStory(
+    harness: Harness,
+    itemId: string,
+  ): Promise<CandidateDiscoveryReport> {
+    await seedItem(harness.rawExecutor, {
+      id: itemId,
+      sourceId: SOURCE_X,
+      title: SHARED_TITLE_R131,
+      url: null,
+    });
+    expect(
+      await enqueueEditorialPrepareDraft({
+        engine: harness.engine,
+        executor: harness.rawExecutor,
+        sourceItemId: itemId,
+      }),
+    ).toMatchObject({ kind: 'created' });
+    expect(await runPipeline(harness)).toEqual(['ack:job_completed']);
+    const draft = await readLatestDraft(harness.rawExecutor);
+    const read = readCandidateDiscoveryReport(JSON.parse(draft.document_json));
+    expect(read.kind).toBe('candidate_discovery_v1');
+    if (read.kind !== 'candidate_discovery_v1') {
+      throw new Error('unreachable: report must be candidate_discovery_v1');
+    }
+    return read.report;
+  }
+
+  it('12 owners of ONE digest: normal lookup vs reverse_unordered_selects + permuted seed order produce the SAME final candidate set', async () => {
+    // ---- Run A: seeds inserted ascending, D1's default unordered-select
+    // behavior. The honest overflow is still recorded (9-row probe, cap 8).
+    const harnessA = createHarness();
+    await seedSource(harnessA.rawExecutor, SOURCE_X, 'منبع ایکس');
+    await seedTitleOwners(harnessA.rawExecutor, ASCENDING);
+    const reportA = await runThirteenthStory(harnessA, 'item-r131-a');
+    expect(reportA.lookup.overflowObserved).toBe(true);
+    expect(reportA.candidates).toHaveLength(8);
+
+    // Clean slate between the runs — run B carries the SAME data.
+    for (const table of [
+      'drafts',
+      'ai_runs',
+      'evidence',
+      'claims',
+      'story_fingerprints',
+      'stories',
+      'source_items',
+      'sources',
+      'jobs',
+      'budgets',
+    ]) {
+      await env.DB.exec(`DELETE FROM ${table}`);
+    }
+
+    // ---- Run B: the SAME 12 owners inserted in a PERMUTED (descending)
+    // order, with the D1 connection asked to REVERSE every unordered
+    // SELECT — the honesty probe for "LIMIT without ORDER BY". Restored
+    // in `finally` so no other test ever runs under the flipped pragma.
+    const harnessB = createHarness();
+    await seedSource(harnessB.rawExecutor, SOURCE_X, 'منبع ایکس');
+    await env.DB.exec('PRAGMA reverse_unordered_selects = ON');
+    let reportB: CandidateDiscoveryReport;
+    try {
+      await seedTitleOwners(harnessB.rawExecutor, [...ASCENDING].reverse());
+      reportB = await runThirteenthStory(harnessB, 'item-r131-b');
+    } finally {
+      await env.DB.exec('PRAGMA reverse_unordered_selects = OFF');
+    }
+    expect(reportB.lookup.overflowObserved).toBe(true);
+    expect(reportB.candidates).toHaveLength(8);
+
+    // THE CONTRACT: identical stored data → identical final candidate
+    // selection, regardless of scan direction or physical insertion order.
+    // The builder's ascending sort cannot rescue a DIFFERENT pre-LIMIT page.
+    expect(reportB.candidates.map((candidate) => candidate.storyId)).toEqual(
+      reportA.candidates.map((candidate) => candidate.storyId),
+    );
+  });
+
+  it('the shipped lookup keeps an explicit PK-compatible order: the REAL plan is a range SEARCH — no full scan, no temporary sort', async () => {
+    const captured: DbStatement[] = [];
+    const harness = createHarness({ captureLookupStatements: captured });
+    await seedSource(harness.rawExecutor, SOURCE_X, 'منبع ایکس');
+    // Two pre-existing owners make the probed range non-trivial.
+    await seedTitleOwners(harness.rawExecutor, ASCENDING.slice(0, 2));
+    const report = await runThirteenthStory(harness, 'item-r131-explain');
+    expect(report.observation).toBe('candidates_observed');
+
+    // Both present-signal lookups (content_hash + title_key) were captured.
+    expect(captured.length).toBeGreaterThanOrEqual(2);
+    for (const statement of captured) {
+      // The deterministic order lives IN the shipped query, BEFORE LIMIT.
+      const orderByAt = statement.sql.indexOf('ORDER BY value ASC');
+      const limitAt = statement.sql.indexOf('LIMIT');
+      expect(orderByAt).toBeGreaterThan(-1);
+      expect(limitAt).toBeGreaterThan(orderByAt);
+
+      // EXPLAIN QUERY PLAN of the REAL statement with the REAL binds:
+      // a bounded PK range SEARCH — never a table scan, never a temp
+      // b-tree sort before LIMIT. Local workerd plan, correct label only:
+      // NO Cloudflare cost guarantee is claimed.
+      const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${statement.sql}`)
+        .bind(...(statement.params ?? []))
+        .all();
+      const details = plan.results.map((row) => String(row['detail'])).join(' | ');
+      expect(details).toMatch(/SEARCH /);
+      expect(details).not.toMatch(/SCAN /);
+      expect(details).not.toMatch(/TEMP B-TREE/);
+    }
+  });
+
+  it('the promised concurrency window: two stories share ONE fingerprint, both lookups run BEFORE either commit — both owners survive, reports stay lookup-moment honest', async () => {
+    let insideNestedRun = false;
+    const harness = createHarness({
+      // The provider-call window sits AFTER the caller's lookup and BEFORE
+      // the caller's commit: when the FIRST story reaches its provider
+      // call, the SECOND story runs its WHOLE real path (lookup → provider
+      // → commit) inside that window. Both lookups precede both commits.
+      onProviderCall: async (evidenceId) => {
+        if (evidenceId !== 'item-r131-c1' || insideNestedRun) {
+          return;
+        }
+        insideNestedRun = true;
+        try {
+          expect(
+            await enqueueEditorialPrepareDraft({
+              engine: harness.engine,
+              executor: harness.rawExecutor,
+              sourceItemId: 'item-r131-c2',
+            }),
+          ).toMatchObject({ kind: 'created' });
+          await harness.engine.dispatchDueJobs();
+          const envelope = harness.envelopes.shift();
+          expect(envelope).toBeDefined();
+          const action = await harness.engine.consumeMessage('msg-r131-c2', envelope);
+          expect(action).toMatchObject({ action: 'ack' });
+        } finally {
+          insideNestedRun = false;
+        }
+      },
+    });
+    await seedSource(harness.rawExecutor, SOURCE_X, 'منبع ایکس');
+    const sharedTitle = 'عنوان مشترک دو خبر همزمان';
+    const sharedBody = 'بدنهٔ یکسان برای هر دو خبرِ همزمان.';
+    await seedItem(harness.rawExecutor, {
+      id: 'item-r131-c1',
+      sourceId: SOURCE_X,
+      title: sharedTitle,
+      body: sharedBody,
+      url: null,
+    });
+    await seedItem(harness.rawExecutor, {
+      id: 'item-r131-c2',
+      sourceId: SOURCE_X,
+      title: sharedTitle,
+      body: sharedBody,
+      url: null,
+    });
+
+    expect(
+      await enqueueEditorialPrepareDraft({
+        engine: harness.engine,
+        executor: harness.rawExecutor,
+        sourceItemId: 'item-r131-c1',
+      }),
+    ).toMatchObject({ kind: 'created' });
+    await harness.engine.dispatchDueJobs();
+    const action = await harness.engine.consumeMessage('msg-r131-c1', harness.envelopes.shift());
+    expect(action).toMatchObject({ action: 'ack', outcome: 'job_completed' });
+
+    // Both commits landed: two stories, two ready drafts, both items
+    // processed — NO overwrite, NO unique failure, NO lost fingerprint.
+    expect(await rowCount(harness.rawExecutor, 'stories')).toBe(2);
+    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(2);
+    const processedItems = await harness.rawExecutor.query<{ processing_status: string }>({
+      sql: "SELECT processing_status FROM source_items WHERE id LIKE 'item-r131-c%'",
+    });
+    expect(processedItems.rows).toHaveLength(2);
+    for (const row of processedItems.rows) {
+      expect(row.processing_status).toBe('processed');
+    }
+
+    // The shared title_key digest keeps TWO independent owner rows (each
+    // story also owns its own content_hash row: 2 + 2 = 4, none replaced).
+    const digestPlans = await buildStoryFingerprints({
+      storyId: 'digest-probe',
+      canonicalUrl: null,
+      fullEvidenceText: sharedTitle,
+      title: sharedTitle,
+    });
+    const digest = digestPlans.find((plan) => plan.kind === 'title_key')!.digest;
+    const owners = await harness.rawExecutor.query<{ story_id: string; value: string }>({
+      sql: 'SELECT story_id, value FROM story_fingerprints WHERE kind = ? AND value >= ? AND value < ?',
+      params: ['title_key', `sc1:${digest}:`, `sc1:${digest}:\u{10ffff}`],
+    });
+    expect(owners.rows).toHaveLength(2);
+    expect(new Set(owners.rows.map((row) => row.story_id))).toHaveLength(2);
+    for (const row of owners.rows) {
+      expect(row.value.endsWith(`:${row.story_id}`)).toBe(true);
+    }
+    expect(await rowCount(harness.rawExecutor, 'story_fingerprints')).toBe(4);
+
+    // Both reports claim ONLY their lookup moment: neither observed the
+    // other (both lookups ran before either commit), and both carry the
+    // visibility limitation verbatim — never a completeness claim.
+    const draftRows = await harness.rawExecutor.query<{ document_json: string }>({
+      sql: 'SELECT document_json FROM drafts ORDER BY rowid ASC',
+    });
+    expect(draftRows.rows).toHaveLength(2);
+    for (const row of draftRows.rows) {
+      const read = readCandidateDiscoveryReport(JSON.parse(row.document_json));
+      expect(read.kind).toBe('candidate_discovery_v1');
+      if (read.kind !== 'candidate_discovery_v1') {
+        throw new Error('unreachable: report must be candidate_discovery_v1');
+      }
+      expect(read.report.candidates).toEqual([]);
+      expect(read.report.observation).toBe('no_candidates_observed');
+      expect(read.report.limitations).toContain('lookup_moment_visibility');
+    }
+
+    // And NOTHING merged: two independent stories, zero confidence.
+    const claimRows = await harness.rawExecutor.query<{ confidence: number }>({
+      sql: 'SELECT confidence FROM claims',
+    });
+    for (const row of claimRows.rows) {
+      expect(row.confidence).toBe(0);
+    }
   });
 });
 

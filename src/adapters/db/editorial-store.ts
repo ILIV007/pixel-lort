@@ -166,6 +166,18 @@ export interface StoryCandidateLookupOutcome {
  * from the (kind, value) primary-key index of `story_fingerprints` — the
  * exact `sc1:<digest>:` namespace prefix, story-scope excluded for the
  * current story, no wildcards, no full scan, no unbounded reads.
+ *
+ * R1.13.1 (bounded selection fix): `ORDER BY value ASC` before LIMIT. For
+ * a fixed kind and digest the value is `sc1:<digest>:<storyId>`, so this
+ * order IS the PK order of the probed range — SQLite satisfies it straight
+ * from the index scan (no temporary sort, EXPLAIN-verified), and the probe
+ * page becomes the SAME first-9 rows regardless of scan direction or
+ * physical insertion order. Without it, a full probe page could return a
+ * DIFFERENT set of owners for the SAME stored data (demonstrated on real
+ * workerd D1 with PRAGMA reverse_unordered_selects), changing the final
+ * candidates with zero writes. Row order without ORDER BY is never a
+ * SQLite guarantee; relying on the builder's post-LIMIT sort cannot make
+ * the PRE-LIMIT selection deterministic.
  */
 export async function findStoryCandidatesByFingerprints(
   executor: DbExecutor,
@@ -178,6 +190,7 @@ export async function findStoryCandidatesByFingerprints(
     const rows = await executor.query<{ story_id: string }>({
       sql: `SELECT story_id FROM story_fingerprints
              WHERE kind = ? AND value >= ? AND value < ? AND story_id <> ?
+             ORDER BY value ASC
              LIMIT ?`,
       params: [plan.kind, plan.lowerBound, plan.upperBound, excludeStoryId, probeLimit],
     });
