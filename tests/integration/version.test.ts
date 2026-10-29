@@ -36,7 +36,7 @@ describe('GET /version via SELF', () => {
       'environment',
       'schemaVersion',
     ]);
-    expect(body['applicationVersion']).toBe('1.5.0');
+    expect(body['applicationVersion']).toBe('1.6.0');
     expect(body['commit']).toBe('local-dev');
     expect(body['schemaVersion']).toBe(3);
     expect(body['environment']).toBe('development');

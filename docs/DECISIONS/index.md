@@ -69,3 +69,4 @@ ADR is written only when a decision is actually made.
 - [ADR-0039 — Connector family contracts, safe HTTP, safe XML, and normalization](adr-0039-connector-contracts-safe-http.md)
 - [ADR-0040 — Lossless policy pause for gated job types (the D01 contract)](adr-0040-lossless-policy-pause.md)
 - [ADR-0041 — Workers-AI-first AI adapter foundation (free-only, fail-closed)](adr-0041-workers-ai-first-adapters.md)
+- [ADR-0042 — Phase 5A: the first integrated local source→draft path (editorial.prepare_draft, EDITORIAL_ENABLED, fenced atomic commit)](adr-0042-editorial-source-to-draft.md)

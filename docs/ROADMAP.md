@@ -19,7 +19,12 @@ version 1.4.0, schema stays 3, ADR-0038/0039) with the new ingestion gate
 shipped disabled everywhere. **Phase 6 is PARTIAL**: the Workers-AI-first
 ADAPTER FOUNDATION is implemented on the review branch, UNDER INDEPENDENT
 REVIEW (draft PR #11), and ships OFF everywhere with zero live inference —
-see the Phase 6 section. Everything else is pending and intentionally not
+see the Phase 6 section. **Phase 5 is PARTIAL in a bounded way (Phase 5A,
+R1.11, ADR-0042)**: the FIRST integrated local source→draft vertical path
+(`editorial.prepare_draft`) is implemented on the same review branch,
+UNDER INDEPENDENT REVIEW, and ships OFF everywhere behind its own
+fail-closed `EDITORIAL_ENABLED` gate with zero live inference — see the
+Phase 5 section. Everything else is pending and intentionally not
 started. Provisioned/deployed, implemented, reviewed, and activated are
 DISTINCT statuses; they are never conflated in this document.
 
@@ -361,15 +366,36 @@ decision.
       normalization/security suites. Measured final-tree totals in the
       Phase 4 handoff.
 
-## Phase 5 — story/claim/evidence engine ⬜
+## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A source→draft path implemented, UNDER INDEPENDENT REVIEW, OFF)
 
+- [x] **Phase 5A (R1.11, ADR-0042): the FIRST integrated local source→draft
+      path** — the `editorial.prepare_draft` durable job type on the
+      EXISTING engine with the independent fail-closed `EDITORIAL_ENABLED`
+      gate (shipped "false" everywhere; gate off = the ADR-0040 lossless
+      policy pause), deterministic versioned identity per item snapshot,
+      stored-hash snapshot verification (typed terminal mismatch), ONE
+      conservative story (discovered/unknown, confidence 0) per snapshot,
+      the single `source_report` claim (unverified, confidence 0,
+      traceable object_text), `mentions` evidence, the REAL
+      `createAiDraftService` call behind the real budget authority, and
+      the fenced atomic commit (story + claim + evidence + ai_runs + READY
+      Persian draft + `processed` item status) with job/generation/lease
+      ownership predicates inside SQL on schema 3 (no migration). Honest
+      at-least-once crash windows; replay after commit is free. Proven by
+      the ten-scenario D1 integration suite, unit contracts, and the
+      offline demo runner (`npm run demo:editorial`). NOT deployed, NOT
+      activated, zero live inference.
 - [ ] Fingerprints, entity aliases, deterministic matching + thresholds.
+      (Explicitly OUT of Phase 5A: similar/identical titles are never
+      merged; one snapshot = one story.)
 - [ ] AI adjudication path (compact claim sets) and decision persistence.
 
 _(The round 1.10.6 / 1.10.6.1 AI ADAPTER foundation does NOT complete any
 part of this phase: the story/claim/evidence engine, the editorial fact
 guard, and the durable AI caller remain future work — see the unchecked
-items in Phase 6.)_
+items in Phase 6. Phase 5A adds the FIRST bounded vertical slice (one
+snapshot → one conservative story → one ready draft) and deliberately NOT
+the full engine.)_
 
 ## Phase 6 — AI adapters, prompt contracts and Persian editorial ◒ (PARTIAL — adapter foundation implemented, UNDER INDEPENDENT REVIEW, OFF)
 
@@ -402,17 +428,25 @@ foundation, including 1.10.6.1 — is NOT full independent acceptance.
       best-effort and never holds a successful draft hostage. Pinned by
       permanent red-first tests A1–A5/B1–B5/U1–U3.)
 - [ ] Fact guard (evidence-id references alone do NOT prove a generated
-      claim is true) — still FUTURE work.
-- [ ] Durable caller wiring (job types, cron/queue, admin surfaces) —
-      deliberately NOT in the adapter rounds.
+      claim is true) — still FUTURE work. (Phase 5A keeps every
+      model-proposed claim `unverified` inside document_json/facts_json.)
+- [x] Durable caller wiring (job types, cron/queue, admin surfaces) —
+      Phase 5A (R1.11, ADR-0042) added the FIRST durable caller: the
+      `editorial.prepare_draft` job type on the existing engine (bounded
+      application-boundary enqueue; NO cron scheduling, NO public
+      endpoint, NO admin surface this round). It ships OFF everywhere
+      behind `EDITORIAL_ENABLED`.
 - [ ] Story engine / Phase 5 adjudication consumption — NOT complete and
-      not claimed by rounds 1.10.6 or 1.10.6.1.
+      not claimed by rounds 1.10.6 or 1.10.6.1. (Phase 5A writes ONE
+      conservative per-snapshot story + source-report claim; it does NOT
+      implement adjudication, matching, or merging.)
 
-Next path AFTER the 1.10.6.1 corrections close: return to the
-news/claim/evidence engine plan (Phase 5) and the real product path,
-with an INDEPENDENT owner decision on the Free-ingestion limitation (see
-the Phase 4 note and `free-plan/FREE_SAFE_EXECUTION_DESIGN.md`). Executing
-those phases is NOT part of the adapter correction rounds.
+Phase 5A (R1.11) delivered the first bounded vertical slice of the
+news/claim/evidence path on schema 3. The REMAINING Phase 5 engine work
+(fingerprints, aliases, matching, adjudication) and the Free-ingestion
+limitation (see the Phase 4 note and
+`free-plan/FREE_SAFE_EXECUTION_DESIGN.md`) each stay pending separate
+independent decisions; executing them is NOT part of this round.
 
 ## Phase 7 — media engine and album publisher ⬜
 
