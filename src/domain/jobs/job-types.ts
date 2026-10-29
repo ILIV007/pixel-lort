@@ -124,6 +124,16 @@ export const JOB_ERROR_CODES = [
   // unchanged). Terminal: retrying the identical input deterministically
   // repeats; the real run is recorded as `invalid`, never a ready draft.
   'editorial_no_traced_claim',
+  // R1.15.1 (Posidon exact-content reuse correctness): the exact-content
+  // GROUP anchor exists — one stable result for this full composed text is
+  // already owned IN SQL — but NO candidate (including the anchor's own
+  // owner story) could be verified as a usable reuse target. The fenced
+  // normal commit would deterministically collide on the anchor and roll
+  // back, so entering the PAID provider→conflict→retry cycle is forbidden:
+  // the handler returns this PERMANENT code BEFORE any provider work — zero
+  // charges, zero writes, zero fake success. The anchor is never taken over
+  // or deleted; a later re-enqueue after the owner heals decides again.
+  'editorial_exact_content_blocked',
 ] as const;
 
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];

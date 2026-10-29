@@ -27,7 +27,15 @@ import {
   sourceReportClaimId,
   EDITORIAL_DRAFT_VERSION,
 } from '../../src/domain/editorial/identity';
-import { buildFullEvidenceText } from '../../src/domain/editorial/mapper';
+import {
+  buildDraftDocument,
+  buildFullEvidenceText,
+  buildTraceableExcerpt,
+} from '../../src/domain/editorial/mapper';
+import { buildEvidenceGuardReport } from '../../src/domain/editorial/evidence-guard';
+import { buildCandidateDiscoveryReport } from '../../src/domain/editorial/candidate-discovery';
+import { buildCandidateAssessmentReport } from '../../src/domain/editorial/candidate-assessment';
+import { canonicalizeJson } from '../../src/domain/jobs/payloads';
 import {
   exactContentAnchorValue,
   exactContentDigest,
@@ -298,7 +306,13 @@ async function itemStatuses(
 }
 
 /** Seed a COMPLETE historical story (story + item + claim + evidence + ready
- * draft) with optional fingerprints — the shape a pre-R1.15 commit left. */
+ * draft) with optional fingerprints — the shape a pre-R1.15 commit left.
+ * R1.15.1: `realisticDocument` builds the draft's document_json with the
+ * PRODUCTION mappers (sourceReport + evidenceGuard + discovery + assessment
+ * exactly as the real fenced commit writes them) — the shape a real
+ * pipeline-committed historical draft carries, and the shape the R1.15.1
+ * immutable reuse basis verifies. The default stays '{}' (a foreign/seeded
+ * shape with NO verifiable basis — honestly NOT a reuse target). */
 async function seedHistoricalStory(
   executor: DbExecutor,
   input: {
@@ -310,6 +324,7 @@ async function seedHistoricalStory(
     readonly draftStatus?: string;
     readonly withContentFingerprint?: boolean;
     readonly withGroupAnchor?: boolean;
+    readonly realisticDocument?: boolean;
   },
 ): Promise<void> {
   const contentHash = await sha256Hex(
@@ -351,12 +366,62 @@ async function seedHistoricalStory(
           VALUES (?, ?, ?, 'mentions', 0, 'متن تاریخی', ?)`,
     params: [`edev_${input.storyId}`, `edcl_${input.storyId}`, input.itemId, NOW],
   });
+  let documentJson = '{}';
+  if (input.realisticDocument ?? false) {
+    // The PRODUCTION document shape (R1.15.1): the draft's own immutable
+    // record — sourceReport + evidenceGuard.snapshot — built by the same
+    // pure mappers the real fenced commit uses.
+    const excerpt = buildTraceableExcerpt({
+      title: input.title,
+      body_excerpt: input.body ?? null,
+    });
+    const evidenceGuard = buildEvidenceGuardReport({
+      snapshot: { sourceItemId: input.itemId, contentHash },
+      evidence: {
+        evidenceId: input.itemId,
+        excerptText: excerpt.text,
+        excerptTruncated: excerpt.truncated,
+      },
+      draftClaims: [],
+      draftHeadlineFa: 'تیتر تاریخی',
+      draftSummaryFa: 'خلاصهٔ تاریخی.',
+      draftSourceItemId: input.itemId,
+    });
+    const discovery = buildCandidateDiscoveryReport({
+      snapshot: { sourceItemId: input.itemId, contentHash },
+      storyId: input.storyId,
+      lookups: [],
+      matches: [],
+    });
+    const assessment = buildCandidateAssessmentReport({ discovery });
+    const document = buildDraftDocument({
+      sourceItemId: input.itemId,
+      sourceName: 'منبع تاریخی',
+      excerpt,
+      semanticDraft: {
+        headlineFa: 'تیتر تاریخی',
+        summaryFa: 'خلاصهٔ تاریخی.',
+        claims: [],
+      },
+      evidenceGuard,
+      candidateDiscovery: discovery,
+      candidateAssessment: assessment,
+    });
+    documentJson = canonicalizeJson(document.document);
+  }
   await executor.run({
     sql: `INSERT INTO drafts (id, story_id, status, language, layout, title, document_json,
                                facts_json, warnings_json, ai_run_id, version, created_by,
                                created_at, updated_at)
-          VALUES (?, ?, ?, 'fa', 'news_v1', 'تیتر تاریخی', '{}', '[]', '[]', NULL, 1, 'seed', ?, ?)`,
-    params: [`eddr_${input.storyId}`, input.storyId, input.draftStatus ?? 'ready', NOW, NOW],
+          VALUES (?, ?, ?, 'fa', 'news_v1', 'تیتر تاریخی', ?, '[]', '[]', NULL, 1, 'seed', ?, ?)`,
+    params: [
+      `eddr_${input.storyId}`,
+      input.storyId,
+      input.draftStatus ?? 'ready',
+      documentJson,
+      NOW,
+      NOW,
+    ],
   });
   if (input.withContentFingerprint ?? false) {
     const digest = await exactContentDigest(
@@ -763,6 +828,9 @@ describe('R1.15 — failure windows of the reuse commit (fence, snapshot, atomic
     const itemHash = await sha256Hex(
       'item-fence-arriving\u001fتیتر نردهٔ reuse\u001fبدنهٔ نردهٔ reuse.',
     );
+    const referenceHash = await sha256Hex(
+      'item-fence-ref\u001fتیتر نردهٔ reuse\u001fبدنهٔ نردهٔ reuse.',
+    );
     const claimId = await sourceReportClaimId('edst_reuse_fence_ref', 'item-fence-arriving');
     const stale = await commitEditorialReuse(harness.rawExecutor, {
       jobId,
@@ -773,7 +841,16 @@ describe('R1.15 — failure windows of the reuse commit (fence, snapshot, atomic
         sourceId: SOURCE_X,
         contentHash: itemHash,
       },
-      target: { storyId: 'edst_reuse_fence_ref', draftVersion: EDITORIAL_DRAFT_VERSION },
+      // R1.15.1: the comparison basis carried INTO the SQL predicate — the
+      // seeded draft's document bytes and the story's ORIGINAL reference
+      // row identity (item-fence-ref, as seeded).
+      target: {
+        storyId: 'edst_reuse_fence_ref',
+        draftVersion: EDITORIAL_DRAFT_VERSION,
+        documentJson: '{}',
+        referenceItemId: 'item-fence-ref',
+        referenceContentHash: referenceHash,
+      },
       claim: {
         id: claimId,
         storyId: 'edst_reuse_fence_ref',
@@ -821,6 +898,7 @@ describe('R1.15 — failure windows of the reuse commit (fence, snapshot, atomic
       body: 'بدنهٔ مسابقهٔ اسنپ‌شات reuse.',
       storyId: 'edst_reuse_snap_ref',
       withContentFingerprint: true,
+      realisticDocument: true, // R1.15.1: a verifiable pipeline-shaped document
     });
     await seedItem(harness.rawExecutor, {
       id: 'item-snap-arriving',
@@ -854,6 +932,7 @@ describe('R1.15 — failure windows of the reuse commit (fence, snapshot, atomic
       body: 'بدنهٔ اتمی بودن reuse.',
       storyId: 'edst_reuse_atomic_ref',
       withContentFingerprint: true,
+      realisticDocument: true, // R1.15.1: a verifiable pipeline-shaped document
     });
     await seedItem(harness.rawExecutor, {
       id: 'item-atomic-arriving',
@@ -932,6 +1011,124 @@ describe('R1.15 scenario 12 — replay of the first AND the reused item is free'
   });
 });
 
+// ---------------------------------------------------------------------------
+// R1.15.1 — the real REPLAY HANDLER executions and the reference-mutation
+// regression (Posidon R1.15.1 test contract items 1+2). enqueue=existing
+// alone never exercises the fast-path HANDLER: here the engine RE-CLAIMS
+// the durable job (the documented at-least-once window — the terminal write
+// was lost) and the handler re-runs in a REAL new generation.
+// ---------------------------------------------------------------------------
+describe('R1.15.1 — real replay handler re-execution is free, proven, and side-effect-free', () => {
+  it('re-running the handler for a NORMAL and a REUSED item answers with ZERO new effects and ZERO provider calls', async () => {
+    const harness = createHarness();
+    await seedSource(harness.rawExecutor, SOURCE_X, 'منبع ایکس');
+    await seedSource(harness.rawExecutor, SOURCE_Y, 'منبع ایگرگ');
+    const title = 'تیتر بازپخش واقعی';
+    const body = 'بدنهٔ بازپخش واقعی.';
+    await seedItem(harness.rawExecutor, { id: 'item-realrep-a', sourceId: SOURCE_X, title, body });
+    await seedItem(harness.rawExecutor, { id: 'item-realrep-b', sourceId: SOURCE_Y, title, body });
+    expect(await enqueueAndRun(harness, 'item-realrep-a')).toEqual(['ack:job_completed']);
+    expect(await enqueueAndRun(harness, 'item-realrep-b')).toEqual(['ack:job_completed']);
+    expect(harness.providerCalls).toBe(1);
+    const before = {
+      stories: await rowCount(harness.rawExecutor, 'stories'),
+      drafts: await rowCount(harness.rawExecutor, 'drafts'),
+      claims: await rowCount(harness.rawExecutor, 'claims'),
+      evidence: await rowCount(harness.rawExecutor, 'evidence'),
+      aiRuns: await rowCount(harness.rawExecutor, 'ai_runs'),
+      fingerprints: await rowCount(harness.rawExecutor, 'story_fingerprints'),
+      jobsSucceeded: await harness.rawExecutor.first<{ n: number }>({
+        sql: "SELECT COUNT(*) AS n FROM jobs WHERE status = 'succeeded'",
+      }),
+    };
+    expect(before.jobsSucceeded?.n).toBe(2);
+
+    // The at-least-once window: the terminal bookkeeping was lost, so BOTH
+    // durable jobs become dispatchable again. The engine re-claims each and
+    // the handler RE-EXECUTES for real (a NEW generation).
+    for (const itemId of ['item-realrep-a', 'item-realrep-b']) {
+      await harness.rawExecutor.run({
+        sql: "UPDATE jobs SET status = 'pending', run_after = ?, lease_until = NULL\n               WHERE aggregate_id = ? AND status = 'succeeded'",
+        params: [NOW, itemId],
+      });
+    }
+    harness.clock.advance(1);
+    const outcomes = await runPipeline(harness);
+    expect(outcomes.sort()).toEqual(['ack:job_completed', 'ack:job_completed']);
+    // The replay fast-paths are REAL: the stable result (item A) and the
+    // PROVEN durable attachment (item B — verified against the draft's
+    // immutable document basis) answered with ZERO new durable effects and
+    // ZERO provider involvement.
+    expect(harness.providerCalls).toBe(1);
+    expect(await rowCount(harness.rawExecutor, 'stories')).toBe(before.stories);
+    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(before.drafts);
+    expect(await rowCount(harness.rawExecutor, 'claims')).toBe(before.claims);
+    expect(await rowCount(harness.rawExecutor, 'evidence')).toBe(before.evidence);
+    expect(await rowCount(harness.rawExecutor, 'ai_runs')).toBe(before.aiRuns);
+    expect(await rowCount(harness.rawExecutor, 'story_fingerprints')).toBe(before.fingerprints);
+    const statuses = await itemStatuses(harness.rawExecutor, ['item-realrep-a', 'item-realrep-b']);
+    expect(statuses.map((row) => row.processing_status)).toEqual(['processed', 'processed']);
+  });
+
+  it('P2 regression — a reference mutated BEFORE verification never attributes the mutated text to the old draft', async () => {
+    const harness = createHarness();
+    await seedSource(harness.rawExecutor, SOURCE_X, 'منبع ایکس');
+    await seedSource(harness.rawExecutor, SOURCE_Y, 'منبع ایگرگ');
+    // A shared URL makes the mutated reference story DISCOVERABLE — the
+    // strongest form of this regression: the candidate IS probed, and the
+    // decision must still refuse.
+    await seedItem(harness.rawExecutor, {
+      id: 'item-premut-a',
+      sourceId: SOURCE_X,
+      title: 'Original title',
+      body: 'Original body',
+      url: 'https://shared.example/premut',
+    });
+    expect(await enqueueAndRun(harness, 'item-premut-a')).toEqual(['ack:job_completed']);
+    const storyAfterA = await harness.rawExecutor.first<{ story_id: string }>({
+      sql: `SELECT c.story_id FROM claims c JOIN evidence e ON e.claim_id = c.id
+             WHERE e.source_item_id = 'item-premut-a'`,
+    });
+    // The reference is mutated BEFORE the arriving item is even enqueued:
+    // the row now carries NEW text under a NEW snapshot identity.
+    await harness.rawExecutor.run({
+      sql: "UPDATE source_items SET title = ?, body_excerpt = ?, content_hash = ? WHERE id = 'item-premut-a'",
+      params: [
+        'Changed reference',
+        'Different reference',
+        await sha256Hex('reference-changed-pre-verification'),
+      ],
+    });
+    // The arriving item's text equals the MUTATED text — the ONLY way it
+    // could wrongly attach to the old draft is by comparing against the
+    // mutated mutable row. The immutable document basis refuses.
+    await seedItem(harness.rawExecutor, {
+      id: 'item-premut-b',
+      sourceId: SOURCE_Y,
+      title: 'Changed reference',
+      body: 'Different reference',
+      url: 'https://shared.example/premut',
+    });
+    expect(await enqueueAndRun(harness, 'item-premut-b')).toEqual(['ack:job_completed']);
+    // The mutated text took its OWN independent path: a real provider call,
+    // its own story and draft — NEVER the old draft.
+    expect(harness.providerCalls).toBe(2);
+    expect(await rowCount(harness.rawExecutor, 'stories')).toBe(2);
+    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(2);
+    const arrivingClaim = await harness.rawExecutor.first<{ story_id: string }>({
+      sql: `SELECT c.story_id FROM claims c JOIN evidence e ON e.claim_id = c.id
+             WHERE e.source_item_id = 'item-premut-b'`,
+    });
+    expect(arrivingClaim!.story_id).not.toBe(storyAfterA!.story_id);
+    // The old draft's own document was never rewritten to fake a new basis.
+    const oldDraft = await harness.rawExecutor.first<{ document_json: string }>({
+      sql: `SELECT d.document_json FROM drafts d WHERE d.story_id = ?`,
+      params: [storyAfterA!.story_id],
+    });
+    expect(oldDraft!.document_json).toContain('Original title');
+  });
+});
+
 describe('R1.15 scenario 14 — historical results behave consistently within the honest limits', () => {
   it('a pre-fingerprint historical story is NEVER consulted (no backfill); an R1.13-era fingerprinted story IS reusable', async () => {
     const harness = createHarness();
@@ -957,7 +1154,11 @@ describe('R1.15 scenario 14 — historical results behave consistently within th
     expect(await rowCount(harness.rawExecutor, 'stories')).toBe(2);
 
     // (b) R1.13-era story: story-scoped content fingerprint, NO anchor —
-    // the verified reuse DOES cover it (byte-verified, provenance kept).
+    //     the verified reuse DOES cover it. R1.15.1 assertion basis (documented):
+    //     the reuse decision verifies the draft's IMMUTABLE document record,
+    //     so the seeded historical draft carries the PRODUCTION document shape
+    //     (built with the real mappers) — exactly what a real R1.13-era
+    //     pipeline commit wrote. '{}' foreign shapes are honestly NOT reusable.
     await seedHistoricalStory(harness.rawExecutor, {
       itemId: 'item-hist-fp',
       sourceId: SOURCE_X,
@@ -965,6 +1166,7 @@ describe('R1.15 scenario 14 — historical results behave consistently within th
       body: 'بدنهٔ تاریخی دارای اثر انگشت.',
       storyId: 'edst_hist_fp',
       withContentFingerprint: true,
+      realisticDocument: true,
     });
     await seedItem(harness.rawExecutor, {
       id: 'item-hist-arriving-2',
@@ -1222,5 +1424,131 @@ describe('R1.15 — the group anchor at the SQL layer (concurrency primitive)', 
     expect(buildFullEvidenceText(references[0]!)).toBe(
       buildFullEvidenceText({ title: 'تیتر وارسی مراجع', body_excerpt: 'بدنهٔ وارسی مراجع.' }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1.15.1 — Posidon's THREE independent counterexamples (recorded RED on the
+// R1.15 baseline, required GREEN after the exact-content reuse correctness
+// fix). Appended to THIS suite with the SAME helpers; the assertions are the
+// reviewer's own and are not weakened.
+// ---------------------------------------------------------------------------
+describe('Posidon R115 independent counterexamples', () => {
+  it('P1 a NEW snapshot of an already attached item must not be acknowledged by the OLD attachment', async () => {
+    const h = createHarness();
+    await seedSource(h.rawExecutor, SOURCE_X, 'X');
+    await seedSource(h.rawExecutor, SOURCE_Y, 'Y');
+    await seedItem(h.rawExecutor, {
+      id: 'proof-a',
+      sourceId: SOURCE_X,
+      title: 'Original title',
+      body: 'Original body',
+    });
+    await seedItem(h.rawExecutor, {
+      id: 'proof-b',
+      sourceId: SOURCE_Y,
+      title: 'Original title',
+      body: 'Original body',
+    });
+    expect(await enqueueAndRun(h, 'proof-a')).toEqual(['ack:job_completed']);
+    expect(await enqueueAndRun(h, 'proof-b')).toEqual(['ack:job_completed']);
+    const newHash = await sha256Hex('genuinely-new-snapshot');
+    await h.rawExecutor.run({
+      sql: "UPDATE source_items SET title=?, body_excerpt=?, content_hash=?, processing_status='new' WHERE id=?",
+      params: ['Completely changed title', 'Completely changed body', newHash, 'proof-b'],
+    });
+    const outcomes = await enqueueAndRun(h, 'proof-b');
+    // eslint-disable-next-line no-console
+    console.log(
+      'P1 observed',
+      JSON.stringify({
+        outcomes,
+        providerCalls: h.providerCalls,
+        statuses: await itemStatuses(h.rawExecutor, ['proof-b']),
+        drafts: await rowCount(h.rawExecutor, 'drafts'),
+      }),
+    );
+    expect(h.providerCalls).toBe(2);
+    expect(await rowCount(h.rawExecutor, 'drafts')).toBe(2);
+  });
+
+  it('P2 reference snapshot mutation between comparison and reuse commit must prevent attachment', async () => {
+    const h = createHarness();
+    await seedSource(h.rawExecutor, SOURCE_X, 'X');
+    await seedSource(h.rawExecutor, SOURCE_Y, 'Y');
+    await seedItem(h.rawExecutor, {
+      id: 'proof-r-a',
+      sourceId: SOURCE_X,
+      title: 'Shared title',
+      body: 'Shared body',
+    });
+    await seedItem(h.rawExecutor, {
+      id: 'proof-r-b',
+      sourceId: SOURCE_Y,
+      title: 'Shared title',
+      body: 'Shared body',
+    });
+    expect(await enqueueAndRun(h, 'proof-r-a')).toEqual(['ack:job_completed']);
+    h.mutateBeforeReuseCommit(async (raw) => {
+      await raw.run({
+        sql: 'UPDATE source_items SET title=?, body_excerpt=?, content_hash=? WHERE id=?',
+        params: [
+          'Changed reference',
+          'Different reference',
+          await sha256Hex('reference-changed'),
+          'proof-r-a',
+        ],
+      });
+    });
+    const outcomes = await enqueueAndRun(h, 'proof-r-b');
+    const claims = await rowCount(h.rawExecutor, 'claims');
+    // eslint-disable-next-line no-console
+    console.log(
+      'P2 observed',
+      JSON.stringify({
+        outcomes,
+        claims,
+        statuses: await itemStatuses(h.rawExecutor, ['proof-r-b']),
+      }),
+    );
+    expect(claims).toBe(1);
+  });
+
+  it('P3 a valid anchor owner outside the 9-row candidate page must still be reusable without a new charge', async () => {
+    const h = createHarness();
+    await seedSource(h.rawExecutor, SOURCE_X, 'X');
+    await seedSource(h.rawExecutor, SOURCE_Y, 'Y');
+    const title = 'Actual original title';
+    const body = 'Actual original body';
+    await seedItem(h.rawExecutor, { id: 'proof-page-a', sourceId: SOURCE_X, title, body });
+    expect(await enqueueAndRun(h, 'proof-page-a')).toEqual(['ack:job_completed']);
+    const digest = await exactContentDigest(buildFullEvidenceText({ title, body_excerpt: body }));
+    for (let i = 0; i < 9; i++) {
+      const sid = `edst_00000_${i}`;
+      await seedHistoricalStory(h.rawExecutor, {
+        itemId: `proof-lying-${i}`,
+        sourceId: SOURCE_X,
+        title: `Different ${i}`,
+        body: 'Unrelated body',
+        storyId: sid,
+      });
+      await h.rawExecutor.run({
+        sql: "INSERT INTO story_fingerprints (story_id,kind,value,created_at) VALUES (?, 'content_hash', ?, ?)",
+        params: [sid, `sc1:${digest}:${sid}`, NOW],
+      });
+    }
+    await seedItem(h.rawExecutor, { id: 'proof-page-b', sourceId: SOURCE_Y, title, body });
+    const outcomes = await enqueueAndRun(h, 'proof-page-b');
+    // eslint-disable-next-line no-console
+    console.log(
+      'P3 observed',
+      JSON.stringify({
+        outcomes,
+        providerCalls: h.providerCalls,
+        statuses: await itemStatuses(h.rawExecutor, ['proof-page-b']),
+      }),
+    );
+    expect(outcomes).toEqual(['ack:job_completed']);
+    expect(h.providerCalls).toBe(1);
   });
 });

@@ -73,22 +73,35 @@
  *  1. REPLAY FAST-PATH: one indexed read proves whether THIS item already
  *     carries a durable source_report attachment (its claim + evidence +
  *     processed flip landed atomically in an earlier generation) — success
- *     with ZERO writes and ZERO provider involvement.
- *  2. VERIFIED TARGET: each probe candidate must BOTH still own a usable
- *     ready draft at the pipeline's draft version AND REALLY equal the
- *     current full composed text (byte-exact through at least one of the
- *     candidate story's attached reference items). The fingerprint is the
- *     LOCATOR; the DECISION is the byte-exact comparison — stale, corrupt,
- *     or foreign fingerprints can never cause a wrong reuse, and numbers,
- *     negations, units, and Persian/Latin digits are never equated.
+ *     with ZERO writes and ZERO provider involvement. R1.15.1 (Posidon P1):
+ *     the relation answers ONLY when it is PROVABLY the CURRENT snapshot's
+ *     — its story must still own a ready draft whose IMMUTABLE document
+ *     basis (sourceReport + evidenceGuard.snapshot) byte-verifies THIS
+ *     snapshot's full composed text. An OLD relation of a DIFFERENT
+ *     snapshot (the item's text changed underneath it) is NEVER a success:
+ *     it falls through and the new text takes its own honest path; the old
+ *     provenance is never rewritten, reattributed, or presented as the new
+ *     snapshot's result.
+ *  2. VERIFIED TARGET: each candidate (the DIRECTLY-resolved group-anchor
+ *     owner FIRST, then the probe page) must BOTH still own a usable ready
+ *     draft at the pipeline's draft version AND REALLY equal the current
+ *     full composed text through the draft's IMMUTABLE document basis
+ *     (R1.15.1 — Posidon P2: the equality basis is the draft's own
+ *     document record, never a mutable source_items row alone). The
+ *     fingerprint is the LOCATOR; the DECISION is the byte-exact
+ *     comparison — stale, corrupt, or foreign fingerprints can never cause
+ *     a wrong reuse, and numbers, negations, units, and Persian/Latin
+ *     digits are never equated.
  *  3. FENCED REUSE COMMIT: the reusing item's OWN deterministic
  *     source_report claim + mentions evidence + its processed flip — ONE
  *     atomic batch under the job fence, the item's snapshot predicate, AND
- *     the target-validity predicate (the target's usable draft must still
- *     exist INSIDE the batch). The reused draft/story/report documents are
- *     NEVER rewritten; the second provenance is added, never substituted;
- *     confidence/trust stay untouched; NO ai_runs row exists because NO
- *     provider call happens (a provider that never ran is never fabricated).
+ *     the extended target-validity predicate (R1.15.1: the EXACT verified
+ *     document bytes AND the compared original reference-row identity are
+ *     re-evaluated INSIDE the batch). The reused draft/story/report
+ *     documents are NEVER rewritten; the second provenance is added, never
+ *     substituted; confidence/trust stay untouched; NO ai_runs row exists
+ *     because NO provider call happens (a provider that never ran is never
+ *     fabricated).
  *  4. GROUP UNIQUENESS UNDER CONCURRENCY: every NORMAL commit now also
  *     writes the group-unique exact-content anchor (`sc1:<digest>`, no
  *     story suffix). A concurrent second commit of the same full content
@@ -98,13 +111,31 @@
  *     used in any final output) and retries into the verified reuse path.
  *     Exactly-once provider behavior is NOT claimed; one stable result
  *     per exact content IS enforced in SQL.
+ *  5. DIRECT ANCHOR RESOLUTION (R1.15.1 — Posidon P3): the group anchor's
+ *     owner is resolved by ONE parameterized PRIMARY-KEY point read
+ *     (`kind = ? AND value = ?`) — INDEPENDENT of the ≤9-row discovery
+ *     probe page (no LIMIT growth, no unbounded scan). A valid, ready
+ *     owner outside the probe page is therefore STILL reusable with ZERO
+ *     new provider calls/charges. When the anchor EXISTS and NO candidate
+ *     verifies (an invalid/unusable owner), the handler returns the typed
+ *     PERMANENT `editorial_exact_content_blocked` BEFORE any provider
+ *     work: the paid provider→conflict→retry cycle is never entered, the
+ *     outcome is honest and bounded, and no anchor is ever taken over or
+ *     deleted. Two providers in a REAL race may still both run (their REAL
+ *     costs stay recorded); the anchor rollback contract is unchanged.
  *
  * Honest scope limits (recorded, never hidden): the reuse probe is bounded
- * by the SAME ≤9-row discovery probe page — stories beyond the probe page
- * are not consulted this round (overflow is logged); historical stories
- * WITHOUT sc1 content fingerprints are not consulted (NO backfill); a
- * reuse target whose draft died between lookup and commit is a typed
- * bounded retry that re-decides honestly.
+ * by the SAME ≤9-row discovery probe page PLUS the directly-resolved anchor
+ * owner (R1.15.1) — stories beyond both are not consulted this round
+ * (overflow is logged); historical stories WITHOUT sc1 content fingerprints
+ * are not consulted (NO backfill); historical/seeded drafts WITHOUT a
+ * coherent immutable document basis are NOT verifiable and therefore NOT
+ * reusable targets (documented conservative limit — R1.15.1 makes the
+ * draft's own document record the equality basis); a reuse target whose
+ * draft died between lookup and commit is a typed bounded retry that
+ * re-decides honestly; a replay whose existing relation cannot be re-proven
+ * against a usable draft falls through conservatively (never a fake
+ * success claim for an unprovable attachment).
  */
 import type { JobHandler, HandlerOutcome, JobExecutionContext } from '../../domain/jobs/handler';
 import type { EditorialPrepareDraftPayload } from '../../domain/jobs/payloads';
@@ -117,7 +148,7 @@ import {
   findEditorialSourceAttachment,
   findEditorialSourceItem,
   findStoryCandidatesByFingerprints,
-  findStoryReferenceItems,
+  findStoryIdByExactContentAnchor,
   findStableEditorialResult,
   recordEditorialAiRun,
   type EditorialSourceAttachmentRow,
@@ -155,11 +186,11 @@ import {
   planFingerprintLookups,
 } from '../../domain/editorial/story-fingerprints';
 import {
-  REUSE_REFERENCE_ITEM_LIMIT,
-  composedFullTextEquals,
   exactContentAnchorValue,
   exactContentDigest,
+  readReuseDocumentBasis,
   selectExactContentReuseTarget,
+  verifyExactContentReuseCandidate,
   type ReuseCandidateVerification,
 } from '../../domain/editorial/exact-content';
 import { buildCandidateDiscoveryReport } from '../../domain/editorial/candidate-discovery';
@@ -351,11 +382,16 @@ export function createEditorialPrepareDraftHandler(
     //          provider work): does THIS item already carry a durable
     //          source_report attachment? The atomic reuse commit guarantees
     //          claim + evidence + processed flip landed TOGETHER, so the
-    //          claim's existence IS the relation's existence — success with
-    //          ZERO writes and ZERO provider involvement. (Covers the
-    //          reused item's replay AND the defensive edge of an item whose
-    //          attachment outlived its draft's readiness: the durable work
-    //          is honestly done; no re-drafting, no re-charging.)
+    //          claim's existence IS the relation's existence.
+    //          R1.15.1 (Posidon P1): the relation answers with success ONLY
+    //          when it is PROVABLY the CURRENT snapshot's — its story must
+    //          still own a ready draft at the pipeline version whose
+    //          IMMUTABLE document basis (sourceReport + evidenceGuard
+    //          snapshot identity) byte-verifies THIS snapshot's full
+    //          composed text. An old relation of a DIFFERENT snapshot (the
+    //          item's text changed underneath it) NEVER succeeds here: it
+    //          falls through and the new text takes its own honest path —
+    //          the old provenance stays untouched and unclaimed.
     let attachment: EditorialSourceAttachmentRow | null = null;
     try {
       attachment = await findEditorialSourceAttachment(executor, item.id);
@@ -368,11 +404,49 @@ export function createEditorialPrepareDraftHandler(
       return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
     }
     if (attachment !== null) {
-      logger?.info('editorial.prepare_draft.provenance_already_attached', {
+      try {
+        const replayDraft = await findDraftForStory(
+          executor,
+          attachment.story_id,
+          EDITORIAL_DRAFT_VERSION,
+        );
+        if (replayDraft !== null && replayDraft.status === 'ready') {
+          const replayBasis = readReuseDocumentBasis(replayDraft.document_json);
+          const replayReference =
+            replayBasis === null
+              ? null
+              : await findEditorialSourceItem(executor, replayBasis.sourceItemId);
+          const replayDecision = verifyExactContentReuseCandidate({
+            basis: replayBasis,
+            referenceRow: replayReference,
+            fullText: fullEvidenceText,
+          });
+          if (replayDecision.verified) {
+            logger?.info('editorial.prepare_draft.provenance_already_attached', {
+              storyId: attachment.story_id,
+              claimId: attachment.claim_id,
+            });
+            // The durable work IS provably done for THIS snapshot:
+            // success with ZERO writes and ZERO provider involvement.
+            return { kind: 'success' };
+          }
+        }
+      } catch (error) {
+        // A DB error in the replay verification is NEVER a fabricated
+        // "unprovable": typed, bounded retry, zero provider involvement.
+        logger?.warn('editorial.prepare_draft.replay_verification_failed', {
+          error: error instanceof Error ? error.message : 'unknown',
+        });
+        return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+      }
+      // The relation exists but is NOT provably this snapshot's (a NEW
+      // snapshot under an OLD attachment — P1 — or an unusable target
+      // draft): CONSERVATIVE fall-through, honestly logged. The new text
+      // takes its own path; the old relation is never claimed, rewritten,
+      // or reattributed.
+      logger?.warn('editorial.prepare_draft.attachment_not_proven_for_current_snapshot', {
         storyId: attachment.story_id,
-        claimId: attachment.claim_id,
       });
-      return { kind: 'success' };
     }
 
     // ---- 5.5 R1.13 (Phase 5C-1) LIMITED candidate discovery — strictly
@@ -436,27 +510,57 @@ export function createEditorialPrepareDraftHandler(
       overflow: candidateDiscovery.lookup.overflowObserved,
     });
 
-    // ---- 5.55 R1.15 (Phase 5C-3) VERIFIED EXACT-CONTENT REUSE — the
-    //          same content_hash lookup outcome the discovery already
-    //          produced (NO extra probe), BEFORE any provider work: each
-    //          candidate must BOTH still own a usable ready draft AND
-    //          REALLY equal this item's full composed text (byte-exact,
-    //          through at least one attached reference item — the
+    // ---- 5.55 R1.15 (Phase 5C-3) VERIFIED EXACT-CONTENT REUSE — BEFORE
+    //          any provider work. R1.15.1 (Posidon P3): the candidate set
+    //          is the DIRECTLY-resolved group-anchor owner (ONE parameterized
+    //          PK point read on (kind,value) — independent of the ≤9-row
+    //          discovery probe page) FIRST, then the probe page's
+    //          content_hash outcome (NO extra probe). Each candidate must
+    //          BOTH still own a usable ready draft AND REALLY equal this
+    //          item's full composed text through the draft's IMMUTABLE
+    //          document basis (R1.15.1 — Posidon P2: the equality basis is
+    //          the draft's own document record + the bridged original
+    //          reference row — never a mutable source_items row alone; the
     //          fingerprint is only the locator). On a verified target: the
     //          item's OWN deterministic source_report claim + mentions
     //          evidence + processed flip land in ONE fenced atomic batch
-    //          (fence + snapshot + target-validity predicates) — the
-    //          second provenance is ADDED, the reused draft/story/report
-    //          documents are NEVER rewritten, confidence/trust stay
-    //          untouched, and ZERO provider calls happen (NO ai_runs row —
-    //          a provider that never ran is never fabricated). The probe's
-    //          overflow and any verification miss are logged honestly; the
-    //          item then takes the normal independent path.
+    //          (fence + snapshot + the EXTENDED target-validity predicate:
+    //          the exact verified document bytes AND the compared reference
+    //          identity are re-evaluated INSIDE the batch) — the second
+    //          provenance is ADDED, the reused draft/story/report documents
+    //          are NEVER rewritten, confidence/trust stay untouched, and
+    //          ZERO provider calls happen (NO ai_runs row — a provider that
+    //          never ran is never fabricated). If the anchor EXISTS but NO
+    //          candidate verifies (an invalid/unusable owner), the typed
+    //          PERMANENT `editorial_exact_content_blocked` is returned
+    //          BEFORE any provider work: the paid
+    //          provider→conflict→retry cycle is never entered. Any other
+    //          verification miss proceeds to the honest independent path.
     const contentOutcome = lookupOutcomes.find((outcome) => outcome.kind === 'content_hash');
-    if (contentOutcome !== undefined && contentOutcome.storyIds.length > 0) {
+    let anchorOwnerStoryId: string | null = null;
+    try {
+      anchorOwnerStoryId = await findStoryIdByExactContentAnchor(executor, exactContentAnchor);
+    } catch (error) {
+      // A DB error in the anchor resolution is NEVER a fabricated "no
+      // anchor": typed bounded retry, zero provider calls, zero charges.
+      logger?.warn('editorial.prepare_draft.anchor_resolution_failed', {
+        error: error instanceof Error ? error.message : 'unknown',
+      });
+      return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+    }
+    const reuseCandidateStoryIds = [
+      ...new Set(
+        [
+          ...(anchorOwnerStoryId !== null ? [anchorOwnerStoryId] : []),
+          ...(contentOutcome?.storyIds ?? []),
+        ].filter((candidateStoryId) => candidateStoryId !== storyId),
+      ),
+    ];
+    if (reuseCandidateStoryIds.length > 0) {
       try {
         const verifications: ReuseCandidateVerification[] = [];
-        for (const candidateStoryId of contentOutcome.storyIds) {
+        const documentJsonByStoryId = new Map<string, string>();
+        for (const candidateStoryId of reuseCandidateStoryIds) {
           const candidateDraft = await findDraftForStory(
             executor,
             candidateStoryId,
@@ -464,29 +568,62 @@ export function createEditorialPrepareDraftHandler(
           );
           const hasUsableDraft = candidateDraft !== null && candidateDraft.status === 'ready';
           let contentVerified = false;
-          if (hasUsableDraft) {
-            const referenceItems = await findStoryReferenceItems(
-              executor,
-              candidateStoryId,
-              REUSE_REFERENCE_ITEM_LIMIT,
-            );
-            contentVerified = referenceItems.some((reference) =>
-              composedFullTextEquals(buildFullEvidenceText(reference), fullEvidenceText),
-            );
+          let fence: ReuseCandidateVerification['fence'];
+          if (hasUsableDraft && candidateDraft !== null) {
+            documentJsonByStoryId.set(candidateStoryId, candidateDraft.document_json);
+            // R1.15.1: the immutable document basis of the candidate's OWN
+            // ready draft — plus the candidate's ORIGINAL reference row
+            // (located by the document, bridged by the guard's recorded
+            // snapshot identity when the excerpt is truncated).
+            const basis = readReuseDocumentBasis(candidateDraft.document_json);
+            const referenceRow =
+              basis === null ? null : await findEditorialSourceItem(executor, basis.sourceItemId);
+            const decision = verifyExactContentReuseCandidate({
+              basis,
+              referenceRow,
+              fullText: fullEvidenceText,
+            });
+            contentVerified = decision.verified;
+            fence = decision.fence;
           }
-          verifications.push({ storyId: candidateStoryId, hasUsableDraft, contentVerified });
+          verifications.push({ storyId: candidateStoryId, hasUsableDraft, contentVerified, fence });
         }
         const target = selectExactContentReuseTarget(verifications);
         if (target === null) {
-          // Honest miss: none of the probed candidates is BOTH usable and
-          // really content-equal (includes stale/corrupt fingerprints —
-          // scenario: the fingerprint said equal, the text says NO). The
-          // item proceeds independently; the overflow flag stays honest.
+          if (anchorOwnerStoryId !== null) {
+            // R1.15.1 (Posidon P3): the exact content is ALREADY OWNED (the
+            // group anchor exists) but NO candidate — including the anchor's
+            // own owner — is a verifiable usable reuse target. The fenced
+            // normal commit would deterministically collide on the anchor
+            // and roll back, so the PAID provider→conflict→retry cycle is
+            // never entered: typed PERMANENT, BEFORE any provider work —
+            // zero charges, zero writes, zero fake success, and no anchor
+            // is ever taken over or deleted. A later re-enqueue after the
+            // owner heals decides again honestly.
+            logger?.warn('editorial.prepare_draft.exact_content_group_blocked', {
+              anchorOwnerStoryId,
+              candidatesProbed: verifications.length,
+              overflow: contentOutcome?.overflow ?? false,
+            });
+            return { kind: 'permanent', reasonCode: 'editorial_exact_content_blocked' };
+          }
+          // Honest miss: no anchor and none of the probed candidates is
+          // BOTH usable and really content-equal (includes stale/corrupt
+          // fingerprints — scenario: the fingerprint said equal, the text
+          // says NO). The item proceeds independently; the overflow flag
+          // stays honest.
           logger?.info('editorial.prepare_draft.exact_content_no_verified_target', {
             candidatesProbed: verifications.length,
-            overflow: contentOutcome.overflow,
+            overflow: contentOutcome?.overflow ?? false,
           });
         } else {
+          if (target.fence === undefined) {
+            // Unreachable by construction (a selected target always carries
+            // its verified fence identity); the conservative guard keeps
+            // the commit input total.
+            logger?.error('editorial.prepare_draft.exact_content_missing_fence');
+            return { kind: 'retry', reasonCode: 'job_internal_error' };
+          }
           const reuseNowMs = nowMs();
           const reuseClaimId = await sourceReportClaimId(target.storyId, item.id);
           const reuseClaim = buildSourceReportClaim({ sourceName: source.name, excerpt });
@@ -500,7 +637,16 @@ export function createEditorialPrepareDraftHandler(
               sourceId: item.source_id,
               contentHash: item.content_hash,
             },
-            target: { storyId: target.storyId, draftVersion: EDITORIAL_DRAFT_VERSION },
+            target: {
+              storyId: target.storyId,
+              draftVersion: EDITORIAL_DRAFT_VERSION,
+              // R1.15.1: the verified comparison basis, carried INTO the
+              // SQL predicate — the exact document bytes AND the original
+              // reference-row identity as read at verification time.
+              documentJson: documentJsonByStoryId.get(target.storyId)!,
+              referenceItemId: target.fence.referenceItemId,
+              referenceContentHash: target.fence.referenceContentHash,
+            },
             claim: {
               id: reuseClaimId,
               storyId: target.storyId,

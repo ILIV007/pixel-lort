@@ -113,6 +113,11 @@ export interface EditorialDraftRow {
   readonly story_id: string;
   readonly status: string;
   readonly version: number;
+  /** R1.15.1: the draft's OWN immutable document record — the reuse
+   * verification basis (`sourceReport` + `evidenceGuard.snapshot`) lives
+   * here. Drafts are write-once (no update path exists), so the basis read
+   * here is the snapshot content the draft was REALLY built from. */
+  readonly document_json: string;
 }
 
 export async function findDraftForStory(
@@ -121,7 +126,8 @@ export async function findDraftForStory(
   version: number,
 ): Promise<EditorialDraftRow | null> {
   return executor.first<EditorialDraftRow>({
-    sql: `SELECT id, story_id, status, version FROM drafts WHERE story_id = ? AND version = ?`,
+    sql: `SELECT id, story_id, status, version, document_json
+            FROM drafts WHERE story_id = ? AND version = ?`,
     params: [storyId, version],
   });
 }
@@ -178,13 +184,41 @@ export async function findEditorialSourceAttachment(
 }
 
 /**
+ * The DIRECT exact-content anchor resolution (R1.15.1 — Posidon P3): ONE
+ * parameterized PRIMARY-KEY point read on `story_fingerprints(kind,value)`
+ * for the group-unique anchor value `sc1:<digest>` — INDEPENDENT of the ≤9-row
+ * discovery probe page (no LIMIT growth, no unbounded scan, no wildcard).
+ * Returns the owner story id, or `null` when NO story owns this exact
+ * content yet. The anchor alone is a LOCATOR: the owner must still pass the
+ * full reuse verification (usable ready draft + immutable basis) before any
+ * reuse, and a BLOCKING anchor with an unusable owner never drives the paid
+ * provider→conflict→retry cycle (the handler decides before any provider
+ * work).
+ */
+export async function findStoryIdByExactContentAnchor(
+  executor: DbExecutor,
+  anchor: {
+    readonly kind: StoryFingerprintKind;
+    readonly value: string;
+  },
+): Promise<string | null> {
+  const row = await executor.first<{ story_id: string }>({
+    sql: `SELECT story_id FROM story_fingerprints WHERE kind = ? AND value = ?`,
+    params: [anchor.kind, anchor.value],
+  });
+  return row?.story_id ?? null;
+}
+
+/**
  * The REFERENCE items of one candidate story (R1.15): the source items
  * attached to the story through its `source_report` claims' evidence —
- * the ONLY honest basis for the byte-exact content verification that must
- * precede any reuse decision (a fingerprint is a locator, never the
- * decision). Bounded, deterministic (ascending item id); all joins are
- * index/PK driven (claims by story, evidence by claim's UNIQUE index,
- * source_items by PK).
+ * the honest reference surface of a story's provenance. R1.15.1: the reuse
+ * DECISION no longer compares these mutable rows (the draft's immutable
+ * document basis is the decision, through the ONE original reference row);
+ * this bounded read remains the store contract for inspecting a story's
+ * attached references. Bounded, deterministic (ascending item id); all
+ * joins are index/PK driven (claims by story, evidence by claim's UNIQUE
+ * index, source_items by PK).
  */
 export async function findStoryReferenceItems(
   executor: DbExecutor,
@@ -800,17 +834,34 @@ async function classifyCommitMetas(
   };
 }
 
-/** The reuse-target validity predicate (R1.15): the story the reuse
- * attaches to must STILL exist and STILL own a usable ready draft at the
- * pipeline's draft version — evaluated INSIDE the atomic batch (a target
- * that died between the lookup and the commit produces ZERO effects with
- * a distinct typed outcome, never a partial attachment). */
+/** The reuse-target validity predicate (R1.15; R1.15.1 — Posidon P2): the
+ * story the reuse attaches to must STILL exist and STILL own a usable ready
+ * draft at the pipeline's draft version WHOSE EXACT DOCUMENT BYTES are the
+ * basis the equality was verified against (`rd.document_json = ?`) AND
+ * whose ORIGINAL reference row — located through the story's own
+ * source_report provenance — still carries the content_hash identity that
+ * was really compared (`ri.id = ? AND ri.content_hash = ?`). ALL evaluated
+ * INSIDE the atomic batch on EVERY reuse artifact: a reference mutated
+ * between the verification and the commit (or a draft document that changed
+ * at all) makes the WHOLE batch write NOTHING with the distinct typed
+ * `targetInvalid` outcome — the compared basis is carried into SQL, never
+ * re-read in JavaScript. */
 const REUSE_TARGET_PREDICATE = `EXISTS (SELECT 1 FROM stories rs
                                   WHERE rs.id = ?
                                     AND EXISTS (SELECT 1 FROM drafts rd
                                                  WHERE rd.story_id = rs.id
                                                    AND rd.status = 'ready'
-                                                   AND rd.version = ?))`;
+                                                   AND rd.version = ?
+                                                   AND rd.document_json = ?
+                                                   AND EXISTS (SELECT 1 FROM claims rc
+                                                                JOIN evidence re
+                                                                  ON re.claim_id = rc.id
+                                                                JOIN source_items ri
+                                                                  ON ri.id = re.source_item_id
+                                                               WHERE rc.story_id = rs.id
+                                                                 AND rc.claim_type = 'source_report'
+                                                                 AND ri.id = ?
+                                                                 AND ri.content_hash = ?)))`;
 
 /** Input of the R1.15 fenced REUSE commit. */
 export interface EditorialReuseCommitInput {
@@ -828,10 +879,21 @@ export interface EditorialReuseCommitInput {
     readonly contentHash: string;
   };
   /** The verified reuse target: the story whose usable ready draft will
-   * serve this item's exact content. */
+   * serve this item's exact content. R1.15.1: the comparison basis is
+   * carried INTO the SQL predicate — the EXACT document bytes the equality
+   * was verified against, and the ORIGINAL reference row identity (item id
+   * + content_hash AS READ at verification time). A mutation of either
+   * between the verification and this batch produces ZERO effects. */
   readonly target: {
     readonly storyId: string;
     readonly draftVersion: number;
+    /** The verified draft's document_json — the immutable basis bytes. */
+    readonly documentJson: string;
+    /** The story's ORIGINAL reference item id (the snapshot the draft was
+     * built from, per the draft's own document record). */
+    readonly referenceItemId: string;
+    /** The reference row's content_hash AS READ at verification. */
+    readonly referenceContentHash: string;
   };
   /** The reusing item's OWN source_report claim (its own provenance —
    * deterministic per (story, item); the old draft's claims are never
@@ -900,7 +962,13 @@ export async function commitEditorialReuse(
     input.snapshot.sourceId,
     input.snapshot.contentHash,
   ];
-  const targetParams = [input.target.storyId, input.target.draftVersion];
+  const targetParams = [
+    input.target.storyId,
+    input.target.draftVersion,
+    input.target.documentJson,
+    input.target.referenceItemId,
+    input.target.referenceContentHash,
+  ];
 
   const metas = await executor.batch([
     {
