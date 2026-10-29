@@ -108,10 +108,6 @@ function createHarness(options?: {
   const lines: string[] = [];
   const sink: LogSink = (_level, line) => {
     lines.push(line);
-    if (process.env.EDITORIAL_DEBUG) {
-      // eslint-disable-next-line no-console -- optional debug aid (EDITORIAL_DEBUG=1)
-      console.log(`[LOG] ${line}`);
-    }
   };
   const logger = createLogger({ level: 'debug', base: { evt: 'test' }, clock, sink });
 
