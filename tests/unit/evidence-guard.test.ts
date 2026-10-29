@@ -417,3 +417,264 @@ describe('evidence guard v1 — determinism and versioning contract', () => {
     expectNoSuccessVocabulary(report);
   });
 });
+
+// ---------------------------------------------------------------------------
+// R1.12.1 — the reader is a v1 CONTRACT validator (shape + invariants), not
+// a finite-number/string-array pass-through. `guard_v1` is returned ONLY for
+// payloads buildEvidenceGuardReport could actually have produced; a payload
+// that merely CLAIMS version 1 while violating the v1 contract (stripped
+// scopes, fractional/negative indexes, impossible counts, unknown codes,
+// status/identity inconsistencies) is malformed — never a current result.
+// Posidon's two independent counterexamples are the first two tests below;
+// they were recorded RED on the R1.12 base (c90ab15) before the fix.
+// ---------------------------------------------------------------------------
+
+/** The base mutation scenario: one verbatim claim + one unresolved claim. */
+function twoClaimInput(): EvidenceGuardInput {
+  return guardInput({
+    draftClaims: [
+      { text: 'به‌روزرسانی بزرگ بازی نمونه منتشر شد.', evidenceIds: ['item-1'] },
+      { text: 'ادعای مستقل نامرتبط.', evidenceIds: ['item-1'] },
+    ],
+  });
+}
+
+type MutableReport = Record<string, unknown>;
+
+/** A real builder report (JSON-cloned to a mutable record), then mutated. */
+function mutatedV1Document(mutate: (report: MutableReport) => void): unknown {
+  const report = JSON.parse(
+    JSON.stringify(buildEvidenceGuardReport(twoClaimInput())),
+  ) as unknown as MutableReport;
+  mutate(report);
+  return { evidenceGuard: report };
+}
+
+function claimsOf(report: MutableReport): Record<string, unknown>[] {
+  return report['claims'] as Record<string, unknown>[];
+}
+
+function setCount(report: MutableReport, key: string, value: unknown): void {
+  (report['counts'] as Record<string, unknown>)[key] = value;
+}
+
+const malformedCases: readonly (readonly [string, (report: MutableReport) => void])[] = [
+  [
+    'a count inconsistent with the claim statuses',
+    (report) => {
+      setCount(report, 'invalidReferenceOrSnapshot', 1);
+    },
+  ],
+  [
+    'total different from the claims length',
+    (report) => {
+      setCount(report, 'total', 5);
+    },
+  ],
+  [
+    'a duplicate claimIndex',
+    (report) => {
+      claimsOf(report)[1]!['claimIndex'] = 0;
+    },
+  ],
+  [
+    'a claimIndex out of array order',
+    (report) => {
+      claimsOf(report)[0]!['claimIndex'] = 1;
+    },
+  ],
+  [
+    'a negative integer claimIndex',
+    (report) => {
+      claimsOf(report)[0]!['claimIndex'] = -1;
+    },
+  ],
+  [
+    'an unknown reasonCode',
+    (report) => {
+      claimsOf(report)[0]!['reasonCodes'] = ['direct_text_observed', 'mystery_code'];
+    },
+  ],
+  [
+    'empty reasonCodes',
+    (report) => {
+      claimsOf(report)[0]!['reasonCodes'] = [];
+    },
+  ],
+  [
+    'duplicated reasonCodes',
+    (report) => {
+      claimsOf(report)[1]!['reasonCodes'] = ['no_direct_text_match', 'no_direct_text_match'];
+    },
+  ],
+  [
+    'a direct_text_observed claim citing no_direct_text_match',
+    (report) => {
+      claimsOf(report)[0]!['reasonCodes'] = ['no_direct_text_match'];
+    },
+  ],
+  [
+    'an unresolved claim without no_direct_text_match',
+    (report) => {
+      claimsOf(report)[1]!['reasonCodes'] = ['excerpt_truncated_coverage'];
+    },
+  ],
+  [
+    'excerpt_truncated_coverage on a NON-truncated report',
+    (report) => {
+      claimsOf(report)[1]!['reasonCodes'] = ['no_direct_text_match', 'excerpt_truncated_coverage'];
+    },
+  ],
+  [
+    'a removed mandatory limitation label',
+    (report) => {
+      report['limitations'] = (report['limitations'] as string[]).slice(1);
+    },
+  ],
+  [
+    'an extra unknown limitation label',
+    (report) => {
+      report['limitations'] = [...EVIDENCE_GUARD_LIMITATIONS, 'extra_label'];
+    },
+  ],
+  [
+    'a partial unassessedFields tuple',
+    (report) => {
+      report['unassessedFields'] = ['headlineFa'];
+    },
+  ],
+  [
+    'an extended unassessedFields tuple',
+    (report) => {
+      report['unassessedFields'] = ['headlineFa', 'summaryFa', 'price'];
+    },
+  ],
+  [
+    'excerptMaxChars drifting from the builder constant',
+    (report) => {
+      (report['evidence'] as Record<string, unknown>)['excerptMaxChars'] = 1234;
+    },
+  ],
+  [
+    'an evaluated report carrying a not_evaluated claim',
+    (report) => {
+      claimsOf(report)[0]!['status'] = 'not_evaluated_identity_invalid';
+      claimsOf(report)[0]!['reasonCodes'] = ['draft_snapshot_identity_mismatch'];
+    },
+  ],
+  [
+    'invalid_snapshot_identity status with evaluated claims',
+    (report) => {
+      report['evaluationStatus'] = 'invalid_snapshot_identity';
+    },
+  ],
+  [
+    'an identity reason code inside an evaluated report',
+    (report) => {
+      claimsOf(report)[1]!['reasonCodes'] = [
+        'no_direct_text_match',
+        'draft_snapshot_identity_mismatch',
+      ];
+    },
+  ],
+  [
+    'evaluated status while the stored identity fields disagree',
+    (report) => {
+      (report['evidence'] as Record<string, unknown>)['evidenceId'] = 'item-other';
+    },
+  ],
+  [
+    'invalid_snapshot_identity without the visible failure cited',
+    (report) => {
+      (report['evidence'] as Record<string, unknown>)['evidenceId'] = 'item-other';
+      report['evaluationStatus'] = 'invalid_snapshot_identity';
+      claimsOf(report)[0]!['status'] = 'not_evaluated_identity_invalid';
+      claimsOf(report)[0]!['reasonCodes'] = ['draft_snapshot_identity_mismatch'];
+      claimsOf(report)[1]!['status'] = 'not_evaluated_identity_invalid';
+      claimsOf(report)[1]!['reasonCodes'] = ['draft_snapshot_identity_mismatch'];
+    },
+  ],
+];
+
+describe('evidence guard v1 — R1.12.1 reader contract: guard_v1 ONLY for true v1 reports', () => {
+  it('COUNTEREXAMPLE A (Posidon) — stripped limitations/unassessedFields is malformed, never guard_v1', () => {
+    const read = readEvidenceGuardReport(
+      mutatedV1Document((report) => {
+        report['limitations'] = [];
+        report['unassessedFields'] = [];
+      }),
+    );
+    expect(read.kind).toBe('malformed');
+  });
+
+  it('COUNTEREXAMPLE B (Posidon) — fractional/negative index and impossible counts are malformed', () => {
+    const read = readEvidenceGuardReport(
+      mutatedV1Document((report) => {
+        claimsOf(report)[0]!['claimIndex'] = -0.5;
+        setCount(report, 'total', -3);
+        setCount(report, 'directTextObserved', 900);
+      }),
+    );
+    expect(read.kind).toBe('malformed');
+  });
+
+  it.each(malformedCases)('malformed: %s', (_label, mutate) => {
+    expect(readEvidenceGuardReport(mutatedV1Document(mutate)).kind).toBe('malformed');
+  });
+
+  it.each([
+    ['verbatim claim only', guardInput()],
+    [
+      'unresolved claim only',
+      guardInput({ draftClaims: [{ text: 'ادعای دیگر.', evidenceIds: ['item-1'] }] }),
+    ],
+    [
+      'truncated excerpt with an absent claim text',
+      guardInput({
+        evidence: { evidenceId: 'item-1', excerptText: 'متن کوتاه', excerptTruncated: true },
+        draftClaims: [{ text: 'ناموجود در مأخذ.', evidenceIds: ['item-1'] }],
+      }),
+    ],
+    [
+      'invalid references',
+      guardInput({
+        draftClaims: [
+          { text: '', evidenceIds: [] },
+          { text: 'متنی.', evidenceIds: ['item-ghost'] },
+        ],
+      }),
+    ],
+    ['identity invalid on the draft side', guardInput({ draftSourceItemId: 'item-999' })],
+    [
+      'identity invalid on the evidence side',
+      guardInput({
+        evidence: { evidenceId: 'item-other', excerptText: 'متنی', excerptTruncated: false },
+      }),
+    ],
+    [
+      'identity invalid with NO claims at all',
+      guardInput({ draftClaims: [], draftSourceItemId: 'item-999' }),
+    ],
+    ['empty claims, identity valid', guardInput({ draftClaims: [] })],
+  ])('a real builder report round-trips as guard_v1: %s', (_label, input) => {
+    const report = buildEvidenceGuardReport(input);
+    expect(readEvidenceGuardReport({ evidenceGuard: report })).toEqual({
+      kind: 'guard_v1',
+      report,
+    });
+  });
+
+  it('the pre-existing absent/unsupported_version/malformed behaviors are preserved', () => {
+    expect(readEvidenceGuardReport({ schemaVersion: 1, modelClaims: [] })).toEqual({
+      kind: 'absent',
+    });
+    expect(readEvidenceGuardReport({ evidenceGuard: { guardVersion: 2 } })).toEqual({
+      kind: 'unsupported_version',
+      guardVersion: 2,
+    });
+    expect(readEvidenceGuardReport({ evidenceGuard: { guardVersion: 1 } })).toEqual({
+      kind: 'malformed',
+    });
+    expect(readEvidenceGuardReport(null)).toEqual({ kind: 'malformed' });
+  });
+});

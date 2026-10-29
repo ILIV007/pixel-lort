@@ -263,6 +263,9 @@ export function buildEvidenceGuardReport(input: EvidenceGuardInput): EvidenceGua
 
 // ---------------------------------------------------------------------------
 // Versioned reader — old/unversioned payloads are never "current results".
+// R1.12.1: the reader validates the REAL v1 contract (shape AND invariants)
+// before surfacing guard_v1; it is a shape/invariant validator, NOT a
+// cryptographic authenticity proof and NOT semantic support.
 // ---------------------------------------------------------------------------
 
 export type EvidenceGuardReportRead =
@@ -271,7 +274,8 @@ export type EvidenceGuardReportRead =
   | { readonly kind: 'absent' }
   /** A guard-shaped payload with a different (e.g. future) version. */
   | { readonly kind: 'unsupported_version'; readonly guardVersion: unknown }
-  /** Not a guard payload at all. */
+  /** Not a guard payload at all — including a payload that CLAIMS version 1
+   * while violating the v1 contract below. */
   | { readonly kind: 'malformed' };
 
 const GUARD_CLAIM_STATUSES: ReadonlySet<string> = new Set([
@@ -286,18 +290,119 @@ const GUARD_EVALUATION_STATUSES: ReadonlySet<string> = new Set([
   'invalid_snapshot_identity',
 ]);
 
+/** Every reason code v1 can ever carry (the union over all claim statuses). */
+const GUARD_REASON_CODES: ReadonlySet<string> = new Set([
+  'direct_text_observed',
+  'no_direct_text_match',
+  'excerpt_truncated_coverage',
+  'empty_claim_text',
+  'empty_evidence_refs',
+  'unknown_evidence_id',
+  'evidence_id_identity_inconsistent',
+  'draft_snapshot_identity_mismatch',
+]);
+
+/** Codes the builder emits ONLY for `not_evaluated_identity_invalid`. */
+const GUARD_IDENTITY_REASON_CODES: ReadonlySet<string> = new Set([
+  'evidence_id_identity_inconsistent',
+  'draft_snapshot_identity_mismatch',
+]);
+
+/** Codes the builder emits ONLY for `invalid_reference_or_snapshot`. */
+const GUARD_REFERENCE_REASON_CODES: ReadonlySet<string> = new Set([
+  'empty_claim_text',
+  'empty_evidence_refs',
+  'unknown_evidence_id',
+]);
+
+/** Codes the builder emits ONLY for `unresolved_requires_further_verification`. */
+const GUARD_UNRESOLVED_REASON_CODES: ReadonlySet<string> = new Set([
+  'no_direct_text_match',
+  'excerpt_truncated_coverage',
+]);
+
 function isStringArray(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
-function isNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/** Exact string-array equality (order included) — for the fixed tuple. */
+function isExactStringArray(value: readonly string[], expected: readonly string[]): boolean {
+  return value.length === expected.length && expected.every((item, index) => value[index] === item);
+}
+
+/**
+ * v1 limitations are the FIXED code-defined label set: every label present,
+ * no duplicates, no extras. Removing or adding any label is not a v1 report.
+ */
+function isFixedLimitationSet(value: readonly string[]): boolean {
+  const fixed = EVIDENCE_GUARD_LIMITATIONS as readonly string[];
+  return (
+    value.length === fixed.length &&
+    new Set(value).size === value.length &&
+    value.every((label) => fixed.includes(label))
+  );
+}
+
+/**
+ * Per-claim v1 reason-code contract: the builder emits non-empty, duplicate-
+ * free codes from the allowed set, consistent with the claim status and with
+ * the report's own evidence record.
+ */
+function claimReasonCodesAreConsistent(
+  status: string,
+  codes: readonly string[],
+  excerptTruncated: boolean,
+): boolean {
+  if (codes.length === 0 || new Set(codes).size !== codes.length) {
+    return false;
+  }
+  if (!codes.every((code) => GUARD_REASON_CODES.has(code))) {
+    return false;
+  }
+  switch (status) {
+    case 'direct_text_observed':
+      // The builder emits exactly this single code for an observed claim.
+      return codes.length === 1 && codes[0] === 'direct_text_observed';
+    case 'unresolved_requires_further_verification':
+      // Must cite the absence; the coverage warning may appear ONLY when the
+      // report itself records a truncated excerpt.
+      return (
+        codes.every((code) => GUARD_UNRESOLVED_REASON_CODES.has(code)) &&
+        codes.includes('no_direct_text_match') &&
+        (!codes.includes('excerpt_truncated_coverage') || excerptTruncated)
+      );
+    case 'invalid_reference_or_snapshot':
+      return codes.every((code) => GUARD_REFERENCE_REASON_CODES.has(code));
+    case 'not_evaluated_identity_invalid':
+      return codes.every((code) => GUARD_IDENTITY_REASON_CODES.has(code));
+    default:
+      return false;
+  }
 }
 
 /**
  * Read the guard payload from a PARSED `drafts.document_json` value.
  * Consumers must treat `absent`/`unsupported_version`/`malformed` as "no
  * current guard result" — none of them is ever a validation of the draft.
+ *
+ * R1.12.1 contract (what `guard_v1` promises — nothing more):
+ * - the payload satisfies the REAL v1 invariants of `buildEvidenceGuardReport`:
+ *   the fixed limitation set, the exact unassessed tuple, `excerptMaxChars`
+ *   equal to the builder constant, per-claim indexes that are non-negative
+ *   integers naming their own array position, non-negative integer counts
+ *   that EXACTLY describe the claims, per-status-consistent reason codes,
+ *   and an evaluationStatus consistent with the claims and with the report's
+ *   OWN stored identity fields;
+ * - identity fields stay pass-through strings (the pure builder guarantees
+ *   no hash format — none is invented here; no new caps, no business limits);
+ * - `absent`, `unsupported_version` and `malformed` keep their distinct
+ *   meanings; an unknown/different version is never treated as supported;
+ * - every report the builder can currently produce (including identity-
+ *   invalid ones and empty claim lists) remains readable as `guard_v1`.
  */
 export function readEvidenceGuardReport(document: unknown): EvidenceGuardReportRead {
   if (typeof document !== 'object' || document === null) {
@@ -314,47 +419,133 @@ export function readEvidenceGuardReport(document: unknown): EvidenceGuardReportR
   if (g['guardVersion'] !== EVIDENCE_GUARD_VERSION) {
     return { kind: 'unsupported_version', guardVersion: g['guardVersion'] };
   }
+
+  const evaluationStatus = g['evaluationStatus'];
+  const snapshot = g['snapshot'];
+  const evidence = g['evidence'];
+  const limitations = g['limitations'];
+  const unassessedFields = g['unassessedFields'];
   if (
-    typeof g['evaluationStatus'] !== 'string' ||
-    !GUARD_EVALUATION_STATUSES.has(g['evaluationStatus']) ||
-    typeof g['snapshot'] !== 'object' ||
-    g['snapshot'] === null ||
-    typeof (g['snapshot'] as Record<string, unknown>)['sourceItemId'] !== 'string' ||
-    typeof (g['snapshot'] as Record<string, unknown>)['contentHash'] !== 'string' ||
-    typeof g['evidence'] !== 'object' ||
-    g['evidence'] === null ||
-    typeof (g['evidence'] as Record<string, unknown>)['evidenceId'] !== 'string' ||
-    typeof (g['evidence'] as Record<string, unknown>)['excerptTruncated'] !== 'boolean' ||
-    !isNumber((g['evidence'] as Record<string, unknown>)['excerptMaxChars']) ||
-    !isStringArray(g['limitations']) ||
-    !isStringArray(g['unassessedFields']) ||
+    typeof evaluationStatus !== 'string' ||
+    !GUARD_EVALUATION_STATUSES.has(evaluationStatus) ||
+    typeof snapshot !== 'object' ||
+    snapshot === null ||
+    typeof (snapshot as Record<string, unknown>)['sourceItemId'] !== 'string' ||
+    typeof (snapshot as Record<string, unknown>)['contentHash'] !== 'string' ||
+    typeof evidence !== 'object' ||
+    evidence === null ||
+    typeof (evidence as Record<string, unknown>)['evidenceId'] !== 'string' ||
+    typeof (evidence as Record<string, unknown>)['excerptTruncated'] !== 'boolean' ||
+    // The builder ALWAYS emits this constant — drift is not a v1 report.
+    (evidence as Record<string, unknown>)['excerptMaxChars'] !== EDITORIAL_EXCERPT_MAX_CHARS ||
+    !Array.isArray(limitations) ||
+    !isStringArray(limitations) ||
+    !isFixedLimitationSet(limitations) ||
+    !Array.isArray(unassessedFields) ||
+    !isStringArray(unassessedFields) ||
+    // v1 assesses NO headline/summary: exactly the fixed two-field tuple.
+    !isExactStringArray(unassessedFields, ['headlineFa', 'summaryFa']) ||
     !Array.isArray(g['claims'])
   ) {
     return { kind: 'malformed' };
   }
-  for (const claim of g['claims'] as unknown[]) {
+
+  const sourceItemId = (snapshot as Record<string, unknown>)['sourceItemId'] as string;
+  const evidenceId = (evidence as Record<string, unknown>)['evidenceId'] as string;
+  const excerptTruncated = (evidence as Record<string, unknown>)['excerptTruncated'] as boolean;
+
+  // ---- Claims: shape, index/order invariants, per-status code contract.
+  const claims = g['claims'] as unknown[];
+  for (let position = 0; position < claims.length; position++) {
+    const claim = claims[position];
+    if (typeof claim !== 'object' || claim === null) {
+      return { kind: 'malformed' };
+    }
+    const record = claim as Record<string, unknown>;
+    const status = record['status'];
+    const codes = record['reasonCodes'];
     if (
-      typeof claim !== 'object' ||
-      claim === null ||
-      !isNumber((claim as Record<string, unknown>)['claimIndex']) ||
-      typeof (claim as Record<string, unknown>)['status'] !== 'string' ||
-      !GUARD_CLAIM_STATUSES.has((claim as Record<string, unknown>)['status'] as string) ||
-      !isStringArray((claim as Record<string, unknown>)['reasonCodes'])
+      // claimIndex: a non-negative INTEGER naming its own array position —
+      // duplicates and out-of-order indexes are impossible from the builder.
+      !isNonNegativeInteger(record['claimIndex']) ||
+      record['claimIndex'] !== position ||
+      typeof status !== 'string' ||
+      !GUARD_CLAIM_STATUSES.has(status) ||
+      !Array.isArray(codes) ||
+      !isStringArray(codes) ||
+      !claimReasonCodesAreConsistent(status, codes, excerptTruncated)
     ) {
       return { kind: 'malformed' };
     }
   }
+
+  // ---- Counts: non-negative integers that EXACTLY describe the claims.
   const counts = g['counts'];
   if (
     typeof counts !== 'object' ||
     counts === null ||
-    !isNumber((counts as Record<string, unknown>)['total']) ||
-    !isNumber((counts as Record<string, unknown>)['directTextObserved']) ||
-    !isNumber((counts as Record<string, unknown>)['unresolvedRequiresFurtherVerification']) ||
-    !isNumber((counts as Record<string, unknown>)['invalidReferenceOrSnapshot']) ||
-    !isNumber((counts as Record<string, unknown>)['notEvaluatedIdentityInvalid'])
+    !isNonNegativeInteger((counts as Record<string, unknown>)['total']) ||
+    !isNonNegativeInteger((counts as Record<string, unknown>)['directTextObserved']) ||
+    !isNonNegativeInteger(
+      (counts as Record<string, unknown>)['unresolvedRequiresFurtherVerification'],
+    ) ||
+    !isNonNegativeInteger((counts as Record<string, unknown>)['invalidReferenceOrSnapshot']) ||
+    !isNonNegativeInteger((counts as Record<string, unknown>)['notEvaluatedIdentityInvalid'])
   ) {
     return { kind: 'malformed' };
   }
+  const countsRecord = counts as Record<string, number>;
+  if (countsRecord['total'] !== claims.length) {
+    return { kind: 'malformed' };
+  }
+  const byStatus = (status: string): number =>
+    claims.filter((claim) => (claim as Record<string, unknown>)['status'] === status).length;
+  if (
+    countsRecord['directTextObserved'] !== byStatus('direct_text_observed') ||
+    countsRecord['unresolvedRequiresFurtherVerification'] !==
+      byStatus('unresolved_requires_further_verification') ||
+    countsRecord['invalidReferenceOrSnapshot'] !== byStatus('invalid_reference_or_snapshot') ||
+    countsRecord['notEvaluatedIdentityInvalid'] !== byStatus('not_evaluated_identity_invalid')
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Evaluation status vs claims vs the report's OWN stored identity.
+  const citesCode = (claim: unknown, code: string): boolean =>
+    ((claim as Record<string, unknown>)['reasonCodes'] as readonly string[]).includes(code);
+  if (evaluationStatus === 'evaluated') {
+    // An evaluated report must not carry identity-invalid claims or identity
+    // failure codes, and its OWN stored identity fields must actually hold.
+    if (
+      evidenceId !== sourceItemId ||
+      claims.some(
+        (claim) =>
+          (claim as Record<string, unknown>)['status'] === 'not_evaluated_identity_invalid',
+      ) ||
+      claims.some((claim) => citesCode(claim, 'evidence_id_identity_inconsistent')) ||
+      claims.some((claim) => citesCode(claim, 'draft_snapshot_identity_mismatch'))
+    ) {
+      return { kind: 'malformed' };
+    }
+  } else {
+    // invalid_snapshot_identity: EVERY claim is not_evaluated and cites the
+    // identity failure. When the visible fields disagree, the visible code
+    // is mandatory on every claim; otherwise the only possible cause is the
+    // draft-side mismatch (the draft id itself is not stored in the report).
+    const expectedCode =
+      evidenceId !== sourceItemId
+        ? 'evidence_id_identity_inconsistent'
+        : 'draft_snapshot_identity_mismatch';
+    if (
+      claims.some(
+        (claim) =>
+          (claim as Record<string, unknown>)['status'] !== 'not_evaluated_identity_invalid',
+      ) ||
+      claims.some((claim) => !citesCode(claim, expectedCode))
+    ) {
+      return { kind: 'malformed' };
+    }
+  }
+
   return { kind: 'guard_v1', report: guard as unknown as EvidenceGuardReport };
 }
