@@ -27,7 +27,8 @@
     "deploy:preview": "node scripts/deploy-preview.mjs",
     "build:preview": "wrangler deploy --dry-run --env preview --outdir dist/preview",
     "test:telegram-setup": "node --test scripts/telegram-webhook-setup.test.mjs",
-    "demo:editorial": "vitest run tests/integration/editorial-demo.test.ts"
+    "demo:editorial": "vitest run tests/integration/editorial-demo.test.ts",
+    "demo:story-candidates": "vitest run tests/integration/story-candidates-demo.test.ts"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

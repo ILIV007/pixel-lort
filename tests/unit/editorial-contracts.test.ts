@@ -34,6 +34,10 @@ import {
   type EvidenceGuardReport,
 } from '../../src/domain/editorial/evidence-guard';
 import {
+  buildCandidateDiscoveryReport,
+  type CandidateDiscoveryReport,
+} from '../../src/domain/editorial/candidate-discovery';
+import {
   classifyAiOutcome,
   observeAiRun,
 } from '../../src/application/editorial/prepare-draft-handler';
@@ -55,6 +59,14 @@ const GUARD_REPORT: EvidenceGuardReport = buildEvidenceGuardReport({
   draftHeadlineFa: 'تیتر مدل',
   draftSummaryFa: 'خلاصه مدل',
   draftSourceItemId: ITEM_ID,
+});
+
+/** A deterministic empty discovery report for the composition tests (R1.13). */
+const NO_CANDIDATES_REPORT: CandidateDiscoveryReport = buildCandidateDiscoveryReport({
+  snapshot: { sourceItemId: ITEM_ID, contentHash: HASH },
+  storyId: 'edst_test_story',
+  lookups: [],
+  matches: [],
 });
 
 describe('editorial payload contract (ADR-0042 §2)', () => {
@@ -244,6 +256,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
         claims: [{ text: 'ادعای مدل', evidenceIds: [ITEM_ID] }],
       },
       evidenceGuard: GUARD_REPORT,
+      candidateDiscovery: NO_CANDIDATES_REPORT,
     });
     expect(document.title).toBe('تیتر مدل');
     expect(document.document.schemaVersion).toBe(1);
@@ -276,6 +289,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
         claims: [{ text: 'ادعای مدل', evidenceIds: [ITEM_ID] }],
       },
       evidenceGuard: GUARD_REPORT,
+      candidateDiscovery: NO_CANDIDATES_REPORT,
     });
     // The report rides INSIDE document_json, byte-for-byte the one built
     // for THIS draft; schemaVersion stays 1 (additive contract extension).

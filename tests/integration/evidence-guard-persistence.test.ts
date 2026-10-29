@@ -536,6 +536,7 @@ describe('evidence guard — acceptance 9: no report for a foreign snapshot or o
         createdBy: 'stale',
         createdAt: harness.clock.now(),
       },
+      fingerprints: [],
     });
     expect(stale.fenceLost).toBe(true);
     expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(0);

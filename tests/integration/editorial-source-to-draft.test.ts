@@ -739,6 +739,7 @@ describe('scenario 5 — stale generation/lease has zero unauthorized effect', (
         createdBy: 'stale',
         createdAt: harness.clock.now(),
       },
+      fingerprints: [],
     });
     expect(staleAttempt.fenceLost).toBe(true);
     expect(await rowCount(harness.rawExecutor, 'stories')).toBe(0);
@@ -1285,6 +1286,7 @@ describe('R1.11.1 corrections (Posidon correctness review) — commit-time snaps
         createdBy: 'test',
         createdAt: harness.clock.now(),
       },
+      fingerprints: [],
     };
 
     // The item's content_hash changed AFTER the handler's (simulated) read:

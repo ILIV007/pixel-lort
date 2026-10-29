@@ -24,6 +24,7 @@
 import type { AiSemanticDraft } from '../ai/types';
 import { EDITORIAL_DRAFT_VERSION } from './identity';
 import type { EvidenceGuardReport } from './evidence-guard';
+import type { CandidateDiscoveryReport } from './candidate-discovery';
 
 /** Fixed draft layout id for this phase's renderer contract. */
 export const EDITORIAL_DRAFT_LAYOUT = 'news_v1' as const;
@@ -156,6 +157,13 @@ export const EDITORIAL_DRAFT_WARNINGS = [
  * The report's `claims[i]` corresponds to `document.modelClaims[i]`
  * (and `facts[i]`) by index — the document holds the texts, the report
  * holds the honest per-claim outcomes.
+ *
+ * R1.13 (Phase 5C-1): the caller MUST also pass the candidate-discovery
+ * report for THIS draft (possibly `no_candidates_observed`) — embedded as
+ * another ADDITIVE versioned field (`discoveryVersion` inside;
+ * `schemaVersion` stays 1) of the SAME `document_json`. It is a proposal
+ * of possibly-related previously-indexed stories at the lookup moment —
+ * candidate discovery ONLY, never a merge, never truth verification.
  */
 export function buildDraftDocument(input: {
   readonly sourceItemId: string;
@@ -163,6 +171,9 @@ export function buildDraftDocument(input: {
   readonly excerpt: TraceableExcerpt;
   readonly semanticDraft: AiSemanticDraft;
   readonly evidenceGuard: EvidenceGuardReport;
+  /** R1.13: the versioned candidate-discovery report (required — every
+   * new draft carries one, even an honest "nothing observed"). */
+  readonly candidateDiscovery: CandidateDiscoveryReport;
 }): {
   readonly layout: typeof EDITORIAL_DRAFT_LAYOUT;
   readonly title: string;
@@ -184,6 +195,7 @@ export function buildDraftDocument(input: {
       readonly status: 'unverified';
     }[];
     readonly evidenceGuard: EvidenceGuardReport;
+    readonly candidateDiscovery: CandidateDiscoveryReport;
   };
   readonly facts: readonly {
     readonly text: string;
@@ -219,6 +231,7 @@ export function buildDraftDocument(input: {
       },
       modelClaims,
       evidenceGuard: input.evidenceGuard,
+      candidateDiscovery: input.candidateDiscovery,
     },
     facts: modelClaims.map((claim) => ({
       text: claim.text,

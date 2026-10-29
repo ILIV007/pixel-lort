@@ -44,6 +44,10 @@
  */
 
 import type { DbExecutor } from './db-executor';
+import type {
+  FingerprintLookupPlan,
+  StoryFingerprintKind,
+} from '../../domain/editorial/story-fingerprints';
 
 /** Editorial-owned read shape of a source_items row (traceable fields only). */
 export interface EditorialSourceItemRow {
@@ -51,6 +55,9 @@ export interface EditorialSourceItemRow {
   readonly source_id: string;
   readonly title: string;
   readonly body_excerpt: string | null;
+  /** R1.13: read in the SAME projection (no extra read) — the verbatim
+   * stored URL identity behind the `url` fingerprint signal. */
+  readonly canonical_url: string | null;
   readonly content_hash: string;
   readonly processing_status: string;
 }
@@ -67,7 +74,8 @@ export async function findEditorialSourceItem(
   sourceItemId: string,
 ): Promise<EditorialSourceItemRow | null> {
   return executor.first<EditorialSourceItemRow>({
-    sql: `SELECT id, source_id, title, body_excerpt, content_hash, processing_status
+    sql: `SELECT id, source_id, title, body_excerpt, canonical_url, content_hash,
+                 processing_status
             FROM source_items WHERE id = ?`,
     params: [sourceItemId],
   });
@@ -137,6 +145,49 @@ export async function findStableEditorialResult(
     return null;
   }
   return { story, draft };
+}
+
+/**
+ * One candidate lookup's outcome: the DISTINCT story owners of ONE
+ * fingerprint digest within the exact namespace prefix, plus the honest
+ * overflow flag (a full probe page means "at least N seen — maybe more",
+ * never "all"). A DB error PROPAGATES to the caller — a failed lookup is
+ * NEVER reported as a successful empty one (R1.13 honesty boundary).
+ */
+export interface StoryCandidateLookupOutcome {
+  readonly kind: StoryFingerprintKind;
+  readonly storyIds: readonly string[];
+  readonly overflow: boolean;
+}
+
+/**
+ * The LIMITED candidate lookup (R1.13): at most one parameterized range
+ * query per present signal, each reading AT MOST the probe limit (9) rows
+ * from the (kind, value) primary-key index of `story_fingerprints` — the
+ * exact `sc1:<digest>:` namespace prefix, story-scope excluded for the
+ * current story, no wildcards, no full scan, no unbounded reads.
+ */
+export async function findStoryCandidatesByFingerprints(
+  executor: DbExecutor,
+  plans: readonly FingerprintLookupPlan[],
+  excludeStoryId: string,
+  probeLimit: number,
+): Promise<readonly StoryCandidateLookupOutcome[]> {
+  const outcomes: StoryCandidateLookupOutcome[] = [];
+  for (const plan of plans) {
+    const rows = await executor.query<{ story_id: string }>({
+      sql: `SELECT story_id FROM story_fingerprints
+             WHERE kind = ? AND value >= ? AND value < ? AND story_id <> ?
+             LIMIT ?`,
+      params: [plan.kind, plan.lowerBound, plan.upperBound, excludeStoryId, probeLimit],
+    });
+    outcomes.push({
+      kind: plan.kind,
+      storyIds: [...new Set(rows.rows.map((row) => row.story_id))],
+      overflow: rows.rows.length >= probeLimit,
+    });
+  }
+  return outcomes;
 }
 
 /** One statement's insertion target inside the fenced commit batch. */
@@ -215,6 +266,20 @@ export interface EditorialCommitInput {
     readonly createdBy: string;
     readonly createdAt: number;
   };
+  /**
+   * R1.13: the NEW story's durable fingerprints (≤3, one per present
+   * signal) — inserted by the SAME atomic batch, each statement carrying
+   * the SAME fence AND snapshot predicates, so a lost fence or a changed
+   * snapshot writes NO draft AND NO fingerprint, and a stale generation
+   * can never leave an orphan row behind. Values are story-scoped
+   * (`sc1:<digest>:<storyId>`), so an insert can never replace another
+   * owner; the NOT EXISTS guard covers only the story's OWN row (idempotent
+   * replay). INSERT OR REPLACE / silent collision overrides are forbidden.
+   */
+  readonly fingerprints: readonly {
+    readonly kind: StoryFingerprintKind;
+    readonly value: string;
+  }[];
 }
 
 /** Per-statement outcome of the fenced atomic commit. */
@@ -225,6 +290,9 @@ export interface EditorialCommitResult {
   readonly storyInserted: boolean;
   /** The source_item processing_status moved to 'processed' by this batch. */
   readonly sourceItemProcessed: boolean;
+  /** R1.13: fingerprint rows inserted by THIS batch (0..3; 0 on any
+   * predicate failure — never orphaned, never half-written). */
+  readonly fingerprintsInserted: number;
   /** Zero fenced effects: the caller lost ownership (stale generation). */
   readonly fenceLost: boolean;
   /**
@@ -444,16 +512,41 @@ export async function commitEditorialResult(
               AND ${FENCE_PREDICATE}`,
       params: [input.snapshot.sourceItemId, ...snapshotParams.slice(1), ...fenceParams],
     },
+    // R1.13: the NEW story's fingerprints — same batch, same fences, same
+    // snapshot predicate. A fingerprint row can never outlive the draft it
+    // belongs to: any predicate failure no-ops the WHOLE batch.
+    ...input.fingerprints.map((fingerprint) => ({
+      sql: `INSERT INTO story_fingerprints (story_id, kind, value, created_at)
+            SELECT ?, ?, ?, ?
+             WHERE NOT EXISTS (SELECT 1 FROM story_fingerprints
+                                WHERE kind = ? AND value = ?)
+               AND ${FENCE_PREDICATE}
+               AND ${SNAPSHOT_PREDICATE}`,
+      params: [
+        input.draft.storyId,
+        fingerprint.kind,
+        fingerprint.value,
+        input.draft.createdAt,
+        fingerprint.kind,
+        fingerprint.value,
+        ...fenceParams,
+        ...snapshotParams,
+      ],
+    })),
   ]);
 
   const storyInserted = (metas[0]?.changes ?? 0) > 0;
   const draftInserted = (metas[4]?.changes ?? 0) > 0;
   const sourceItemProcessed = (metas[5]?.changes ?? 0) > 0;
+  const fingerprintsInserted = metas
+    .slice(6)
+    .reduce((total, meta) => total + (meta?.changes ?? 0), 0);
   if (draftInserted) {
     return {
       draftInserted,
       storyInserted,
       sourceItemProcessed,
+      fingerprintsInserted,
       fenceLost: false,
       snapshotChanged: false,
     };
@@ -479,6 +572,7 @@ export async function commitEditorialResult(
       draftInserted,
       storyInserted,
       sourceItemProcessed,
+      fingerprintsInserted: 0,
       fenceLost: false,
       snapshotChanged: true,
     };
@@ -491,6 +585,7 @@ export async function commitEditorialResult(
     draftInserted,
     storyInserted,
     sourceItemProcessed,
+    fingerprintsInserted: 0,
     fenceLost: true,
     snapshotChanged: false,
   };

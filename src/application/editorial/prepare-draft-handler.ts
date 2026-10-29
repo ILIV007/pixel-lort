@@ -45,6 +45,25 @@
  * - a stale generation that loses the SQL ownership fence reports a
  *   recoverable retry; it can never write over a newer generation's state.
  *
+ * R1.13 (Phase 5C-1 — candidate discovery, AFTER validation/reuse and
+ * BEFORE any provider work): the handler derives the snapshot's ≤3 durable
+ * fingerprints (url / content_hash / title_key — pure, versioned `sc1`
+ * namespace) and performs AT MOST THREE parameterized prefix lookups
+ * (≤9-row probe each) against the multi-owner `story_fingerprints` index.
+ * The outcome is a versioned `candidateDiscovery` report — a PROPOSAL of
+ * possibly-related previously-indexed stories at the lookup moment: NEVER
+ * a merge, never truth verification, no confidence or trust raise. The
+ * report and the NEW story's fingerprints travel inside the SAME fenced
+ * atomic batch as the draft (≤3 extra INSERT statements, same fence AND
+ * snapshot predicates): a lost fence or changed snapshot writes NO draft
+ * AND NO fingerprint. A lookup DB error is NEVER a fabricated empty
+ * success — it maps onto the engine's typed bounded retry with ZERO
+ * provider calls and ZERO AI charges (the lookup runs before the AI).
+ * Replay/reuse happens BEFORE the lookup: no backfill, no rewritten
+ * report, no repeated AI spend. Exactly-once cross-story visibility is
+ * NOT claimed: two stories committed simultaneously may not see each
+ * other at their lookup moments.
+ *
  * Replay discipline: the pre-AI stable-result lookup (deterministic story
  * key + ready draft) returns success WITHOUT any AI call or write —
  * re-execution after a successful commit is free. The at-least-once crash
@@ -60,6 +79,7 @@ import {
   commitEditorialResult,
   findEditorialSource,
   findEditorialSourceItem,
+  findStoryCandidatesByFingerprints,
   findStableEditorialResult,
   recordEditorialAiRun,
   type EditorialSourceItemRow,
@@ -89,6 +109,12 @@ import {
   EDITORIAL_CREATED_BY,
 } from '../../domain/editorial/mapper';
 import { buildEvidenceGuardReport } from '../../domain/editorial/evidence-guard';
+import {
+  FINGERPRINT_LOOKUP_ROW_LIMIT,
+  buildStoryFingerprints,
+  planFingerprintLookups,
+} from '../../domain/editorial/story-fingerprints';
+import { buildCandidateDiscoveryReport } from '../../domain/editorial/candidate-discovery';
 import type { Logger } from '../../observability/logger';
 
 /** Deferred AI reasons that map onto the engine's recoverable retry path. */
@@ -272,6 +298,60 @@ export function createEditorialPrepareDraftHandler(
     }
     const inputHash = await editorialAiInputHash([snippet]);
 
+    // ---- 5.5 R1.13 (Phase 5C-1) LIMITED candidate discovery — strictly
+    //          AFTER early validation/reuse and BEFORE any provider work:
+    //          the ≤3 durable fingerprints of THIS snapshot, then at most
+    //          one ≤9-row prefix lookup per present signal. The current
+    //          story is excluded by id; the outcome is a versioned,
+    //          honest report — candidate discovery ONLY (no merge, no
+    //          trust change, no truth claim), scoped to `sc1`-indexed
+    //          stories (historical stories are NOT backfilled).
+    const storyId = await storyIdForSnapshot(item.id, item.content_hash);
+    const fingerprintSignals = {
+      canonicalUrl: item.canonical_url,
+      fullEvidenceText,
+      title: item.title,
+    };
+    const fingerprints = await buildStoryFingerprints({ ...fingerprintSignals, storyId });
+    let candidateDiscovery;
+    try {
+      const lookupPlans = await planFingerprintLookups(fingerprintSignals);
+      const lookupOutcomes = await findStoryCandidatesByFingerprints(
+        executor,
+        lookupPlans,
+        storyId,
+        FINGERPRINT_LOOKUP_ROW_LIMIT,
+      );
+      candidateDiscovery = buildCandidateDiscoveryReport({
+        snapshot: { sourceItemId: item.id, contentHash: item.content_hash },
+        storyId,
+        lookups: lookupOutcomes.map((outcome) => ({
+          kind: outcome.kind,
+          overflow: outcome.overflow,
+        })),
+        matches: lookupOutcomes.flatMap((outcome) =>
+          outcome.storyIds.map((candidateStoryId) => ({
+            kind: outcome.kind,
+            storyId: candidateStoryId,
+          })),
+        ),
+      });
+    } catch (error) {
+      // A DB error in discovery is NEVER a fabricated successful empty
+      // report. Typed, bounded retry via the engine's own attempt budget;
+      // ZERO provider calls and ZERO AI charges were made — the lookup
+      // runs strictly BEFORE the provider.
+      logger?.warn('editorial.prepare_draft.candidate_lookup_failed', {
+        error: error instanceof Error ? error.message : 'unknown',
+      });
+      return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+    }
+    logger?.debug('editorial.prepare_draft.candidates_observed', {
+      observation: candidateDiscovery.observation,
+      candidates: candidateDiscovery.counts.candidatesReported,
+      overflow: candidateDiscovery.lookup.overflowObserved,
+    });
+
     // ---- 6. The EXISTING AI service (real gates: flag, budget authority,
     //         allowlist ladder, wall deadline, output validation).
     const aiStartedAtMs = nowMs();
@@ -365,7 +445,6 @@ export function createEditorialPrepareDraftHandler(
       draftSummaryFa: outcome.draft.summaryFa,
       draftSourceItemId: item.id,
     });
-    const storyId = await storyIdForSnapshot(item.id, item.content_hash);
     const claimId = await sourceReportClaimId(storyId, item.id);
     const evidenceId = await mentionsEvidenceId(claimId, item.id);
     const draftId = await draftIdForStory(storyId);
@@ -381,6 +460,7 @@ export function createEditorialPrepareDraftHandler(
       excerpt,
       semanticDraft: outcome.draft,
       evidenceGuard,
+      candidateDiscovery,
     });
     const now = nowMs();
 
@@ -453,6 +533,10 @@ export function createEditorialPrepareDraftHandler(
         createdBy: EDITORIAL_CREATED_BY,
         createdAt: now,
       },
+      // R1.13: the NEW story's ≤3 durable fingerprints ride in the SAME
+      // fenced batch — a lost fence or changed snapshot writes NO draft
+      // AND NO fingerprint row.
+      fingerprints: fingerprints.map((plan) => ({ kind: plan.kind, value: plan.value })),
     });
 
     if (commit.snapshotChanged) {
@@ -488,6 +572,7 @@ export function createEditorialPrepareDraftHandler(
       storyInserted: commit.storyInserted,
       draftId,
       sourceItemProcessed: commit.sourceItemProcessed,
+      fingerprintsInserted: commit.fingerprintsInserted,
     });
     return { kind: 'success' };
   }
