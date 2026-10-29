@@ -24,6 +24,8 @@ import { commitEditorialResult } from '../../src/adapters/db/editorial-store';
 import { claimJob } from '../../src/adapters/db/job-store';
 import { readCandidateAssessmentReport } from '../../src/domain/editorial/candidate-assessment';
 import { readCandidateDiscoveryReport } from '../../src/domain/editorial/candidate-discovery';
+import { buildFullEvidenceText } from '../../src/domain/editorial/mapper';
+import { exactContentDigest } from '../../src/domain/editorial/exact-content';
 
 /**
  * R1.14 candidate-ASSESSMENT D1 integration suite (Phase 5C-2): the
@@ -235,6 +237,77 @@ async function rowCount(executor: DbExecutor, table: string): Promise<number> {
   return row?.n ?? 0;
 }
 
+/** Seed a COMPLETE historical story (R1.13-era shape: ready draft + item +
+ * claim + evidence, optional fingerprints) — pre-R1.15 state, no anchor. */
+async function seedHistoricalStory(
+  executor: DbExecutor,
+  input: {
+    readonly itemId: string;
+    readonly sourceId: string;
+    readonly title: string;
+    readonly body?: string;
+    readonly storyId: string;
+    readonly withContentFingerprint?: boolean;
+  },
+): Promise<void> {
+  const contentHash = await sha256Hex(
+    `${input.itemId}\u001f${input.title}\u001f${input.body ?? ''}`,
+  );
+  await executor.run({
+    sql: `INSERT INTO source_items (id, source_id, external_id, canonical_url, title, body_excerpt,
+                                     author, published_at, fetched_at, content_hash, raw_json,
+                                     processing_status)
+          VALUES (?, ?, ?, ?, ?, ?, 'نویسنده', ?, ?, ?, '{}', 'processed')`,
+    params: [
+      input.itemId,
+      input.sourceId,
+      `ext-${input.itemId}`,
+      `https://example.com/${input.itemId}`,
+      input.title,
+      input.body ?? null,
+      NOW,
+      NOW,
+      contentHash,
+    ],
+  });
+  await executor.run({
+    sql: `INSERT INTO stories (id, story_key, status, trust_status, content_type, priority,
+                                confidence, working_headline, first_seen_at, last_evidence_at,
+                                version, created_at, updated_at)
+          VALUES (?, ?, 'discovered', 'unknown', 'industry', 50, 0, NULL, ?, ?, 1, ?, ?)`,
+    params: [input.storyId, `seeded-${input.storyId}`, NOW, NOW, NOW, NOW],
+  });
+  await executor.run({
+    sql: `INSERT INTO claims (id, story_id, claim_type, subject, predicate, object_text,
+                               confidence, status, created_at, updated_at)
+          VALUES (?, ?, 'source_report', 'منبع تاریخی', 'reported', 'متن تاریخی', 0,
+                  'unverified', ?, ?)`,
+    params: [`edcl_${input.storyId}`, input.storyId, NOW, NOW],
+  });
+  await executor.run({
+    sql: `INSERT INTO evidence (id, claim_id, source_item_id, stance, confidence, excerpt, created_at)
+          VALUES (?, ?, ?, 'mentions', 0, 'متن تاریخی', ?)`,
+    params: [`edev_${input.storyId}`, `edcl_${input.storyId}`, input.itemId, NOW],
+  });
+  await executor.run({
+    sql: `INSERT INTO drafts (id, story_id, status, language, layout, title, document_json,
+                               facts_json, warnings_json, ai_run_id, version, created_by,
+                               created_at, updated_at)
+          VALUES (?, ?, 'ready', 'fa', 'news_v1', 'تیتر تاریخی', '{}', '[]', '[]', NULL, 1, 'seed', ?, ?)`,
+    params: [`eddr_${input.storyId}`, input.storyId, NOW, NOW],
+  });
+  if (input.withContentFingerprint ?? false) {
+    const digest = await exactContentDigest(
+      buildFullEvidenceText({ title: input.title, body_excerpt: input.body ?? null }),
+    );
+    await executor.run({
+      sql: `INSERT INTO story_fingerprints (story_id, kind, value, created_at)
+            VALUES (?, 'content_hash', ?, ?)`,
+      params: [input.storyId, `sc1:${digest}:${input.storyId}`, NOW],
+    });
+  }
+}
+
 beforeEach(async () => {
   await applyMigrations(env.DB);
   for (const table of [
@@ -254,7 +327,7 @@ beforeEach(async () => {
 });
 
 describe('candidate assessment — the three observed relations on the REAL path', () => {
-  it('identical content, different ids/sources/URLs → full content equality OBSERVED (not truth, not independence)', async () => {
+  it('identical content, different ids/sources/URLs → the second item REUSES the first result (R1.15): provenance added, the first draft never rewritten, assessment reports stay with their OWN drafts', async () => {
     const harness = createHarness();
     await seedSource(harness.rawExecutor, SOURCE_A, 'منبع الف');
     await seedSource(harness.rawExecutor, SOURCE_B, 'منبع ب');
@@ -279,13 +352,6 @@ describe('candidate assessment — the three observed relations on the REAL path
       { id: 'item-cassess-c1', sourceId: SOURCE_A, title, body, url: 'https://example.com/c1-a' },
       0,
     );
-    const second = await runItem(
-      harness,
-      { id: 'item-cassess-c2', sourceId: SOURCE_B, title, body, url: 'https://example.com/c1-b' },
-      1,
-    );
-
-    // The FIRST draft honestly observed nothing yet.
     const firstDocument = JSON.parse(first.document_json) as Record<string, unknown>;
     const firstRead = readCandidateAssessmentReport(firstDocument);
     expect(firstRead.kind).toBe('candidate_assessment_v1');
@@ -295,40 +361,78 @@ describe('candidate assessment — the three observed relations on the REAL path
       expect(firstRead.report.unrelatednessConcluded).toBe(false);
     }
 
-    // The SECOND draft observed the shared composite digest AND the weak
-    // title signal — full content equality OBSERVED, all reasons kept.
-    const secondDocument = JSON.parse(second.document_json) as Record<string, unknown>;
-    const read = readCandidateAssessmentReport(secondDocument);
+    // R1.15: the identical-content second item REUSES the first result —
+    // zero provider calls, zero charges, NO second draft, NO rewritten
+    // report documents. The assessment/discovery/guard reports of the
+    // first draft describe THEIR OWN lookup moment and stay untouched.
+    const second = await runItem(
+      harness,
+      { id: 'item-cassess-c2', sourceId: SOURCE_B, title, body, url: 'https://example.com/c1-b' },
+      1,
+    );
+    expect(second.document_json).toBe(first.document_json); // byte-identical
+    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(1);
+    expect(await rowCount(harness.rawExecutor, 'stories')).toBe(1);
+    expect(await rowCount(harness.rawExecutor, 'ai_runs')).toBe(1);
+
+    // The second provenance: B's OWN claim under the ONE story.
+    const claims = await harness.rawExecutor.query<{ subject: string; confidence: number }>({
+      sql: 'SELECT subject, confidence FROM claims ORDER BY created_at ASC, id ASC',
+    });
+    expect(claims.rows).toHaveLength(2);
+    expect(claims.rows[1]!.subject).toBe('منبع ب');
+    expect(claims.rows.every((row) => row.confidence === 0)).toBe(true);
+    const processed = await harness.rawExecutor.query<{ processing_status: string }>({
+      sql: "SELECT processing_status FROM source_items WHERE id LIKE 'item-cassess-c%' ORDER BY id ASC",
+    });
+    expect(processed.rows.map((row) => row.processing_status)).toEqual(['processed', 'processed']);
+  });
+
+  it('a fingerprint that MATCHES but whose real text differs: the draft honestly reports the full-content-equality SIGNAL while the verified reuse correctly refuses (stale-locator honesty)', async () => {
+    const harness = createHarness();
+    await seedSource(harness.rawExecutor, SOURCE_A, 'منبع الف');
+    // A historical-shaped story whose content_hash fingerprint digest
+    // equals the arriving text's digest, but whose REAL attached item text
+    // differs (seeded stale locator).
+    await seedHistoricalStory(harness.rawExecutor, {
+      itemId: 'item-stale-ref',
+      sourceId: SOURCE_A,
+      title: 'متن واقعی کاملاً متفاوت',
+      body: 'این متن واقعی ذخیره‌شده است.',
+      storyId: 'edst_stale_ref',
+      withContentFingerprint: false,
+    });
+    const staleDigest = await exactContentDigest(
+      buildFullEvidenceText({ title: 'تیتر سیگنال خراب', body_excerpt: 'بدنهٔ سیگنال خراب.' }),
+    );
+    await harness.rawExecutor.run({
+      sql: `INSERT INTO story_fingerprints (story_id, kind, value, created_at)
+            VALUES ('edst_stale_ref', 'content_hash', ?, ?)`,
+      params: [`sc1:${staleDigest}:edst_stale_ref`, NOW],
+    });
+    const itemInput = {
+      id: 'item-stale-arriving',
+      sourceId: SOURCE_A,
+      title: 'تیتر سیگنال خراب',
+      body: 'بدنهٔ سیگنال خراب.',
+      url: 'https://example.com/stale',
+    };
+    await seedItem(harness.rawExecutor, itemInput);
+    const draft = await runItem(harness, itemInput, 0);
+    // The reuse correctly REFUSED (the real text differs) — the item got
+    // its own draft, and THAT draft's discovery/assessment pair honestly
+    // reports the fingerprint SIGNAL it observed at its lookup moment.
+    expect(await rowCount(harness.rawExecutor, 'stories')).toBe(2);
+    const read = readCandidateAssessmentReport(
+      JSON.parse(draft.document_json) as Record<string, unknown>,
+    );
     expect(read.kind).toBe('candidate_assessment_v1');
     if (read.kind !== 'candidate_assessment_v1') return;
     expect(read.report.observation).toBe('candidates_observed');
-    expect(read.report.entries).toEqual([
-      {
-        storyId: second.story_id === first.story_id ? '' : first.story_id,
-        verdict: 'full_content_equality_observed',
-        verdictReasons: ['content_hash_fingerprint_match', 'title_key_fingerprint_match'],
-      },
-    ]);
+    expect(read.report.entries).toHaveLength(1);
+    expect(read.report.entries[0]!.verdict).toBe('full_content_equality_observed');
+    expect(read.report.entries[0]!.verdictReasons).toContain('content_hash_fingerprint_match');
     expect(read.report.unrelatednessConcluded).toBe(false);
-    expect(read.report.unassessed).toEqual(['same_event', 'truth', 'source_independence']);
-    expect(read.report.limitations).toContain('not_truth_verification');
-    expect(read.report.limitations).toContain('not_source_independence_proof');
-    expect(read.report.discoveryLimits).toEqual({
-      candidatesTruncated: false,
-      overflowObserved: false,
-      maxCandidates: 8,
-      indexedScope: 'index_version_sc1_only',
-      historicalBackfill: false,
-    });
-
-    // NOTHING merged: two stories, two claims, confidence 0 everywhere.
-    expect(await rowCount(harness.rawExecutor, 'stories')).toBe(2);
-    expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(2);
-    const claims = await harness.rawExecutor.query<{ confidence: number }>({
-      sql: 'SELECT confidence FROM claims',
-    });
-    expect(claims.rows).toHaveLength(2);
-    expect(claims.rows.every((row) => row.confidence === 0)).toBe(true);
   });
 
   it('same URL, different title/body → ONLY the shared-URL observation', async () => {
@@ -497,7 +601,7 @@ describe('candidate assessment — the three observed relations on the REAL path
 });
 
 describe('candidate assessment — zero new SQL on the real commit path', () => {
-  it('the assessment rides INSIDE document_json; the atomic batch carries NO new statement', async () => {
+  it('the assessment rides INSIDE document_json; the atomic batch carries NO statement beyond the known editorial set (including the R1.15 anchor, still story_fingerprints)', async () => {
     const batches: DbStatement[][] = [];
     const harness = createHarness({ captureBatches: batches });
     await seedSource(harness.rawExecutor, SOURCE_A, 'منبع الف');
@@ -509,10 +613,12 @@ describe('candidate assessment — zero new SQL on the real commit path', () => 
       body: 'بدنهٔ کاملاً یکسان دمو برای بررسی شکل دستورها.',
       url: 'https://example.com/s1',
     });
+    // DISTINCT content (R1.15 would otherwise reuse the first result and
+    // skip the second commit entirely — the shape proof needs BOTH drafts).
     await seedItem(harness.rawExecutor, {
       id: 'item-cassess-s2',
       sourceId: SOURCE_B,
-      title: 'دمو: تیتر کاملاً یکسان برای SQL',
+      title: 'دمو: تیتر کاملاً یکسان برای SQL نسخهٔ دوم',
       body: 'بدنهٔ کاملاً یکسان دمو برای بررسی شکل دستورها.',
       url: 'https://example.com/s2',
     });
@@ -558,9 +664,11 @@ describe('candidate assessment — zero new SQL on the real commit path', () => 
         expect(statement.sql).not.toContain('candidate_assessment');
       }
     }
-    // No extra table exists: the whole write surface is unchanged.
+    // No extra table exists: the whole write surface is unchanged. The R1.15
+    // delta is exactly ONE story_fingerprints row per commit (the group
+    // anchor): 3 story-scoped signals × 2 items + 2 anchors = 8.
     expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(2);
-    expect(await rowCount(harness.rawExecutor, 'story_fingerprints')).toBe(6); // 3 signals × 2 items
+    expect(await rowCount(harness.rawExecutor, 'story_fingerprints')).toBe(8); // 3×2 scoped + 2 anchors
   });
 });
 
@@ -688,6 +796,12 @@ describe('candidate assessment — no report for a foreign snapshot or owner', (
         createdAt: harness.clock.now(),
       },
       fingerprints: [],
+      // R1.15: the exact-content group anchor (store-level tests use a fixed
+      // well-formed anchor; the REAL path derives it from the item's own text).
+      exactContentAnchor: {
+        kind: 'content_hash' as const,
+        value: 'sc1:' + 'a'.repeat(64),
+      },
     });
     expect(stale.fenceLost).toBe(true);
     expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(0);

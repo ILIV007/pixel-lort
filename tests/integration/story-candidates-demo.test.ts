@@ -24,34 +24,29 @@ import {
 } from '../../src/domain/editorial/story-fingerprints';
 
 /**
- * R1.13+R1.14 (Phase 5C-1/5C-2) OFFLINE demo runner: SEVEN artificial news
- * items from seven different sources — THREE related pairs plus one
- * unrelated item — through the SAME real editorial path (real engine, real
- * budget authority, real fenced commit; artificial provider port, zero
- * network, zero live AI):
+ * R1.15 (Phase 5C-3) OFFLINE demo runner — exact-content draft reuse with
+ * preserved provenance, over the SAME real editorial path (real engine,
+ * real budget authority, real fenced commits; artificial provider port,
+ * zero network, zero live AI). FIVE artificial news items from five
+ * different sources demonstrate the three required paths:
  *
- * - one pair with IDENTICAL content (title+body; different ids/sources/URLs)
- *   → the content_hash composite digest AND the weak title signal are
- *   observed → `full_content_equality_observed` (all reasons kept) — a
- *   text observation, NOT truth confirmation, NOT source independence;
- * - one pair sharing ONLY the stored URL (different texts/titles)
- *   → `shared_url_observed`;
- * - one pair sharing ONLY the normalized title (different bodies/URLs)
- *   → the WEAK `shared_title_observed` signal;
- * - one fully unrelated item → zero candidates, and the assessment's
- *   `unrelatednessConcluded` stays FALSE — never "definitely unrelated".
+ * - A: the FIRST item → the normal path → one stable Persian draft;
+ * - B: a DIFFERENT source with the EXACT same full title+body → VERIFIED
+ *   reuse of A's result: ZERO provider calls, ZERO new charges, B's OWN
+ *   provenance (source_report claim + mentions evidence) durably added
+ *   under A's story, B's item processed, and A's draft/report documents
+ *   byte-untouched — NOT a semantic merge, NOT truth, NOT independence;
+ * - C: ONLY the shared stored URL (different texts) → independent draft;
+ * - D: ONLY the shared title (different body/URL) → independent draft;
+ * - E: a fully independent item → its own draft.
  *
- * It prints the SAFE summary: storyIds, per-draft candidate observation,
- * matchedSignals, the R1.14 assessment verdicts + observed reasons + the
- * preserved discovery limits, candidate counts, the honest scope caps, and
- * the proof that NOTHING merged (7 independent stories, confidence 0
- * everywhere) — plus the LOCAL D1 cost table (statements / execution-API
- * calls / rows returned), with the R1.13 fingerprint delta (≤3 pre-provider
- * lookups + ≤3 in-batch inserts per item) called out and the R1.14 delta
- * explicitly ZERO (the assessment rides inside the existing document_json).
- * These are LOCAL PROXY metrics (ADR-0042 §8) — NOT Cloudflare billing
- * counters, and this demo does NOT resolve the NOT_READY status of Free
- * ingestion/full-poll.
+ * It prints the SAFE summary: per-item outcome type (normal_draft /
+ * exact_content_reuse), result + draft ids, preserved provenances, the
+ * REAL provider-call count per path, the discovery/assessment observations
+ * of every draft, the no-merge proof (4 stories for 5 items, confidence 0
+ * everywhere), and the LOCAL D1 cost table (statements / execution-API
+ * calls / rows returned) measured PER PATH. These are LOCAL PROXY metrics
+ * (ADR-0042 §8) — NOT Cloudflare billing counters.
  *
  * Run standalone with: `npm run demo:story-candidates`.
  */
@@ -62,13 +57,10 @@ const SOURCE_B = 'src-demo-beta';
 const SOURCE_C = 'src-demo-gamma';
 const SOURCE_D = 'src-demo-delta';
 const SOURCE_E = 'src-demo-epsilon';
-const SOURCE_F = 'src-demo-zeta';
-const SOURCE_G = 'src-demo-eta';
 const SHARED_URL = 'https://example.com/demo/shared-event';
 const IDENTICAL_TITLE = 'دمو: تیتر محتوای کاملاً یکسان';
 const IDENTICAL_BODY =
   'بدنهٔ کاملاً یکسان دمو برای بررسی برابری کامل محتوا بین دو منبع مستقل مصنوعی.';
-const SHARED_TITLE_ONLY = 'دمو: تیتر مشترک فقط در عنوان';
 
 /** Counting executor: the local D1 proxy metric, WITH rows returned. */
 function createCountingExecutor(inner: DbExecutor): DbExecutor & {
@@ -118,8 +110,8 @@ function createCountingExecutor(inner: DbExecutor): DbExecutor & {
   };
 }
 
-describe('story candidates demo — offline three-source runner', () => {
-  it('runs the related pair + the unrelated item and prints the safe summary with SQL cost', async () => {
+describe('story candidates demo — offline runner (R1.15 exact-content reuse)', () => {
+  it('runs A→draft, B→verified reuse (zero provider), C/D→independent, E→solo and prints the safe summary with per-path SQL cost', async () => {
     await applyMigrations(env.DB);
     const clock = fixedClock(NOW);
     const rawExecutor = createDbExecutor(env.DB, { clock });
@@ -132,8 +124,6 @@ describe('story candidates demo — offline three-source runner', () => {
       [SOURCE_C, 'دموی منبع گاما'],
       [SOURCE_D, 'دموی منبع دلتا'],
       [SOURCE_E, 'دموی منبع اپسیلون'],
-      [SOURCE_F, 'دموی منبع زتا'],
-      [SOURCE_G, 'دموی منبع اتا'],
     ] as const) {
       await rawExecutor.run({
         sql: `INSERT INTO sources (id, name, connector, lane, trust_tier, enabled, interval_seconds,
@@ -144,51 +134,37 @@ describe('story candidates demo — offline three-source runner', () => {
     }
     const items = [
       {
-        id: 'demo-cand-a1',
+        id: 'demo-reuse-a',
         sourceId: SOURCE_A,
-        title: 'دمو: رویداد مشترک خبری آلفا',
-        body: 'بدنهٔ دموی رویداد مشترک از منبع آلفا با جزئیات ویژهٔ آلفا.',
-        url: SHARED_URL,
-      },
-      {
-        id: 'demo-cand-a2',
-        sourceId: SOURCE_B,
-        title: 'دمو: گزارش متفاوت بتا از همان رویداد',
-        body: 'بدنهٔ دموی کاملاً متفاوت از منبع بتا؛ تنها URL ذخیره‌شده مشترک است.',
-        url: SHARED_URL,
-      },
-      {
-        id: 'demo-cand-p1',
-        sourceId: SOURCE_C,
         title: IDENTICAL_TITLE,
         body: IDENTICAL_BODY,
-        url: 'https://example.com/demo/identical-c',
+        url: SHARED_URL,
       },
       {
-        id: 'demo-cand-p2',
+        id: 'demo-reuse-b',
+        sourceId: SOURCE_B,
+        title: IDENTICAL_TITLE,
+        body: IDENTICAL_BODY,
+        url: 'https://example.com/demo/identical-b',
+      },
+      {
+        id: 'demo-reuse-c',
+        sourceId: SOURCE_C,
+        title: 'دمو: گزارش متفاوت گاما از همان رویداد',
+        body: 'بدنهٔ دموی کاملاً متفاوت از منبع گاما؛ تنها URL ذخیره‌شده مشترک است.',
+        url: SHARED_URL,
+      },
+      {
+        id: 'demo-reuse-d',
         sourceId: SOURCE_D,
         title: IDENTICAL_TITLE,
-        body: IDENTICAL_BODY,
-        url: 'https://example.com/demo/identical-d',
+        body: 'بدنهٔ دموی منبع دلتا؛ فقط عنوان با خبر آلفا مشترک است.',
+        url: 'https://example.com/demo/title-d',
       },
       {
-        id: 'demo-cand-t1',
+        id: 'demo-reuse-e',
         sourceId: SOURCE_E,
-        title: SHARED_TITLE_ONLY,
-        body: 'بدنهٔ نخست زوج عنوانی با محتوای ویژهٔ منبع اپسیلون.',
-        url: 'https://example.com/demo/title-e',
-      },
-      {
-        id: 'demo-cand-t2',
-        sourceId: SOURCE_F,
-        title: SHARED_TITLE_ONLY,
-        body: 'بدنهٔ دوم زوج عنوانی با محتوای کاملاً متفاوت منبع زتا.',
-        url: 'https://example.com/demo/title-f',
-      },
-      {
-        id: 'demo-cand-solo',
-        sourceId: SOURCE_G,
-        title: 'دمو: خبر کاملاً مستقل اتا',
+        title: 'دمو: خبر کاملاً مستقل اپسیلون',
         body: 'بدنهٔ دموی خبر مستقل؛ هیچ سیگنال مشترکی با بقیهٔ خبرها ندارد.',
         url: 'https://example.com/demo/solo',
       },
@@ -213,9 +189,11 @@ describe('story candidates demo — offline three-source runner', () => {
       });
     }
 
+    let providerCalls = 0;
     const port: AiProviderPort = {
       provider: 'workers-ai',
       complete: async (input) => {
+        providerCalls += 1;
         const userContent = input.messages.find((message) => message.role === 'user')?.content;
         const evidenceId =
           /شناسه: ([^\n]+)\n<<<SHAHED_SHOROO>>/.exec(userContent ?? '')?.[1] ?? 'missing-id';
@@ -258,7 +236,7 @@ describe('story candidates demo — offline three-source runner', () => {
             logger,
           }),
         ] as never),
-        idGenerator: { newId: () => `demo-cand-${(demoIdCounter += 1)}` },
+        idGenerator: { newId: () => `demo-reuse-${(demoIdCounter += 1)}` },
         clock,
         random: () => 1,
         logger,
@@ -284,6 +262,10 @@ describe('story candidates demo — offline three-source runner', () => {
     const summaryItems: Record<string, unknown>[] = [];
     for (const item of items) {
       const before = executor.stats();
+      const draftsBefore = (await rawExecutor.first<{ n: number }>({
+        sql: 'SELECT COUNT(*) AS n FROM drafts',
+      }))!.n;
+      const providerBefore = providerCalls;
       expect(
         await enqueueEditorialPrepareDraft({
           engine,
@@ -295,54 +277,113 @@ describe('story candidates demo — offline three-source runner', () => {
       const action = await engine.consumeMessage(`demo-msg-${item.id}`, envelopes.shift());
       expect(action).toMatchObject({ action: 'ack' });
       const after = executor.stats();
+      const draftsAfter = (await rawExecutor.first<{ n: number }>({
+        sql: 'SELECT COUNT(*) AS n FROM drafts',
+      }))!.n;
 
-      const latest = await rawExecutor.first<{
-        id: string;
+      const outcomeType = draftsAfter > draftsBefore ? 'normal_draft' : 'exact_content_reuse';
+      const claims = await rawExecutor.query<{
+        claim_id: string;
         story_id: string;
-        status: string;
-        document_json: string;
+        subject: string;
       }>({
-        sql: 'SELECT id, story_id, status, document_json FROM drafts ORDER BY rowid DESC LIMIT 1',
+        sql: `SELECT c.id AS claim_id, c.story_id, c.subject
+                FROM claims c JOIN evidence e ON e.claim_id = c.id
+               WHERE e.source_item_id = ?`,
+        params: [item.id],
       });
-      expect(latest).not.toBeNull();
-      const document = JSON.parse(latest!.document_json) as Record<string, unknown>;
-      const guardRead = readEvidenceGuardReport(document);
-      const discoveryRead = readCandidateDiscoveryReport(document);
-      const assessmentRead = readCandidateAssessmentReport(document);
-      expect(discoveryRead.kind).toBe('candidate_discovery_v1');
-      expect(assessmentRead.kind).toBe('candidate_assessment_v1');
-      if (discoveryRead.kind !== 'candidate_discovery_v1') return;
-
+      const ownClaim = claims.rows[0]!;
+      let draftInfo: {
+        draftId: string | null;
+        draftStatus: string | null;
+        guardKind: string;
+        observation: string | null;
+        candidates: unknown;
+        assessment: unknown;
+      } = {
+        draftId: null,
+        draftStatus: null,
+        guardKind: 'not_created_on_reuse',
+        observation: null,
+        candidates: [],
+        assessment: { kind: 'not_created_on_reuse' },
+      };
+      if (outcomeType === 'normal_draft') {
+        const latest = await rawExecutor.first<{
+          id: string;
+          story_id: string;
+          status: string;
+          document_json: string;
+        }>({
+          sql: 'SELECT id, story_id, status, document_json FROM drafts ORDER BY rowid DESC LIMIT 1',
+        });
+        const document = JSON.parse(latest!.document_json) as Record<string, unknown>;
+        const guardRead = readEvidenceGuardReport(document);
+        const discoveryRead = readCandidateDiscoveryReport(document);
+        const assessmentRead = readCandidateAssessmentReport(document);
+        expect(discoveryRead.kind).toBe('candidate_discovery_v1');
+        expect(assessmentRead.kind).toBe('candidate_assessment_v1');
+        draftInfo = {
+          draftId: latest!.id,
+          draftStatus: latest!.status,
+          guardKind: guardRead.kind,
+          observation:
+            discoveryRead.kind === 'candidate_discovery_v1'
+              ? discoveryRead.report.observation
+              : null,
+          candidates:
+            discoveryRead.kind === 'candidate_discovery_v1'
+              ? discoveryRead.report.candidates.map((candidate) => ({
+                  storyId: candidate.storyId,
+                  matchedSignals: candidate.matchedSignals.map((signal) => signal.kind),
+                }))
+              : [],
+          assessment:
+            assessmentRead.kind === 'candidate_assessment_v1'
+              ? {
+                  observation: assessmentRead.report.observation,
+                  entries: assessmentRead.report.entries.map((entry) => ({
+                    storyId: entry.storyId,
+                    verdict: entry.verdict,
+                    verdictReasons: entry.verdictReasons,
+                  })),
+                  unrelatednessConcluded: assessmentRead.report.unrelatednessConcluded,
+                  unassessed: assessmentRead.report.unassessed,
+                }
+              : { kind: assessmentRead.kind },
+        };
+      } else {
+        // Reuse outcome: report the TARGET draft this item now shares.
+        const reused = await rawExecutor.first<{ id: string; status: string }>({
+          sql: 'SELECT id, status FROM drafts WHERE story_id = ? AND version = 1',
+          params: [ownClaim.story_id],
+        });
+        draftInfo = {
+          ...draftInfo,
+          draftId: reused!.id,
+          draftStatus: reused!.status,
+          guardKind: 'reused_target_draft_untouched',
+        };
+      }
       summaryItems.push({
         sourceItemId: item.id,
-        storyId: latest!.story_id,
-        draftId: latest!.id,
-        draftStatus: latest!.status,
-        guardKind: guardRead.kind,
-        observation: discoveryRead.report.observation,
-        candidates: discoveryRead.report.candidates.map((candidate) => ({
-          storyId: candidate.storyId,
-          matchedSignals: candidate.matchedSignals.map((signal) => signal.kind),
-        })),
-        counts: discoveryRead.report.counts,
-        candidatesTruncated: discoveryRead.report.candidatesTruncated,
-        assessment:
-          assessmentRead.kind === 'candidate_assessment_v1'
-            ? {
-                observation: assessmentRead.report.observation,
-                entries: assessmentRead.report.entries.map((entry) => ({
-                  storyId: entry.storyId,
-                  verdict: entry.verdict,
-                  verdictReasons: entry.verdictReasons,
-                })),
-                unrelatednessConcluded: assessmentRead.report.unrelatednessConcluded,
-                unassessed: assessmentRead.report.unassessed,
-                discoveryLimits: {
-                  candidatesTruncated: assessmentRead.report.discoveryLimits.candidatesTruncated,
-                  overflowObserved: assessmentRead.report.discoveryLimits.overflowObserved,
-                },
-              }
-            : { kind: assessmentRead.kind },
+        outcomeType,
+        resultStoryId: ownClaim.story_id,
+        ownProvenance: {
+          claimId: ownClaim.claim_id,
+          claimSubject: ownClaim.subject,
+        },
+        reusedOrCreatedDraft: draftInfo.draftId,
+        draftStatus: draftInfo.draftStatus,
+        guardKind: draftInfo.guardKind,
+        discoveryObservation: draftInfo.observation,
+        discoveryCandidates: draftInfo.candidates,
+        assessment: draftInfo.assessment,
+        itemProcessingStatus: (await rawExecutor.first<{ processing_status: string }>({
+          sql: 'SELECT processing_status FROM source_items WHERE id = ?',
+          params: [item.id],
+        }))!.processing_status,
+        providerCallsDelta: providerCalls - providerBefore,
         sqlDelta: {
           statements: after.statements - before.statements,
           apiCalls: after.apiCalls - before.apiCalls,
@@ -359,18 +400,22 @@ describe('story candidates demo — offline three-source runner', () => {
     const claimRows = await rawExecutor.query<{ confidence: number }>({
       sql: 'SELECT confidence FROM claims',
     });
+    const draftRows = await rawExecutor.query<{ id: string; document_json: string }>({
+      sql: 'SELECT id, document_json FROM drafts',
+    });
 
     const summary = {
-      demo: 'R1.14 story candidates + conservative assessment — seven artificial sources, ZERO network/AI',
+      demo: 'R1.15 exact-content draft reuse with preserved provenance — five artificial sources, ZERO network/live AI',
       scopeCaps: {
         probeRowsPerLookup: FINGERPRINT_LOOKUP_ROW_LIMIT,
         maxCandidates: STORY_CANDIDATES_MAX,
         indexNamespace: 'sc1',
-        assessmentNote:
-          'R1.14 adds ZERO statements: the assessment rides inside the existing document_json',
+        reuseNote:
+          'R1.15 reuse is VERIFIED (byte-exact full composed text + usable ready draft); the group anchor enforces ONE stable result per exact content in SQL; reuse is NOT a merge, NOT truth, NOT independence',
       },
       items: summaryItems,
       totals: {
+        providerCalls,
         statements: stats.statements,
         apiCalls: stats.apiCalls,
         rowsReturned: stats.rowsReturned,
@@ -382,74 +427,79 @@ describe('story candidates demo — offline three-source runner', () => {
         storyStatuses: storyRows.rows.map((row) => row.status),
         claimCount: claimRows.rows.length,
         allClaimConfidencesZero: claimRows.rows.every((row) => row.confidence === 0),
+        distinctDraftDocuments: new Set(draftRows.rows.map((row) => row.document_json)).size,
       },
       note:
         'Local D1 proxy metrics only — NOT Cloudflare billing counters. ' +
         'Free ingestion/full-poll remain NOT_READY.',
     };
     // eslint-disable-next-line no-console
-    console.log('\n=== R1.14 STORY-CANDIDATES + ASSESSMENT DEMO (safe summary) ===');
+    console.log('\n=== R1.15 EXACT-CONTENT REUSE DEMO (safe summary) ===');
     // eslint-disable-next-line no-console
     console.log(JSON.stringify(summary, null, 2));
 
-    // The demo's OWN assertions: each pair observed EXACTLY the signals it
-    // shares, the solo items honestly empty, and NOTHING merged anywhere.
-    const a1 = summaryItems[0]!;
-    const a2 = summaryItems[1]!;
-    const p1 = summaryItems[2]!;
-    const p2 = summaryItems[3]!;
-    const t1 = summaryItems[4]!;
-    const t2 = summaryItems[5]!;
-    const solo = summaryItems[6]!;
-    expect(a1['observation']).toBe('no_candidates_observed');
-    expect(a2['observation']).toBe('candidates_observed');
-    expect(a2['candidates']).toEqual([{ storyId: a1['storyId'], matchedSignals: ['url'] }]);
-    expect(a2['assessment']).toMatchObject({
+    // The demo's OWN assertions.
+    const [a, b, c, d, e] = summaryItems;
+    // A: the normal path — one real provider call, its own draft.
+    expect(a!.outcomeType).toBe('normal_draft');
+    expect(a!.providerCallsDelta).toBe(1);
+    expect(a!.discoveryObservation).toBe('no_candidates_observed');
+    // B: VERIFIED reuse — zero provider calls, own provenance under A's story.
+    expect(b!.outcomeType).toBe('exact_content_reuse');
+    expect(b!.providerCallsDelta).toBe(0);
+    expect(b!.resultStoryId).toBe(a!.resultStoryId);
+    expect(b!.ownProvenance).toMatchObject({ claimSubject: 'دموی منبع بتا' });
+    expect(b!.reusedOrCreatedDraft).toBe(a!.reusedOrCreatedDraft);
+    expect(b!.itemProcessingStatus).toBe('processed');
+    // C: shared URL only → independent draft; the URL signal observed.
+    expect(c!.outcomeType).toBe('normal_draft');
+    expect(c!.providerCallsDelta).toBe(1);
+    expect(c!.discoveryCandidates).toEqual([
+      { storyId: a!.resultStoryId, matchedSignals: ['url'] },
+    ]);
+    expect(c!.assessment).toMatchObject({
       entries: [
         {
-          storyId: a1['storyId'],
+          storyId: a!.resultStoryId,
           verdict: 'shared_url_observed',
           verdictReasons: ['url_fingerprint_match'],
         },
       ],
       unrelatednessConcluded: false,
     });
-    expect(p1['observation']).toBe('no_candidates_observed');
-    expect(p2['observation']).toBe('candidates_observed');
-    expect(p2['candidates']).toEqual([
-      { storyId: p1['storyId'], matchedSignals: ['content_hash', 'title_key'] },
+    // D: shared title only → independent draft; the WEAK title signal observed.
+    expect(d!.outcomeType).toBe('normal_draft');
+    expect(d!.providerCallsDelta).toBe(1);
+    expect(d!.discoveryCandidates).toEqual([
+      { storyId: a!.resultStoryId, matchedSignals: ['title_key'] },
     ]);
-    expect(p2['assessment']).toMatchObject({
+    expect(d!.assessment).toMatchObject({
       entries: [
         {
-          storyId: p1['storyId'],
-          verdict: 'full_content_equality_observed',
-          verdictReasons: ['content_hash_fingerprint_match', 'title_key_fingerprint_match'],
-        },
-      ],
-      unrelatednessConcluded: false,
-      unassessed: ['same_event', 'truth', 'source_independence'],
-    });
-    expect(t1['observation']).toBe('no_candidates_observed');
-    expect(t2['observation']).toBe('candidates_observed');
-    expect(t2['candidates']).toEqual([{ storyId: t1['storyId'], matchedSignals: ['title_key'] }]);
-    expect(t2['assessment']).toMatchObject({
-      entries: [
-        {
-          storyId: t1['storyId'],
+          storyId: a!.resultStoryId,
           verdict: 'shared_title_observed',
           verdictReasons: ['title_key_fingerprint_match'],
         },
       ],
       unrelatednessConcluded: false,
     });
-    expect(solo['observation']).toBe('no_candidates_observed');
-    expect(solo['assessment']).toMatchObject({
+    // E: fully independent.
+    expect(e!.outcomeType).toBe('normal_draft');
+    expect(e!.discoveryObservation).toBe('no_candidates_observed');
+    expect(e!.assessment).toMatchObject({
       observation: 'no_candidates_observed',
       entries: [],
       unrelatednessConcluded: false,
     });
-    expect(summary.noMergeProof.stories).toBe(7);
+
+    // 5 items → 4 stories, 4 drafts, 5 claims, exactly 4 REAL provider
+    // calls, 4 ai_runs rows — B paid NOTHING and fabricated NOTHING.
+    expect(summary.noMergeProof.stories).toBe(4);
+    expect(summary.noMergeProof.claimCount).toBe(5);
     expect(summary.noMergeProof.allClaimConfidencesZero).toBe(true);
+    expect(summary.totals.providerCalls).toBe(4);
+    expect(
+      await rawExecutor.first<{ n: number }>({ sql: 'SELECT COUNT(*) AS n FROM ai_runs' }),
+    ).toMatchObject({ n: 4 });
   });
 });

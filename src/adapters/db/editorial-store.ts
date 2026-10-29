@@ -43,11 +43,12 @@
  * once external behavior is NOT claimed.
  */
 
-import type { DbExecutor } from './db-executor';
+import type { DbExecutor, DbQueryMeta } from './db-executor';
 import type {
   FingerprintLookupPlan,
   StoryFingerprintKind,
 } from '../../domain/editorial/story-fingerprints';
+import { isAppError } from '../../shared/errors/app-error';
 
 /** Editorial-owned read shape of a source_items row (traceable fields only). */
 export interface EditorialSourceItemRow {
@@ -145,6 +146,63 @@ export async function findStableEditorialResult(
     return null;
   }
   return { story, draft };
+}
+
+/**
+ * The DURABLE source_report attachment of one source item (R1.15): the
+ * (claim, story) pair that proves the item's provenance relation to a
+ * story result already exists — the replay fast-path of the exact-content
+ * reuse. ONE indexed read (evidence by source_item_id → claims by PK);
+ * the atomic commit guarantees a claim and its evidence (and the item's
+ * processed flip) always landed TOGETHER, so claim existence is the
+ * relation's existence proof.
+ */
+export interface EditorialSourceAttachmentRow {
+  readonly claim_id: string;
+  readonly story_id: string;
+}
+
+export async function findEditorialSourceAttachment(
+  executor: DbExecutor,
+  sourceItemId: string,
+): Promise<EditorialSourceAttachmentRow | null> {
+  return executor.first<EditorialSourceAttachmentRow>({
+    sql: `SELECT c.id AS claim_id, c.story_id
+            FROM evidence e
+            JOIN claims c ON c.id = e.claim_id
+           WHERE e.source_item_id = ? AND c.claim_type = 'source_report'
+           ORDER BY c.created_at ASC, c.id ASC
+           LIMIT 1`,
+    params: [sourceItemId],
+  });
+}
+
+/**
+ * The REFERENCE items of one candidate story (R1.15): the source items
+ * attached to the story through its `source_report` claims' evidence —
+ * the ONLY honest basis for the byte-exact content verification that must
+ * precede any reuse decision (a fingerprint is a locator, never the
+ * decision). Bounded, deterministic (ascending item id); all joins are
+ * index/PK driven (claims by story, evidence by claim's UNIQUE index,
+ * source_items by PK).
+ */
+export async function findStoryReferenceItems(
+  executor: DbExecutor,
+  storyId: string,
+  limit: number,
+): Promise<readonly EditorialSourceItemRow[]> {
+  const { rows } = await executor.query<EditorialSourceItemRow>({
+    sql: `SELECT si.id, si.source_id, si.title, si.body_excerpt, si.canonical_url,
+                 si.content_hash, si.processing_status
+            FROM claims c
+            JOIN evidence e ON e.claim_id = c.id
+            JOIN source_items si ON si.id = e.source_item_id
+           WHERE c.story_id = ? AND c.claim_type = 'source_report'
+           ORDER BY si.id ASC
+           LIMIT ?`,
+    params: [storyId, limit],
+  });
+  return rows;
 }
 
 /**
@@ -293,6 +351,21 @@ export interface EditorialCommitInput {
     readonly kind: StoryFingerprintKind;
     readonly value: string;
   }[];
+  /**
+   * R1.15 (Phase 5C-3): the exact-content GROUP anchor — the group-unique
+   * `sc1:<digest>` value (NO story suffix) derived from THIS item's OWN
+   * full composed text. The `(kind,value)` PRIMARY KEY makes the anchor
+   * unique across ALL stories: when another commit already owns this
+   * exact content, the anchor's PRIMARY KEY COLLIDES and the WHOLE atomic
+   * batch is rolled back (D1 batch = transaction) — the SQL-level
+   * uniqueness of one stable result per exact content. The REAL path
+   * ALWAYS provides the anchor; the own-row NOT EXISTS guard keeps the
+   * commit re-runnable for the SAME story only.
+   */
+  readonly exactContentAnchor: {
+    readonly kind: StoryFingerprintKind;
+    readonly value: string;
+  };
 }
 
 /** Per-statement outcome of the fenced atomic commit. */
@@ -306,6 +379,15 @@ export interface EditorialCommitResult {
   /** R1.13: fingerprint rows inserted by THIS batch (0..3; 0 on any
    * predicate failure — never orphaned, never half-written). */
   readonly fingerprintsInserted: number;
+  /**
+   * R1.15: the exact-content anchor PRIMARY KEY collided — ANOTHER story
+   * already owns this exact full content, so the WHOLE batch (including
+   * the anchor) rolled back with ZERO effects. DISTINCT from fence/snapshot
+   * failures on purpose: the caller records its REAL provider run (it
+   * happened and stays charged) and retries into the verified reuse path —
+   * never an overwrite, never a second stable result.
+   */
+  readonly contentTaken: boolean;
   /** Zero fenced effects: the caller lost ownership (stale generation). */
   readonly fenceLost: boolean;
   /**
@@ -323,6 +405,59 @@ const FENCE_PREDICATE = `EXISTS (SELECT 1 FROM jobs
 
 const SNAPSHOT_PREDICATE = `EXISTS (SELECT 1 FROM source_items
                               WHERE id = ? AND source_id = ? AND content_hash = ?)`;
+
+/**
+ * The R1.15 exact-content anchor statement — appended LAST in the fenced
+ * commit batch. Deliberately NO cross-story NOT EXISTS: when another story
+ * already owns the `sc1:<digest>` anchor, the PRIMARY KEY collision is the
+ * SIGNAL that aborts the whole atomic batch (typed `contentTaken`). The
+ * own-row guard keeps the statement re-runnable for the SAME story only.
+ * Fence and snapshot predicates still gate the insert, so a stale
+ * generation or a changed snapshot can NEVER plant an anchor.
+ */
+function exactContentAnchorStatement(
+  input: EditorialCommitInput,
+  fenceParams: readonly unknown[],
+  snapshotParams: readonly unknown[],
+): { readonly sql: string; readonly params: readonly unknown[] } {
+  const anchor = input.exactContentAnchor;
+  return {
+    sql: `INSERT INTO story_fingerprints (story_id, kind, value, created_at)
+          SELECT ?, ?, ?, ?
+           WHERE NOT EXISTS (SELECT 1 FROM story_fingerprints
+                              WHERE kind = ? AND value = ? AND story_id = ?)
+             AND ${FENCE_PREDICATE}
+             AND ${SNAPSHOT_PREDICATE}`,
+    params: [
+      input.story.id,
+      anchor.kind,
+      anchor.value,
+      input.draft.createdAt,
+      anchor.kind,
+      anchor.value,
+      input.story.id,
+      ...fenceParams,
+      ...snapshotParams,
+    ],
+  };
+}
+
+/**
+ * Classification of a caught batch error into the R1.15 typed
+ * `contentTaken` outcome: the ONLY constraint the unguarded anchor can
+ * violate is its own `(kind, value)` PRIMARY KEY (every other statement
+ * carries a NOT EXISTS/deterministic-id guard), so a constraint violation
+ * whose raw driver message names `story_fingerprints` IS the anchor
+ * collision. The raw message is inspected for CLASSIFICATION ONLY and is
+ * never surfaced, logged, or serialized (d1-errors.ts contract).
+ */
+function isExactContentAnchorConflict(error: unknown): boolean {
+  if (!isAppError(error) || error.code !== 'db_constraint_violation') {
+    return false;
+  }
+  const cause = error.cause;
+  return cause instanceof Error && cause.message.includes('story_fingerprints');
+}
 
 /**
  * Fenced standalone ai_runs insert for NON-success paths (deferred /
@@ -393,7 +528,46 @@ export async function commitEditorialResult(
     input.snapshot.contentHash,
   ];
 
-  const metas = await executor.batch([
+  let metas: readonly DbQueryMeta[];
+  try {
+    metas = await buildAndRunCommitBatch(executor, input, fenceParams, snapshotParams);
+  } catch (error) {
+    if (isExactContentAnchorConflict(error)) {
+      // The exact-content anchor collided: ANOTHER story owns this exact
+      // full content. The D1 batch is a transaction — the WHOLE batch
+      // (story, claim, evidence, ai_run, draft, processed flip, story-
+      // scoped fingerprints AND the anchor) rolled back with ZERO effects.
+      // Typed, distinct outcome: never conflated with a lost fence or a
+      // changed snapshot; the caller owns the honest retry into reuse.
+      return {
+        draftInserted: false,
+        storyInserted: false,
+        sourceItemProcessed: false,
+        fingerprintsInserted: 0,
+        contentTaken: true,
+        fenceLost: false,
+        snapshotChanged: false,
+      };
+    }
+    throw error;
+  }
+
+  return classifyCommitMetas(metas, input, fenceParams, snapshotParams, executor);
+}
+
+/**
+ * The atomic statement list: the six base statements + the ≤3 story-scoped
+ * fingerprints (R1.13) + the exact-content anchor (R1.15, LAST). Any
+ * statement failure rolls back the whole transaction; the anchor's PRIMARY
+ * KEY collision is the R1.15 group-uniqueness signal.
+ */
+async function buildAndRunCommitBatch(
+  executor: DbExecutor,
+  input: EditorialCommitInput,
+  fenceParams: readonly unknown[],
+  snapshotParams: readonly unknown[],
+): Promise<readonly DbQueryMeta[]> {
+  return executor.batch([
     {
       sql: `INSERT INTO stories (id, story_key, status, trust_status, content_type,
                                   priority, confidence, working_headline,
@@ -546,13 +720,32 @@ export async function commitEditorialResult(
         ...snapshotParams,
       ],
     })),
+    // R1.15: the exact-content group anchor — LAST, deliberately unguarded
+    // across stories: a live cross-story owner trips the PRIMARY KEY and
+    // aborts the whole transaction (typed contentTaken for the caller).
+    exactContentAnchorStatement(input, fenceParams, snapshotParams),
   ]);
+}
 
+/**
+ * Per-statement classification of a successful batch (or the one
+ * classification read for a zero-effect batch — write protection itself
+ * always happened entirely inside SQL).
+ */
+async function classifyCommitMetas(
+  metas: readonly DbQueryMeta[],
+  input: EditorialCommitInput,
+  fenceParams: readonly unknown[],
+  snapshotParams: readonly unknown[],
+  executor: DbExecutor,
+): Promise<EditorialCommitResult> {
   const storyInserted = (metas[0]?.changes ?? 0) > 0;
   const draftInserted = (metas[4]?.changes ?? 0) > 0;
   const sourceItemProcessed = (metas[5]?.changes ?? 0) > 0;
+  // Indices 6..6+n are the story-scoped fingerprints; the LAST meta is the
+  // exact-content anchor (not part of `fingerprintsInserted`).
   const fingerprintsInserted = metas
-    .slice(6)
+    .slice(6, 6 + input.fingerprints.length)
     .reduce((total, meta) => total + (meta?.changes ?? 0), 0);
   if (draftInserted) {
     return {
@@ -560,6 +753,7 @@ export async function commitEditorialResult(
       storyInserted,
       sourceItemProcessed,
       fingerprintsInserted,
+      contentTaken: false,
       fenceLost: false,
       snapshotChanged: false,
     };
@@ -586,6 +780,7 @@ export async function commitEditorialResult(
       storyInserted,
       sourceItemProcessed,
       fingerprintsInserted: 0,
+      contentTaken: false,
       fenceLost: false,
       snapshotChanged: true,
     };
@@ -599,7 +794,269 @@ export async function commitEditorialResult(
     storyInserted,
     sourceItemProcessed,
     fingerprintsInserted: 0,
+    contentTaken: false,
     fenceLost: true,
     snapshotChanged: false,
+  };
+}
+
+/** The reuse-target validity predicate (R1.15): the story the reuse
+ * attaches to must STILL exist and STILL own a usable ready draft at the
+ * pipeline's draft version — evaluated INSIDE the atomic batch (a target
+ * that died between the lookup and the commit produces ZERO effects with
+ * a distinct typed outcome, never a partial attachment). */
+const REUSE_TARGET_PREDICATE = `EXISTS (SELECT 1 FROM stories rs
+                                  WHERE rs.id = ?
+                                    AND EXISTS (SELECT 1 FROM drafts rd
+                                                 WHERE rd.story_id = rs.id
+                                                   AND rd.status = 'ready'
+                                                   AND rd.version = ?))`;
+
+/** Input of the R1.15 fenced REUSE commit. */
+export interface EditorialReuseCommitInput {
+  /** Ownership fence: the durable job id. */
+  readonly jobId: string;
+  /** Ownership fence: the claimed generation (jobs.attempts). */
+  readonly generation: number;
+  /** Ownership fence: the "now" the lease freshness is judged against. */
+  readonly fenceNowMs: number;
+  /** Snapshot identity of the REUSING item (read and verified by the
+   * handler) — evaluated inside the batch on EVERY statement. */
+  readonly snapshot: {
+    readonly sourceItemId: string;
+    readonly sourceId: string;
+    readonly contentHash: string;
+  };
+  /** The verified reuse target: the story whose usable ready draft will
+   * serve this item's exact content. */
+  readonly target: {
+    readonly storyId: string;
+    readonly draftVersion: number;
+  };
+  /** The reusing item's OWN source_report claim (its own provenance —
+   * deterministic per (story, item); the old draft's claims are never
+   * reattributed). */
+  readonly claim: {
+    readonly id: string;
+    readonly storyId: string;
+    readonly claimType: string;
+    readonly subject: string;
+    readonly predicate: string;
+    readonly objectText: string;
+    readonly confidence: number;
+    readonly status: string;
+    readonly createdAt: number;
+  };
+  /** The reusing item's OWN mentions evidence. */
+  readonly evidence: {
+    readonly id: string;
+    readonly claimId: string;
+    readonly sourceItemId: string;
+    readonly stance: string;
+    readonly confidence: number;
+    readonly excerpt: string;
+    readonly createdAt: number;
+  };
+}
+
+/** Typed outcome of the R1.15 fenced reuse commit. */
+export interface EditorialReuseCommitResult {
+  /** The claim AND evidence rows landed by THIS batch (the durable
+   * provenance relation exists). */
+  readonly attached: boolean;
+  /** The reusing item's processing_status moved to 'processed' by this
+   * batch (reported honestly; the relation never precedes it). */
+  readonly sourceItemProcessed: boolean;
+  /** The deterministic claim already existed — the relation was already
+   * durably established (defensive replay branch; SQL-proven). */
+  readonly alreadyAttached: boolean;
+  /** Zero effects: the caller lost ownership (stale generation). */
+  readonly fenceLost: boolean;
+  /** Zero effects: the reusing item's snapshot changed mid-flight. */
+  readonly snapshotChanged: boolean;
+  /** Zero effects: the target story/usable draft no longer holds — the
+   * caller retries; the next generation's lookup re-decides honestly. */
+  readonly targetInvalid: boolean;
+}
+
+/**
+ * THE R1.15 fenced REUSE commit: the reusing item's own source_report
+ * claim + mentions evidence + its processed flip — ONE atomic batch, EVERY
+ * statement carrying the job fence, the reusing item's snapshot predicate,
+ * AND the reuse-target validity predicate (the target's usable ready draft
+ * must still exist INSIDE the batch). NO draft, NO story, NO ai_runs row,
+ * NO fingerprint is written here: the reused result belongs to the target
+ * story and is never rewritten; a reuse makes NO provider call, so NO
+ * ai_runs row is fabricated. A failure anywhere rolls the WHOLE batch back
+ * (no orphan relation, no fake processed).
+ */
+export async function commitEditorialReuse(
+  executor: DbExecutor,
+  input: EditorialReuseCommitInput,
+): Promise<EditorialReuseCommitResult> {
+  const fenceParams = [input.jobId, input.generation, input.fenceNowMs];
+  const snapshotParams = [
+    input.snapshot.sourceItemId,
+    input.snapshot.sourceId,
+    input.snapshot.contentHash,
+  ];
+  const targetParams = [input.target.storyId, input.target.draftVersion];
+
+  const metas = await executor.batch([
+    {
+      sql: `INSERT INTO claims (id, story_id, claim_type, subject, predicate, object_text,
+                                 confidence, status, created_at, updated_at)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+             WHERE NOT EXISTS (SELECT 1 FROM claims WHERE id = ?)
+               AND ${FENCE_PREDICATE}
+               AND ${SNAPSHOT_PREDICATE}
+               AND ${REUSE_TARGET_PREDICATE}`,
+      params: [
+        input.claim.id,
+        input.claim.storyId,
+        input.claim.claimType,
+        input.claim.subject,
+        input.claim.predicate,
+        input.claim.objectText,
+        input.claim.confidence,
+        input.claim.status,
+        input.claim.createdAt,
+        input.claim.createdAt,
+        input.claim.id,
+        ...fenceParams,
+        ...snapshotParams,
+        ...targetParams,
+      ],
+    },
+    {
+      sql: `INSERT INTO evidence (id, claim_id, source_item_id, stance, confidence, excerpt, created_at)
+            SELECT ?, ?, ?, ?, ?, ?, ?
+             WHERE NOT EXISTS (SELECT 1 FROM evidence WHERE id = ?)
+               AND ${FENCE_PREDICATE}
+               AND ${SNAPSHOT_PREDICATE}
+               AND ${REUSE_TARGET_PREDICATE}`,
+      params: [
+        input.evidence.id,
+        input.evidence.claimId,
+        input.evidence.sourceItemId,
+        input.evidence.stance,
+        input.evidence.confidence,
+        input.evidence.excerpt,
+        input.evidence.createdAt,
+        input.evidence.id,
+        ...fenceParams,
+        ...snapshotParams,
+        ...targetParams,
+      ],
+    },
+    {
+      // The processed flip is guarded DIRECTLY on the reusing item's row
+      // AND on the target's continued validity — the relation and the
+      // processed status land (or not) TOGETHER.
+      sql: `UPDATE source_items
+              SET processing_status = 'processed'
+            WHERE id = ?
+              AND source_id = ?
+              AND content_hash = ?
+              AND processing_status IN ('new', 'queued')
+              AND ${FENCE_PREDICATE}
+              AND ${REUSE_TARGET_PREDICATE}`,
+      params: [
+        input.snapshot.sourceItemId,
+        ...snapshotParams.slice(1),
+        ...fenceParams,
+        ...targetParams,
+      ],
+    },
+  ]);
+
+  const claimInserted = (metas[0]?.changes ?? 0) > 0;
+  const evidenceInserted = (metas[1]?.changes ?? 0) > 0;
+  const sourceItemProcessed = (metas[2]?.changes ?? 0) > 0;
+  if (claimInserted && evidenceInserted) {
+    return {
+      attached: true,
+      sourceItemProcessed,
+      alreadyAttached: false,
+      fenceLost: false,
+      snapshotChanged: false,
+      targetInvalid: false,
+    };
+  }
+
+  // Zero (or partial) effects: ONE classification read decides WHICH
+  // predicate produced the no-op — the guards themselves never left SQL.
+  const classification = await executor.first<{
+    fence_holds: number;
+    snapshot_holds: number;
+    target_holds: number;
+    claim_exists: number;
+  }>({
+    sql: `SELECT EXISTS (SELECT 1 FROM jobs
+                          WHERE id = ? AND status = 'claimed' AND attempts = ?
+                            AND lease_until IS NOT NULL AND lease_until > ?) AS fence_holds,
+                 EXISTS (SELECT 1 FROM source_items
+                          WHERE id = ? AND source_id = ? AND content_hash = ?) AS snapshot_holds,
+                 ${REUSE_TARGET_PREDICATE} AS target_holds,
+                 EXISTS (SELECT 1 FROM claims WHERE id = ?) AS claim_exists`,
+    params: [...fenceParams, ...snapshotParams, ...targetParams, input.claim.id],
+  });
+  const fenceHolds = (classification?.fence_holds ?? 0) === 1;
+  const snapshotHolds = (classification?.snapshot_holds ?? 0) === 1;
+  const targetHolds = (classification?.target_holds ?? 0) === 1;
+  const claimExists = (classification?.claim_exists ?? 0) === 1;
+  if (claimExists) {
+    // The durable relation already exists (defensive replay branch; the
+    // handler's pre-commit attachment check makes this unreachable in the
+    // real flow). Honest success: the work IS durably done.
+    return {
+      attached: false,
+      sourceItemProcessed,
+      alreadyAttached: true,
+      fenceLost: false,
+      snapshotChanged: false,
+      targetInvalid: false,
+    };
+  }
+  if (!fenceHolds) {
+    return {
+      attached: false,
+      sourceItemProcessed: false,
+      alreadyAttached: false,
+      fenceLost: true,
+      snapshotChanged: false,
+      targetInvalid: false,
+    };
+  }
+  if (!snapshotHolds) {
+    return {
+      attached: false,
+      sourceItemProcessed: false,
+      alreadyAttached: false,
+      fenceLost: false,
+      snapshotChanged: true,
+      targetInvalid: false,
+    };
+  }
+  if (!targetHolds) {
+    return {
+      attached: false,
+      sourceItemProcessed: false,
+      alreadyAttached: false,
+      fenceLost: false,
+      snapshotChanged: false,
+      targetInvalid: true,
+    };
+  }
+  // Unreachable conservative default (a pre-existing evidence row without
+  // its claim, etc.) — reported as a lost fence, bounded by the engine's
+  // own attempt budget; no partial state can exist either way.
+  return {
+    attached: false,
+    sourceItemProcessed: false,
+    alreadyAttached: false,
+    fenceLost: true,
+    snapshotChanged: false,
+    targetInvalid: false,
   };
 }

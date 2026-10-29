@@ -740,6 +740,12 @@ describe('scenario 5 — stale generation/lease has zero unauthorized effect', (
         createdAt: harness.clock.now(),
       },
       fingerprints: [],
+      // R1.15: the exact-content group anchor (store-level tests use a fixed
+      // well-formed anchor; the REAL path derives it from the item's own text).
+      exactContentAnchor: {
+        kind: 'content_hash' as const,
+        value: 'sc1:' + 'a'.repeat(64),
+      },
     });
     expect(staleAttempt.fenceLost).toBe(true);
     expect(await rowCount(harness.rawExecutor, 'stories')).toBe(0);
@@ -1287,6 +1293,12 @@ describe('R1.11.1 corrections (Posidon correctness review) — commit-time snaps
         createdAt: harness.clock.now(),
       },
       fingerprints: [],
+      // R1.15: the exact-content group anchor (store-level tests use a fixed
+      // well-formed anchor; the REAL path derives it from the item's own text).
+      exactContentAnchor: {
+        kind: 'content_hash' as const,
+        value: 'sc1:' + 'a'.repeat(64),
+      },
     };
 
     // The item's content_hash changed AFTER the handler's (simulated) read:
