@@ -126,6 +126,56 @@ output demonstrated in tests is an OFFLINE FIXTURE — no live-model Persian
 quality is claimed. Free-plan live fetching stays NOT_READY; this local
 path does not change that.
 
+## R1.11.1 correctness addendum (Posidon review — three fixes, no scope change)
+
+1. **Snapshot predicate at COMMIT time.** §5's atomic batch now carries a
+   SECOND predicate on EVERY statement — the identity of the snapshot the
+   handler read — evaluated inside the same SQL batch:
+   `EXISTS (SELECT 1 FROM source_items WHERE id = ? AND source_id = ?
+AND content_hash = ?)` (the `source_items` update guards its own row
+   directly). A source item that changes between the handler's
+   identity-checked read and the commit therefore produces ZERO editorial
+   rows and ZERO processed flips — an old-snapshot draft can never be
+   committed while the item is marked processed. The zero-effect result is
+   classified by ONE post-batch read into a DISTINCT typed outcome:
+   `fenceLost` (job fence failed → recoverable retry, unchanged) vs
+   `snapshotChanged` (fence held, snapshot gone → PERMANENT
+   `editorial_snapshot_changed`). The new outcome is deliberately NOT
+   conflated with the fence loss or with the pre-read
+   `editorial_snapshot_mismatch`; the consumed provider budget is NOT
+   refunded and the REAL run is recorded (`failed` +
+   `editorial_snapshot_changed`). Terminal — a retry would re-read the same
+   stale identity (no hot loop; the pre-read terminal check stays).
+2. **Byte cap on the FULL evidence input BEFORE any truncation.** The
+   handler now measures UTF-8 bytes of `buildFullEvidenceText(item)`
+   (title + body composed, UNCUT — the single composition source shared
+   with `buildTraceableExcerpt`) BEFORE building the excerpt. An input
+   whose full text exceeds `AI_BOUNDS.maxInputUtf8Bytes` is a PERMANENT
+   `editorial_input_invalid` with ZERO provider calls, ZERO AI charges,
+   ZERO ai_runs rows, and the stored `source_item` text untouched. The
+   4000-code-unit excerpt remains the transparent SEPARATE contract for
+   `source_report.object_text`/evidence/draft (with the explicit
+   `excerpt_truncated` warning) — it can no longer smuggle an oversized
+   input past the AI input limit. No new cap was added on URL or source.
+3. **Traced-claim guard at the EDITORIAL boundary.** A schema-valid draft
+   with NO claim referencing the request evidence (the general AI schema —
+   and other callers' contracts — are unchanged) is not a success of this
+   path: PERMANENT `editorial_no_traced_claim`, never a ready draft, never
+   a processed item. The REAL run is recorded with `status='invalid'` and
+   the stable code; the charge stays. Terminal (the identical input would
+   deterministically repeat — no retry storm). Positive fixtures (suite +
+   demo) carry ONE real artificial claim whose `evidenceIds` reference the
+   request input; assertions pin the trace.
+
+Regression evidence: the independent reproduction file ran RED on the
+baseline (3 failed / 20 skipped, exit 1) and GREEN after the fixes; the
+regressions live in `editorial-source-to-draft.test.ts` (commit-time
+snapshot engine + store-level with a held-fence positive control; ASCII +
+multi-byte Persian + exact 16384/16385 boundary with zero provider/charge;
+empty-claims terminal path) and `editorial-contracts.test.ts` (codes,
+composition parity). As of R1.11.1: contracts 32 tests, integration suite
+27 tests, demo unchanged with its traceable claim.
+
 ## Proof
 
 - `tests/unit/editorial-contracts.test.ts` — payload strictness, identity
