@@ -10,7 +10,7 @@ import type { WorkerEnv } from '../../src/shared/types/env';
  */
 export function createTestEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
   return {
-    APP_VERSION: '1.4.0-test',
+    APP_VERSION: '1.5.0-test',
     ENVIRONMENT: 'development',
     LOG_LEVEL: 'debug',
     ...overrides,

@@ -195,3 +195,50 @@ architecture round and not a reimplementation:
   config change, no VERSION.json bump (same round), no deploy, no
   activation, no live inference, no Cloudflare operation, no workflow or
   account change, no frozen-file edit, no force push.
+
+### H1-E1 — Reporting erratum + version correction + recovery provenance
+
+- **Package accounting erratum:** the H1 delivery report (chat, 2026-10-28)
+  said "fresh extraction → 399/399 checksums ALL MATCH". Precise accounting:
+  the package contains **399 regular files** = 396 tracked + recovery bundle
+  - META + SHA256SUMS; the **manifest has 398 entries** and does not cover
+    itself; the verified checksum count is **398**. Posidon independently
+    verified ALL 398 entries of the received package (SHA-256
+    `e4cafd440f4f9dc722461d03f15838e7645899b05e2fd9aeb7c88510ec8a1b74`).
+    The H1 META file inside the ZIP already stated 398 correctly; the error
+    was in the chat report only. The H1 package was NOT rebuilt, renamed, or
+    replaced.
+- **Artifact metadata erratum:** the H1 round's VERSION.json
+  `artifactFilename` still named the PRE-H1 package
+  (`Pixel-Lores_v1.4.0_R1.10.6.1_AI-Deadline-Corrections_REVIEW_FULL-BACKUP.zip`).
+  Fixed in this B01 delivery: `artifactFilename` now names the actual B01
+  artifact, and package META files carry the same name.
+- **Version correction (owner ruling):** the next product candidate version
+  is **1.5.0** (minor — the AI adapter foundation is a new compatible
+  capability relative to 1.4.0). Synced across ALL active references per
+  `scripts/check-versions.mjs`: package.json, package-lock.json ROOT
+  metadata ONLY (the `expect-type@1.4.0` / `natural-compare@1.4.0`
+  dependency entries are third-party versions, untouched; NO lockfile
+  regeneration — two root fields edited in place, `npm ci` re-run green),
+  wrangler.jsonc `APP_VERSION` (root + preview), phase0.ts
+  `DEFAULT_APP_VERSION`, `.env.example`, `.dev.vars.example`,
+  `tests/helpers/test-env.ts`, and the three active test assertions pinning
+  the version (config.test.ts ×2, version.test.ts ×1). SCHEMA VERSION
+  STAYS 3 — no migration. Historical reports/frozen evidence untouched.
+  **Standing versioning policy:** compatible capability = minor;
+  post-release product fix = patch; breaking = major with an architecture
+  decision; repackaging or report-only fixes = delivery-ID increment
+  (B01, B02, …), not necessarily a software version; round numbers never
+  replace software versions. **1.5.0 = REVIEW CANDIDATE / NOT ACTIVATED**;
+  the cloud-active version is not assumed changed without observation.
+- **Environment event (observed facts, no cause claimed):** between the H1
+  delivery and this work the sandbox was observed restored to an earlier
+  snapshot — the working clone was found EMPTY at its path (dir mtime
+  Oct 23), local /home/z helper scripts and backup copies gone, while the
+  public/ ZIPs, the worklog, and the owner-attached H1 package survived.
+  The repo was rebuilt from the owner-verified H1 package: fresh extraction
+  (399 regular files, manifest 398/398 verified), inner bundle clone with
+  explicit `--branch review/r1.10.3-sql-design`, HEAD `2f923fe` + tree
+  `9eb8fa2b` verified, fsck clean, ALL 396 tracked files byte-identical to
+  the extraction. No committed work was lost (origin branch still at
+  `7ab64cd`; the 4 local H1-era commits restored byte-exactly).
