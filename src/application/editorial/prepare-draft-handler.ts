@@ -8,17 +8,31 @@
  *   (story + source_report claim + mentions evidence + ai_runs row + ready
  *   draft + source_item→processed).
  *
- * Typed-outcome contract (Posidon R1.11 — stable execution):
+ * Typed-outcome contract (Posidon R1.11 — stable execution; R1.11.1):
  * - unknown source item / missing source row → PERMANENT
  *   (`editorial_source_item_missing` / `editorial_source_missing`): retries
  *   cannot conjure a missing reference.
  * - stored-hash mismatch → PERMANENT `editorial_snapshot_mismatch`: the
  *   handler NEVER processes an imaginary snapshot.
- * - oversized evidence (UTF-8 bytes beyond AI_BOUNDS.maxInputUtf8Bytes)
- *   → PERMANENT `editorial_input_invalid`: a data property; retrying would
- *   deterministically reject again (no retry storm).
+ * - evidence input whose FULL defined text (title + body, BEFORE any
+ *   truncation) exceeds the AI input byte bound → PERMANENT
+ *   `editorial_input_invalid` (R1.11.1): a data property; truncation may
+ *   never smuggle an oversized input past the AI limit. ZERO provider
+ *   calls and ZERO AI charges for the rejection; the stored item text is
+ *   never rewritten.
+ * - a schema-valid draft with NO claim traceable to the request evidence
+ *   → PERMANENT `editorial_no_traced_claim` (R1.11.1, editorial boundary
+ *   only — the general AI schema is unchanged): never a ready draft, never
+ *   a processed item; the REAL run is recorded as `invalid`; terminal
+ *   because the identical input would deterministically repeat (no storm).
  * - provider SAFETY REFUSAL → PERMANENT `editorial_ai_refused`: terminal,
  *   no model/provider hopping (ADR-0041 contract preserved).
+ * - the stored source snapshot changed between the identity-checked read
+ *   and the commit → PERMANENT `editorial_snapshot_changed` (R1.11.1):
+ *   the SQL snapshot predicate made the WHOLE atomic commit a no-op —
+ *   zero editorial rows, zero processed flip. DISTINCT from a lost job
+ *   fence; the consumed provider budget is NOT refunded; terminal because
+ *   a retry would re-read the same stale identity (never a hot loop).
  * - typed AI deferrals (gate off, binding missing, budget denied, budget
  *   store failure, deadline, provider unavailable/auth, eligibility
  *   unverified, no free path, config invalid) → RECOVERABLE retry with the
@@ -68,6 +82,7 @@ import {
 import {
   buildAiEvidenceInput,
   buildDraftDocument,
+  buildFullEvidenceText,
   buildMentionsEvidence,
   buildSourceReportClaim,
   buildTraceableExcerpt,
@@ -232,11 +247,25 @@ export function createEditorialPrepareDraftHandler(
       return { kind: 'success' };
     }
 
-    // ---- 5. Traceable evidence from the item's OWN fields; byte-bounded.
+    // ---- 5. Traceable evidence from the item's OWN fields; byte-bounded
+    //          on the FULL defined evidence input BEFORE any truncation
+    //          (R1.11.1): the 16 KiB AI input limit is checked against
+    //          title + body as stored — truncating first would let an
+    //          oversized item reach the provider. The rejection happens
+    //          BEFORE any provider work: ZERO provider calls, ZERO AI
+    //          charges, ZERO ai_runs rows; the stored item is not touched.
+    const fullEvidenceText = buildFullEvidenceText(item);
+    const fullEvidenceBytes = new TextEncoder().encode(fullEvidenceText).length;
+    if (fullEvidenceBytes > AI_BOUNDS.maxInputUtf8Bytes || fullEvidenceText.length === 0) {
+      logger?.warn('editorial.prepare_draft.input_oversized');
+      return { kind: 'permanent', reasonCode: 'editorial_input_invalid' };
+    }
     const excerpt = buildTraceableExcerpt(item);
     const { snippet } = buildAiEvidenceInput(item.id, excerpt);
     const snippetBytes = new TextEncoder().encode(snippet.text).length;
     if (snippetBytes > AI_BOUNDS.maxInputUtf8Bytes || snippet.text.length === 0) {
+      // Defensive second layer (unreachable while the full-input gate
+      // above holds: an allowed input's excerpt is always smaller).
       logger?.warn('editorial.prepare_draft.input_oversized');
       return { kind: 'permanent', reasonCode: 'editorial_input_invalid' };
     }
@@ -277,6 +306,35 @@ export function createEditorialPrepareDraftHandler(
       return { kind: 'retry', reasonCode: 'job_internal_error' };
     }
 
+    // ---- 7a'. Editorial acceptance guard (R1.11.1): at least ONE model
+    //          claim must reference the request evidence. A schema-valid
+    //          draft with empty claims (or none pointing at THIS input) is
+    //          NOT a success of this path: it never becomes a ready draft
+    //          and never processes the item. The general AI schema and
+    //          other callers' contract stay unchanged. The REAL run is
+    //          recorded as `invalid` (the provider DID run and stays
+    //          charged — no refund); the outcome is TERMINAL because the
+    //          identical input would deterministically repeat (no storm).
+    const hasTracedClaim = outcome.draft.claims.some((claim) =>
+      claim.evidenceIds.includes(snippet.id),
+    );
+    if (!hasTracedClaim) {
+      if (observed !== null) {
+        await recordRealAiRun(
+          executor,
+          jobId,
+          generation,
+          { ...observed, status: 'invalid', errorCode: 'editorial_no_traced_claim' },
+          inputHash,
+          nowMs(),
+        );
+      }
+      logger?.warn('editorial.prepare_draft.no_traced_claim', {
+        claims: outcome.draft.claims.length,
+      });
+      return { kind: 'permanent', reasonCode: 'editorial_no_traced_claim' };
+    }
+
     // ---- 7b. Commit path: conservative story + source_report claim +
     //          mentions evidence + real ai_runs row + READY draft +
     //          source_item→processed — ONE fenced atomic batch.
@@ -302,6 +360,14 @@ export function createEditorialPrepareDraftHandler(
       jobId,
       generation,
       fenceNowMs: now,
+      // The snapshot identity the handler READ and verified: re-checked
+      // INSIDE the atomic batch (R1.11.1) so a source item that changed
+      // mid-flight produces zero effects with a distinct typed outcome.
+      snapshot: {
+        sourceItemId: item.id,
+        sourceId: item.source_id,
+        contentHash: item.content_hash,
+      },
       story: {
         id: storyId,
         storyKey,
@@ -359,8 +425,28 @@ export function createEditorialPrepareDraftHandler(
         createdBy: EDITORIAL_CREATED_BY,
         createdAt: now,
       },
-      sourceItemId: item.id,
     });
+
+    if (commit.snapshotChanged) {
+      // The source snapshot changed between the read and the atomic
+      // commit (R1.11.1): ZERO editorial rows and ZERO processed flips
+      // landed — the SQL snapshot predicate no-oped the whole batch. A
+      // DISTINCT terminal outcome — never conflated with a lost fence.
+      // The provider call happened and stays charged (no refund); the
+      // real run is recorded honestly as failed with the editorial code.
+      if (observed !== null) {
+        await recordRealAiRun(
+          executor,
+          jobId,
+          generation,
+          { ...observed, status: 'failed', errorCode: 'editorial_snapshot_changed' },
+          inputHash,
+          nowMs(),
+        );
+      }
+      logger?.warn('editorial.prepare_draft.source_snapshot_changed');
+      return { kind: 'permanent', reasonCode: 'editorial_snapshot_changed' };
+    }
 
     if (commit.fenceLost) {
       // Zero fenced effects landed — a newer generation owns the work.

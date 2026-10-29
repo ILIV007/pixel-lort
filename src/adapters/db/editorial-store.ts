@@ -11,13 +11,22 @@
  *   EXISTS (SELECT 1 FROM jobs
  *            WHERE id = ?1 AND status = 'claimed' AND attempts = ?2)
  *
- * The predicate is evaluated INSIDE SQL against the current row state
- * (a JS pre-check never substitutes for write fencing). A stale worker —
- * an old generation whose lease expired and was reclaimed — therefore
- * inserts ZERO stories/claims/evidence/ai_runs/drafts and flips ZERO
- * source_items: every INSERT..SELECT matches no rows and the guarded
- * UPDATE changes nothing, with NO constraint errors raised and nothing
- * swallowed (guards are positive predicates, not error handlers).
+ * SNAPSHOT PREDICATE (R1.11.1 — Posidon correctness review): EVERY
+ * statement ALSO carries the identity of the source snapshot the handler
+ * read — (source item id, source id, content_hash) — evaluated INSIDE the
+ * same atomic batch:
+ *
+ *   EXISTS (SELECT 1 FROM source_items
+ *            WHERE id = ? AND source_id = ? AND content_hash = ?)
+ *
+ * If the stored item changes between the handler's identity-checked read
+ * and the commit (the R1.11.1 demonstrated race), EVERY effect of the
+ * batch — story, claim, evidence, ai_run, draft AND the processed flip —
+ * matches ZERO rows: a draft of an OLD snapshot can never be committed
+ * while the item is marked processed as a NEW one. A JS re-read never
+ * substitutes for this SQL condition; a post-batch read only CLASSIFIES
+ * which predicate failed for the typed outcome (the write protection
+ * itself is entirely in SQL).
  *
  * IDEMPOTENCY CONTRACT: story/claim/evidence/draft rows use DETERMINISTIC
  * ids derived from (sourceItemId, snapshotHash) (ADR-0042 §2), so the
@@ -138,6 +147,17 @@ export interface EditorialCommitInput {
   readonly generation: number;
   /** Ownership fence: the "now" the lease freshness is judged against. */
   readonly fenceNowMs: number;
+  /**
+   * Snapshot identity the handler READ and verified (R1.11.1): applied as
+   * an SQL predicate on EVERY statement of the batch so a source item that
+   * changed between the read and the commit produces ZERO editorial
+   * effects and ZERO processed flips.
+   */
+  readonly snapshot: {
+    readonly sourceItemId: string;
+    readonly sourceId: string;
+    readonly contentHash: string;
+  };
   readonly story: {
     readonly id: string;
     readonly storyKey: string;
@@ -195,7 +215,6 @@ export interface EditorialCommitInput {
     readonly createdBy: string;
     readonly createdAt: number;
   };
-  readonly sourceItemId: string;
 }
 
 /** Per-statement outcome of the fenced atomic commit. */
@@ -208,11 +227,21 @@ export interface EditorialCommitResult {
   readonly sourceItemProcessed: boolean;
   /** Zero fenced effects: the caller lost ownership (stale generation). */
   readonly fenceLost: boolean;
+  /**
+   * Zero effects because the SOURCE SNAPSHOT changed between the
+   * handler's read and this batch (R1.11.1) — the job fence still holds.
+   * DISTINCT from `fenceLost` on purpose: the caller maps it to a
+   * terminal, snapshot-specific outcome, never to a blind retry.
+   */
+  readonly snapshotChanged: boolean;
 }
 
 const FENCE_PREDICATE = `EXISTS (SELECT 1 FROM jobs
                         WHERE id = ? AND status = 'claimed' AND attempts = ?
                           AND lease_until IS NOT NULL AND lease_until > ?)`;
+
+const SNAPSHOT_PREDICATE = `EXISTS (SELECT 1 FROM source_items
+                              WHERE id = ? AND source_id = ? AND content_hash = ?)`;
 
 /**
  * Fenced standalone ai_runs insert for NON-success paths (deferred /
@@ -265,15 +294,23 @@ export async function recordEditorialAiRun(
 /**
  * THE atomic editorial commit (ADR-0042 §4): story + source_report claim +
  * mentions evidence + ai_runs row + ready draft + source_item→processed,
- * all in ONE atomic D1 batch, every statement fenced on job ownership.
- * A failure anywhere rolls the WHOLE batch back (no partial editorial
- * state, no fake success, no fake processed).
+ * all in ONE atomic D1 batch, every statement fenced on job ownership AND
+ * on the read source snapshot (R1.11.1). A failure anywhere rolls the
+ * WHOLE batch back (no partial editorial state, no fake success, no fake
+ * processed). When the draft lands with zero effects, ONE classification
+ * read decides WHICH predicate failed (fence vs snapshot) — the guards
+ * themselves never leave SQL.
  */
 export async function commitEditorialResult(
   executor: DbExecutor,
   input: EditorialCommitInput,
 ): Promise<EditorialCommitResult> {
   const fenceParams = [input.jobId, input.generation, input.fenceNowMs];
+  const snapshotParams = [
+    input.snapshot.sourceItemId,
+    input.snapshot.sourceId,
+    input.snapshot.contentHash,
+  ];
 
   const metas = await executor.batch([
     {
@@ -282,7 +319,8 @@ export async function commitEditorialResult(
                                   first_seen_at, last_evidence_at, version, created_at, updated_at)
             SELECT ?, ?, 'discovered', 'unknown', 'industry', 50, 0, ?, ?, ?, 1, ?, ?
              WHERE NOT EXISTS (SELECT 1 FROM stories WHERE id = ?)
-               AND ${FENCE_PREDICATE}`,
+               AND ${FENCE_PREDICATE}
+               AND ${SNAPSHOT_PREDICATE}`,
       params: [
         input.story.id,
         input.story.storyKey,
@@ -293,6 +331,7 @@ export async function commitEditorialResult(
         input.story.createdAt,
         input.story.id,
         ...fenceParams,
+        ...snapshotParams,
       ],
     },
     {
@@ -300,7 +339,8 @@ export async function commitEditorialResult(
                                  confidence, status, created_at, updated_at)
             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              WHERE NOT EXISTS (SELECT 1 FROM claims WHERE id = ?)
-               AND ${FENCE_PREDICATE}`,
+               AND ${FENCE_PREDICATE}
+               AND ${SNAPSHOT_PREDICATE}`,
       params: [
         input.claim.id,
         input.claim.storyId,
@@ -314,13 +354,15 @@ export async function commitEditorialResult(
         input.claim.createdAt,
         input.claim.id,
         ...fenceParams,
+        ...snapshotParams,
       ],
     },
     {
       sql: `INSERT INTO evidence (id, claim_id, source_item_id, stance, confidence, excerpt, created_at)
             SELECT ?, ?, ?, ?, ?, ?, ?
              WHERE NOT EXISTS (SELECT 1 FROM evidence WHERE id = ?)
-               AND ${FENCE_PREDICATE}`,
+               AND ${FENCE_PREDICATE}
+               AND ${SNAPSHOT_PREDICATE}`,
       params: [
         input.evidence.id,
         input.evidence.claimId,
@@ -331,6 +373,7 @@ export async function commitEditorialResult(
         input.evidence.createdAt,
         input.evidence.id,
         ...fenceParams,
+        ...snapshotParams,
       ],
     },
     {
@@ -339,7 +382,8 @@ export async function commitEditorialResult(
                                   error_message, created_at, completed_at)
             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              WHERE NOT EXISTS (SELECT 1 FROM ai_runs WHERE id = ?)
-               AND ${FENCE_PREDICATE}`,
+               AND ${FENCE_PREDICATE}
+               AND ${SNAPSHOT_PREDICATE}`,
       params: [
         input.aiRun.id,
         input.aiRun.task,
@@ -357,6 +401,7 @@ export async function commitEditorialResult(
         input.aiRun.completedAt,
         input.aiRun.id,
         ...fenceParams,
+        ...snapshotParams,
       ],
     },
     {
@@ -365,7 +410,8 @@ export async function commitEditorialResult(
                                  created_at, updated_at)
             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              WHERE NOT EXISTS (SELECT 1 FROM drafts WHERE id = ?)
-               AND ${FENCE_PREDICATE}`,
+               AND ${FENCE_PREDICATE}
+               AND ${SNAPSHOT_PREDICATE}`,
       params: [
         input.draft.id,
         input.draft.storyId,
@@ -383,25 +429,69 @@ export async function commitEditorialResult(
         input.draft.createdAt,
         input.draft.id,
         ...fenceParams,
+        ...snapshotParams,
       ],
     },
     {
+      // The processed flip is guarded DIRECTLY on the same row: the exact
+      // snapshot identity (source_id + content_hash) must still hold.
       sql: `UPDATE source_items
               SET processing_status = 'processed'
             WHERE id = ?
+              AND source_id = ?
+              AND content_hash = ?
               AND processing_status IN ('new', 'queued')
               AND ${FENCE_PREDICATE}`,
-      params: [input.sourceItemId, ...fenceParams],
+      params: [input.snapshot.sourceItemId, ...snapshotParams.slice(1), ...fenceParams],
     },
   ]);
 
   const storyInserted = (metas[0]?.changes ?? 0) > 0;
   const draftInserted = (metas[4]?.changes ?? 0) > 0;
   const sourceItemProcessed = (metas[5]?.changes ?? 0) > 0;
+  if (draftInserted) {
+    return {
+      draftInserted,
+      storyInserted,
+      sourceItemProcessed,
+      fenceLost: false,
+      snapshotChanged: false,
+    };
+  }
+
+  // Zero draft effects: ONE classification read decides which predicate
+  // failed (write protection already happened entirely inside SQL — this
+  // read only picks the typed outcome for the zero-effect batch).
+  const classification = await executor.first<{ fence_holds: number; snapshot_holds: number }>({
+    sql: `SELECT EXISTS (SELECT 1 FROM jobs
+                          WHERE id = ? AND status = 'claimed' AND attempts = ?
+                            AND lease_until IS NOT NULL AND lease_until > ?) AS fence_holds,
+                 EXISTS (SELECT 1 FROM source_items
+                          WHERE id = ? AND source_id = ? AND content_hash = ?) AS snapshot_holds`,
+    params: [...fenceParams, ...snapshotParams],
+  });
+  const fenceHolds = (classification?.fence_holds ?? 0) === 1;
+  const snapshotHolds = (classification?.snapshot_holds ?? 0) === 1;
+  if (fenceHolds && !snapshotHolds) {
+    // The job fence held but the source snapshot is gone: the R1.11.1
+    // commit-time change — zero editorial effects, distinct typed outcome.
+    return {
+      draftInserted,
+      storyInserted,
+      sourceItemProcessed,
+      fenceLost: false,
+      snapshotChanged: true,
+    };
+  }
+  // Stale generation (fence lost), or the impossible both-hold case (a
+  // pre-existing non-ready draft with this deterministic id — no such
+  // path exists; conservatively reported as a lost fence, bounded by the
+  // engine's own attempt budget).
   return {
     draftInserted,
     storyInserted,
     sourceItemProcessed,
-    fenceLost: !draftInserted,
+    fenceLost: true,
+    snapshotChanged: false,
   };
 }

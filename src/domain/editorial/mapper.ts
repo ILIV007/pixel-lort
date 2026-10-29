@@ -49,16 +49,35 @@ export const EDITORIAL_EXCERPT_MAX_CHARS = 4000;
 export const EDITORIAL_AI_SNIPPET_MAX_CHARS = 8000;
 
 /**
+ * The FULL evidence input text for one item (title + body composed),
+ * BEFORE ANY truncation (R1.11.1 — Posidon correctness review): this is
+ * the "defined evidence input" the AI input-limit byte cap applies to.
+ * The single composition source for both this measure and the traceable
+ * excerpt, so the two can never drift apart.
+ */
+export function buildFullEvidenceText(item: {
+  readonly title: string;
+  readonly body_excerpt: string | null;
+}): string {
+  const body = item.body_excerpt?.trim() ?? '';
+  return body.length > 0 ? `${item.title.trim()}\n\n${body}` : item.title.trim();
+}
+
+/**
  * Build the traceable excerpt from the item's OWN stored fields (title +
  * body_excerpt). `truncated` marks an excerpt cut at the bound — never
  * silently: the marker lands in draft warnings.
+ *
+ * R1.11.1 ordering contract: the byte cap on the FULL evidence input is
+ * checked by the CALLER on `buildFullEvidenceText` BEFORE this excerpt
+ * (or any other text) is cut — truncation may never smuggle an oversized
+ * input past the AI input limit.
  */
 export function buildTraceableExcerpt(item: {
   readonly title: string;
   readonly body_excerpt: string | null;
 }): TraceableExcerpt {
-  const body = item.body_excerpt?.trim() ?? '';
-  const full = body.length > 0 ? `${item.title.trim()}\n\n${body}` : item.title.trim();
+  const full = buildFullEvidenceText(item);
   if (full.length <= EDITORIAL_EXCERPT_MAX_CHARS) {
     return { text: full, truncated: false };
   }

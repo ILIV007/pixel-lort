@@ -111,6 +111,19 @@ export const JOB_ERROR_CODES = [
   'editorial_snapshot_mismatch',
   'editorial_input_invalid',
   'editorial_ai_refused',
+  // R1.11.1 (Posidon correctness review): the stored source snapshot
+  // changed BETWEEN the handler's identity-checked read and the atomic
+  // commit — the SQL snapshot predicate made the WHOLE commit a no-op.
+  // Deliberately DISTINCT from a lost job fence and from the pre-read
+  // `editorial_snapshot_mismatch`; terminal (a retry would re-read the
+  // same stale identity and dead-end anyway — never a hot loop).
+  'editorial_snapshot_changed',
+  // R1.11.1: the provider returned a schema-valid draft with NO claim
+  // traceable to the request evidence — editorially unusable at THIS
+  // boundary (the general AI schema contract for other callers is
+  // unchanged). Terminal: retrying the identical input deterministically
+  // repeats; the real run is recorded as `invalid`, never a ready draft.
+  'editorial_no_traced_claim',
 ] as const;
 
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
