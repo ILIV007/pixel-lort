@@ -42,6 +42,10 @@ import {
   type CandidateAssessmentReport,
 } from '../../src/domain/editorial/candidate-assessment';
 import {
+  emptyEntityMentionsReport,
+  type EntityMentionsReport,
+} from '../../src/domain/editorial/entity-mentions';
+import {
   classifyAiOutcome,
   observeAiRun,
 } from '../../src/application/editorial/prepare-draft-handler';
@@ -76,6 +80,12 @@ const NO_CANDIDATES_REPORT: CandidateDiscoveryReport = buildCandidateDiscoveryRe
 /** Its deterministic assessment (R1.14) — zero entries, nothing concluded. */
 const NO_CANDIDATES_ASSESSMENT: CandidateAssessmentReport = buildCandidateAssessmentReport({
   discovery: NO_CANDIDATES_REPORT,
+});
+
+/** Its deterministic "nothing observed" mentions report (R1.16). */
+const NO_MENTIONS_REPORT: EntityMentionsReport = emptyEntityMentionsReport({
+  sourceItemId: ITEM_ID,
+  contentHash: HASH,
 });
 
 describe('editorial payload contract (ADR-0042 §2)', () => {
@@ -267,6 +277,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
       evidenceGuard: GUARD_REPORT,
       candidateDiscovery: NO_CANDIDATES_REPORT,
       candidateAssessment: NO_CANDIDATES_ASSESSMENT,
+      entityMentions: NO_MENTIONS_REPORT,
     });
     expect(document.title).toBe('تیتر مدل');
     expect(document.document.schemaVersion).toBe(1);
@@ -301,6 +312,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
       evidenceGuard: GUARD_REPORT,
       candidateDiscovery: NO_CANDIDATES_REPORT,
       candidateAssessment: NO_CANDIDATES_ASSESSMENT,
+      entityMentions: NO_MENTIONS_REPORT,
     });
     // The report rides INSIDE document_json, byte-for-byte the one built
     // for THIS draft; schemaVersion stays 1 (additive contract extension).
@@ -330,6 +342,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
       evidenceGuard: GUARD_REPORT,
       candidateDiscovery: NO_CANDIDATES_REPORT,
       candidateAssessment: NO_CANDIDATES_ASSESSMENT,
+      entityMentions: NO_MENTIONS_REPORT,
     });
     expect(document.document.candidateAssessment).toBe(NO_CANDIDATES_ASSESSMENT);
     expect(document.document.schemaVersion).toBe(1);
@@ -343,6 +356,35 @@ describe('conservative mapping (ADR-0042 §2)', () => {
       'truth',
       'source_independence',
     ]);
+  });
+
+  it('embeds the versioned entity-mentions report additively (R1.16, 5D)', () => {
+    const document = buildDraftDocument({
+      sourceItemId: ITEM_ID,
+      sourceName: 'منبع رسمی',
+      excerpt,
+      semanticDraft: {
+        headlineFa: 'تیتر مدل',
+        summaryFa: 'خلاصه مدل',
+        claims: [{ text: 'ادعای مدل', evidenceIds: [ITEM_ID] }],
+      },
+      evidenceGuard: GUARD_REPORT,
+      candidateDiscovery: NO_CANDIDATES_REPORT,
+      candidateAssessment: NO_CANDIDATES_ASSESSMENT,
+      entityMentions: NO_MENTIONS_REPORT,
+    });
+    // Additive contract: schemaVersion stays 1; the report rides inside
+    // document_json byte-for-byte with its policy identity and honest
+    // scope labels — an explicit mention is NEVER a verification and the
+    // text NEVER adds anything to the catalog.
+    expect(document.document.schemaVersion).toBe(1);
+    expect(document.document.entityMentions).toBe(NO_MENTIONS_REPORT);
+    expect(document.document.entityMentions.mentionsVersion).toBe(1);
+    expect(document.document.entityMentions.policyVersion).toBe('em1');
+    expect(document.document.entityMentions.observation).toBe('no_phrases_observed');
+    expect(document.document.entityMentions.coverage.textAddsToCatalog).toBe(false);
+    expect(document.document.entityMentions.limitations).toContain('controlled_aliases_only');
+    expect(document.document.entityMentions.limitations).toContain('reuse_drafts_not_enriched');
   });
 
   it('flags oversized AI snippets via the byte-level handler check path', () => {

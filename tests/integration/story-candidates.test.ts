@@ -958,6 +958,7 @@ describe('R1.13 — fences, atomicity, and failure windows', () => {
       jobId,
       generation: claimed.generation,
       fenceNowMs: NOW + 10 * 60 * 1000, // lease expired → fence fails
+      entityMentions: [],
       snapshot: {
         sourceItemId: 'item-fence-b',
         sourceId: SOURCE_X,

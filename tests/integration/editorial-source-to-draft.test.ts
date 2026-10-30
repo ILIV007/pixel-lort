@@ -677,6 +677,7 @@ describe('scenario 5 — stale generation/lease has zero unauthorized effect', (
       jobId,
       generation: claim.generation,
       fenceNowMs: harness.clock.now(), // lease_until < now → fence fails
+      entityMentions: [],
       snapshot: {
         sourceItemId: 'item-5',
         sourceId: SOURCE_ID,
@@ -1235,6 +1236,7 @@ describe('R1.11.1 corrections (Posidon correctness review) — commit-time snaps
       jobId,
       generation: claim.generation,
       fenceNowMs: harness.clock.now(),
+      entityMentions: [],
       story: {
         id: 'edst_store_snap',
         storyKey: 'editorial.story:store-snap',

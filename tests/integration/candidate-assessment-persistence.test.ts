@@ -736,6 +736,7 @@ describe('candidate assessment — no report for a foreign snapshot or owner', (
       generation: claim.generation,
       fenceNowMs: harness.clock.now(),
       snapshot: { sourceItemId: item.id, sourceId: item.sourceId, contentHash },
+      entityMentions: [],
       story: {
         id: 'edst-cassess-stale',
         storyKey: 'editorial.story:cassess-stale',

@@ -48,6 +48,12 @@ import type {
   FingerprintLookupPlan,
   StoryFingerprintKind,
 } from '../../domain/editorial/story-fingerprints';
+import type { EntityMentionLookupRow } from '../../domain/editorial/entity-mentions';
+import {
+  ENTITY_MENTION_MAX_RESULT_ROWS,
+  STORY_ENTITY_MENTION_CONFIDENCE,
+  STORY_ENTITY_RELATION_MENTIONED,
+} from '../../domain/editorial/entity-mentions';
 import { isAppError } from '../../shared/errors/app-error';
 
 /** Editorial-owned read shape of a source_items row (traceable fields only). */
@@ -295,6 +301,36 @@ export async function findStoryCandidatesByFingerprints(
   return outcomes;
 }
 
+/**
+ * The R1.16 CONTROLLED-ALIAS lookup (Phase 5D): ONE parameterized, indexed
+ * IN-list query against `entity_aliases(normalized_alias)` — the ONLY
+ * lookup this round performs (no full-table scan, no per-word unbounded
+ * queries, no SQL interpolation; the IN-list size is the caller's bounded
+ * phrase cap, ≤ the D1 per-query bound-parameter limit). The page is
+ * `ORDER BY`-ed BEFORE the LIMIT so the probed page is the SAME first rows
+ * regardless of scan direction or physical order (R1.13.1 lesson), and
+ * the +1 row probe detects overflow HONESTLY. A DB error PROPAGATES to
+ * the caller — a failed lookup is NEVER reported as a successful empty
+ * one. Empty phrase list → ZERO SQL (the bounded no-op).
+ */
+export async function findEntityMentionMatches(
+  executor: DbExecutor,
+  phrases: readonly string[],
+): Promise<{ readonly rows: readonly EntityMentionLookupRow[]; readonly overflow: boolean }> {
+  if (phrases.length === 0) {
+    return { rows: [], overflow: false };
+  }
+  const placeholders = phrases.map(() => '?').join(', ');
+  const { rows } = await executor.query<EntityMentionLookupRow>({
+    sql: `SELECT entity_id, normalized_alias FROM entity_aliases
+           WHERE normalized_alias IN (${placeholders})
+          ORDER BY normalized_alias ASC, entity_id ASC
+           LIMIT ${ENTITY_MENTION_MAX_RESULT_ROWS}`,
+    params: [...phrases],
+  });
+  return { rows, overflow: rows.length >= ENTITY_MENTION_MAX_RESULT_ROWS };
+}
+
 /** One statement's insertion target inside the fenced commit batch. */
 export interface EditorialCommitInput {
   /** Ownership fence: the durable job id. */
@@ -400,6 +436,22 @@ export interface EditorialCommitInput {
     readonly kind: StoryFingerprintKind;
     readonly value: string;
   };
+  /**
+   * R1.16 (Phase 5D): the DETERMINISTIC unique controlled-alias mentions
+   * resolved for THIS draft (policy `em1` — ambiguous aliases are NEVER
+   * here). Each pair becomes ONE `story_entities` statement in the SAME
+   * atomic batch, whose SQL predicate re-checks INSIDE the batch that the
+   * alias STILL maps to EXACTLY this entity: a mapping deleted, remapped,
+   * or given a second owner between the lookup and the commit no-ops ONLY
+   * that link (never an invalid link, never a partial editorial state).
+   * The PK (story_id, entity_id, relation) dedups multi-alias mentions of
+   * one entity; confidence is the fixed conservative 0; INSERT OR REPLACE
+   * and link deletion are forbidden.
+   */
+  readonly entityMentions: readonly {
+    readonly normalizedAlias: string;
+    readonly entityId: string;
+  }[];
 }
 
 /** Per-statement outcome of the fenced atomic commit. */
@@ -413,6 +465,11 @@ export interface EditorialCommitResult {
   /** R1.13: fingerprint rows inserted by THIS batch (0..3; 0 on any
    * predicate failure — never orphaned, never half-written). */
   readonly fingerprintsInserted: number;
+  /** R1.16: durable `story_entities` mention links inserted by THIS batch
+   * (≤ resolved count; a suppressed link means the alias mapping changed
+   * inside the lookup→commit window — the SQL predicate no-oped ONLY that
+   * link, honestly and without any invalid row). */
+  readonly entityMentionsInserted: number;
   /**
    * R1.15: the exact-content anchor PRIMARY KEY collided — ANOTHER story
    * already owns this exact full content, so the WHOLE batch (including
@@ -578,6 +635,7 @@ export async function commitEditorialResult(
         storyInserted: false,
         sourceItemProcessed: false,
         fingerprintsInserted: 0,
+        entityMentionsInserted: 0,
         contentTaken: true,
         fenceLost: false,
         snapshotChanged: false,
@@ -590,10 +648,57 @@ export async function commitEditorialResult(
 }
 
 /**
+ * The R1.16 alias-mapping validity predicate: the normalized alias the
+ * decision was made from must STILL map to EXACTLY ONE entity AND that
+ * entity must still be THIS one — evaluated INSIDE the atomic batch on
+ * the mention's own statement (a JS re-read is never a substitute). A
+ * mapping deleted, remapped, or given a second owner between the lookup
+ * and the commit zeroes ONLY this insert; the rest of the batch is
+ * unaffected (the draft/report stay coherent; the report records the
+ * lookup-moment observation with `lookup_moment_visibility`).
+ */
+const ALIAS_UNIQOWN_PREDICATE = `1 = (SELECT COUNT(DISTINCT ea.entity_id)
+                                      FROM entity_aliases ea
+                                       WHERE ea.normalized_alias = ?)
+   AND EXISTS (SELECT 1 FROM entity_aliases ea
+                WHERE ea.normalized_alias = ? AND ea.entity_id = ?)`;
+
+/** One fenced `story_entities` mention-link statement (R1.16). */
+function entityMentionStatement(
+  input: EditorialCommitInput,
+  mention: { readonly normalizedAlias: string; readonly entityId: string },
+  fenceParams: readonly unknown[],
+  snapshotParams: readonly unknown[],
+): { readonly sql: string; readonly params: readonly unknown[] } {
+  return {
+    sql: `INSERT INTO story_entities (story_id, entity_id, relation, confidence)
+          SELECT ?, ?, '${STORY_ENTITY_RELATION_MENTIONED}', ${STORY_ENTITY_MENTION_CONFIDENCE}
+           WHERE NOT EXISTS (SELECT 1 FROM story_entities
+                              WHERE story_id = ? AND entity_id = ?
+                                AND relation = '${STORY_ENTITY_RELATION_MENTIONED}')
+             AND ${ALIAS_UNIQOWN_PREDICATE}
+             AND ${FENCE_PREDICATE}
+             AND ${SNAPSHOT_PREDICATE}`,
+    params: [
+      input.story.id,
+      mention.entityId,
+      input.story.id,
+      mention.entityId,
+      mention.normalizedAlias,
+      mention.normalizedAlias,
+      mention.entityId,
+      ...fenceParams,
+      ...snapshotParams,
+    ],
+  };
+}
+
+/**
  * The atomic statement list: the six base statements + the ≤3 story-scoped
- * fingerprints (R1.13) + the exact-content anchor (R1.15, LAST). Any
- * statement failure rolls back the whole transaction; the anchor's PRIMARY
- * KEY collision is the R1.15 group-uniqueness signal.
+ * fingerprints (R1.13) + the ≤resolved controlled-alias mention links
+ * (R1.16) + the exact-content anchor (R1.15, LAST). Any statement failure
+ * rolls back the whole transaction; the anchor's PRIMARY KEY collision is
+ * the R1.15 group-uniqueness signal.
  */
 async function buildAndRunCommitBatch(
   executor: DbExecutor,
@@ -754,6 +859,13 @@ async function buildAndRunCommitBatch(
         ...snapshotParams,
       ],
     })),
+    // R1.16: the controlled-alias mention links — same batch, same fences,
+    // same snapshot predicate, PLUS the alias-mapping validity predicate.
+    // A mention link can never outlive the draft it belongs to: any
+    // predicate failure no-ops the WHOLE batch.
+    ...input.entityMentions.map((mention) =>
+      entityMentionStatement(input, mention, fenceParams, snapshotParams),
+    ),
     // R1.15: the exact-content group anchor — LAST, deliberately unguarded
     // across stories: a live cross-story owner trips the PRIMARY KEY and
     // aborts the whole transaction (typed contentTaken for the caller).
@@ -781,12 +893,21 @@ async function classifyCommitMetas(
   const fingerprintsInserted = metas
     .slice(6, 6 + input.fingerprints.length)
     .reduce((total, meta) => total + (meta?.changes ?? 0), 0);
+  // Indices 6+n..6+n+m are the controlled-alias mention links (R1.16); the
+  // LAST meta is STILL the exact-content anchor.
+  const entityMentionsInserted = metas
+    .slice(
+      6 + input.fingerprints.length,
+      6 + input.fingerprints.length + input.entityMentions.length,
+    )
+    .reduce((total, meta) => total + (meta?.changes ?? 0), 0);
   if (draftInserted) {
     return {
       draftInserted,
       storyInserted,
       sourceItemProcessed,
       fingerprintsInserted,
+      entityMentionsInserted,
       contentTaken: false,
       fenceLost: false,
       snapshotChanged: false,
@@ -814,6 +935,7 @@ async function classifyCommitMetas(
       storyInserted,
       sourceItemProcessed,
       fingerprintsInserted: 0,
+      entityMentionsInserted: 0,
       contentTaken: false,
       fenceLost: false,
       snapshotChanged: true,
@@ -828,6 +950,7 @@ async function classifyCommitMetas(
     storyInserted,
     sourceItemProcessed,
     fingerprintsInserted: 0,
+    entityMentionsInserted: 0,
     contentTaken: false,
     fenceLost: true,
     snapshotChanged: false,

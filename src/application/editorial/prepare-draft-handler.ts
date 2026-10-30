@@ -147,6 +147,7 @@ import {
   findEditorialSource,
   findEditorialSourceAttachment,
   findEditorialSourceItem,
+  findEntityMentionMatches,
   findStoryCandidatesByFingerprints,
   findStoryIdByExactContentAnchor,
   findStableEditorialResult,
@@ -196,6 +197,11 @@ import {
 } from '../../domain/editorial/exact-content';
 import { buildCandidateDiscoveryReport } from '../../domain/editorial/candidate-discovery';
 import { buildCandidateAssessmentReport } from '../../domain/editorial/candidate-assessment';
+import {
+  buildEntityMentionPhrases,
+  buildEntityMentionsReport,
+  type EntityMentionsReport,
+} from '../../domain/editorial/entity-mentions';
 import type { Logger } from '../../observability/logger';
 
 /** Deferred AI reasons that map onto the engine's recoverable retry path. */
@@ -749,6 +755,48 @@ export function createEditorialPrepareDraftHandler(
       discovery: candidateDiscovery,
     });
 
+    // ---- 5.7 R1.16 (Phase 5D) CONTROLLED entity-alias mentions —
+    //          strictly AFTER the input gates and the early-reuse
+    //          decisions (replay/reuse never reach this point — their
+    //          contracts stay untouched and their drafts are NEVER
+    //          enriched) and BEFORE any provider work: the bounded `em1`
+    //          phrase scan over THIS snapshot's OWN full composed text,
+    //          ONE parameterized indexed lookup against
+    //          `entity_aliases(normalized_alias)`, ambiguity = ZERO
+    //          links (no first-row-wins), and a versioned report that
+    //          travels INSIDE document_json of the SAME fenced commit.
+    //          A DB error is NEVER a fabricated empty result: typed,
+    //          bounded retry with ZERO provider calls and ZERO charges
+    //          (the lookup runs strictly before the AI).
+    const entityMentionScan = buildEntityMentionPhrases(fullEvidenceText);
+    let entityMentionRows: readonly { normalized_alias: string; entity_id: string }[] = [];
+    let entityMentionOverflow = false;
+    if (entityMentionScan.phrases.length > 0) {
+      try {
+        const aliasLookup = await findEntityMentionMatches(executor, entityMentionScan.phrases);
+        entityMentionRows = aliasLookup.rows;
+        entityMentionOverflow = aliasLookup.overflow;
+      } catch (error) {
+        logger?.warn('editorial.prepare_draft.entity_alias_lookup_failed', {
+          error: error instanceof Error ? error.message : 'unknown',
+        });
+        return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+      }
+    }
+    const entityMentionResolution = buildEntityMentionsReport({
+      snapshot: { sourceItemId: item.id, contentHash: item.content_hash },
+      scan: entityMentionScan,
+      matches: entityMentionRows,
+      resultOverflow: entityMentionOverflow,
+    });
+    const entityMentions: EntityMentionsReport = entityMentionResolution.report;
+    logger?.debug('editorial.prepare_draft.entity_mentions_observed', {
+      observation: entityMentions.observation,
+      matched: entityMentions.counts.uniqueAliasesMatched,
+      ambiguous: entityMentions.counts.ambiguousAliasesObserved,
+      overflow: entityMentions.scan.resultOverflow,
+    });
+
     // ---- 6. The EXISTING AI service (real gates: flag, budget authority,
     //         allowlist ladder, wall deadline, output validation).
     const aiStartedAtMs = nowMs();
@@ -859,6 +907,7 @@ export function createEditorialPrepareDraftHandler(
       evidenceGuard,
       candidateDiscovery,
       candidateAssessment,
+      entityMentions,
     });
     const now = nowMs();
 
@@ -940,6 +989,10 @@ export function createEditorialPrepareDraftHandler(
       // owner trips the PRIMARY KEY inside this batch and rolls the WHOLE
       // commit back (typed contentTaken below).
       exactContentAnchor,
+      // R1.16: the deterministic unique controlled-alias mention pairs —
+      // written by the SAME fenced batch; each link's SQL predicate
+      // re-checks its alias mapping INSIDE the transaction.
+      entityMentions: entityMentionResolution.resolved,
     });
 
     if (commit.contentTaken) {
@@ -992,7 +1045,17 @@ export function createEditorialPrepareDraftHandler(
       draftId,
       sourceItemProcessed: commit.sourceItemProcessed,
       fingerprintsInserted: commit.fingerprintsInserted,
+      entityMentionsInserted: commit.entityMentionsInserted,
     });
+    if (commit.entityMentionsInserted < entityMentionResolution.resolved.length) {
+      // The lookup→commit alias-mutation window: at least one mapping
+      // changed before the fenced insert — THAT link alone no-oped (in
+      // SQL), the draft/report stay coherent. Honest, bounded, typed.
+      logger?.warn('editorial.prepare_draft.entity_mention_link_suppressed', {
+        resolved: entityMentionResolution.resolved.length,
+        inserted: commit.entityMentionsInserted,
+      });
+    }
     return { kind: 'success' };
   }
 

@@ -26,7 +26,10 @@ durable fingerprints + candidate discovery — R1.13, ADR-0043 —
 implemented, UNDER INDEPENDENT REVIEW; Phase 5C-2 conservative candidate
 assessment — R1.14, ADR-0043 addendum — implemented, UNDER INDEPENDENT
 REVIEW; Phase 5C-3 exact-content draft reuse with preserved provenance —
-R1.15, ADR-0043 addendum — implemented, UNDER INDEPENDENT REVIEW)**: the FIRST
+R1.15, ADR-0043 addendum — implemented, its R1.15.2 offline exact-content
+reuse correction INDEPENDENTLY ACCEPTED, and Phase 5D controlled entity
+aliases → durable story mentions — R1.16, ADR-0044 — implemented, UNDER
+INDEPENDENT REVIEW)**: the FIRST
 integrated local source→draft vertical path (`editorial.prepare_draft`)
 ships OFF everywhere behind its own fail-closed `EDITORIAL_ENABLED` gate
 with zero live inference, Phase 5B adds the limited Evidence Guard
@@ -36,7 +39,13 @@ merge, NO truth verification — Phase 5C-2 adds the pure, versioned
 candidate-ASSESSMENT derived only from those discovery signals, and
 Phase 5C-3 adds VERIFIED exact-content draft reuse with preserved
 provenance (the copied news costs no second inference; one stable result
-per exact content enforced in SQL) —
+per exact content enforced in SQL; the R1.15.2 snapshot-identity +
+null-guard correction was independently ACCEPTED for the offline
+exact-content reuse capability), and Phase 5D adds CONTROLLED entity
+alias mentions: registered Persian/English aliases resolve to ONE entity
+id and the connection lands DURABLY in `story_entities` — mention only,
+confidence 0, no fuzzy/semantic matching, the news text never adds to
+the catalog —
 candidate-ASSESSMENT derived only from those discovery signals — NO
 merge, NO truth verification, NEVER an unrelatedness conclusion — see
 the Phase 5 section. Everything else is
@@ -382,7 +391,7 @@ decision.
       normalization/security suites. Measured final-tree totals in the
       Phase 4 handoff.
 
-## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery, Phase 5C-2 conservative candidate-assessment and Phase 5C-3 exact-content draft reuse with preserved provenance implemented, UNDER INDEPENDENT REVIEW, OFF)
+## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery, Phase 5C-2 conservative candidate-assessment and Phase 5C-3 exact-content draft reuse with preserved provenance (R1.15.2 correction independently ACCEPTED offline) implemented; Phase 5D controlled entity aliases → durable story mentions implemented; UNDER INDEPENDENT REVIEW, OFF)
 
 - [x] **Phase 5A (R1.11, ADR-0042): the FIRST integrated local source→draft
       path — ACCEPTED OFFLINE by independent review (R1.12 round ruling; the
@@ -596,10 +605,70 @@ decision.
       write-free same-snapshot replay, verification→commit mutation
       window); integration 20→25, unit 19→37, full gate 110 files / 1512
       tests; version 1.10.2; no Phase-5-completion claim.
-- [ ] Story MERGING, entity aliases, semantic/deterministic matching with
-      thresholds (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate
-      discovery + conservative observation assessment — merging remains
-      explicitly future).
+      INDEPENDENT ACCEPTANCE (reflected here in the CURRENT text only —
+      the historical report above is untouched): the R1.15.2
+      snapshot-identity + null-guard correction for the offline
+      exact-content reuse capability was independently reviewed and
+      ACCEPTED by Posidon; the accepted contract is the one R1.16
+      preserves byte-for-byte on the reuse paths.
+- [x] **Phase 5D (R1.16, v1.11.0, ADR-0044): CONTROLLED entity aliases →
+      DURABLE story mentions — the next real roadmap step: a fresh news
+      draft is now durably connected to its REGISTERED entities through
+      the existing `entities`/`entity_aliases` catalog, and a registered
+      Persian and English name of one entity resolve to the SAME id; the
+      connection is a real `story_entities` row (relation `mentioned`,
+      confidence 0), not another JSON-only report. Versioned policy `em1`
+      (pure `src/domain/editorial/entity-mentions.ts`): normalization =
+      NFC + whitespace-collapse + trim ONLY (no case folding, no
+      ی/ک/digit conversion — matching is byte-exact under the registered
+      forms); candidate phrases are byte-exact 1..4-token windows between
+      Unicode word boundaries (letters/numbers/marks; ZWNJ نیم‌فاصله is
+      word-INTERNAL — conscious and tested), generated width-major so
+      single-token aliases get the coverage first; ONE parameterized
+      indexed IN-list lookup (≤90 phrases, ≤ D1 per-query bound-parameter
+      limit; ORDER BY before LIMIT 91 = cap+overflow probe) against
+      `idx_entity_alias_lookup` — no full-table scan, no per-word
+      unbounded queries, no SQL interpolation. A normalized_alias with
+      EXACTLY ONE owner resolves it; a shared alias is AMBIGUOUS with
+      ZERO auto links (no first-row-wins, no invented confidence);
+      ≥91-row result overflow embeds NOTHING (honest lookup_overflow);
+      cap hits are recorded (bounded_scan_window — NO full-coverage
+      claim); empty catalog and zero-row lookup are the SAME honest
+      no_match_observed (never a proof of absence). The SAME fenced
+      atomic commit writes each unique link with an SQL predicate that
+      re-checks INSIDE the batch that the alias STILL maps to exactly
+      that entity — a mapping deleted/remapped/second-owned between
+      lookup and commit no-ops ONLY that link (never an invalid link,
+      never a partial state, never a forced AI re-run). The versioned
+      `entityMentions` report (policy em1, snapshot identity, observation,
+      matched/ambiguous, scan flags, caps, fixed limitations) rides
+      inside document_json (schemaVersion stays 1) with a typed reader
+      (v1/absent/unsupported_version/malformed + real invariants).
+      Mention resolution runs strictly AFTER the input gates and the
+      early-reuse decisions — replay/reuse never run lookups and old
+      drafts are NEVER enriched (reuse_drafts_not_enriched; the accepted
+      R1.15.2 reuse contract preserved). Tests: RED recorded on the
+      8f68c5d baseline (module absent), GREEN after — new unit suite
+      (policy/boundaries/caps/ambiguity/overflow/reader malformed table),
+      new REAL-D1 integration suite (fa/en → one entity on two
+      independent stories with NO merge; Doomlike/Doom2 never match Doom
+      while 'Doom 2' matches both game and franchise; ZWNJ vs spaced;
+      multi-word Half-Life; reversed-order ambiguity; multi-mention dedup
+      to ONE row; empty catalog; cap window; overflow; alias
+      delete/remap/second-owner in the lookup→commit window; REAL replay
+      write-free; stale-fence/snapshot-changed/mid-batch-failure → zero
+      orphans; EXPLAIN QUERY PLAN index proof — LOCAL PROXY only), and
+      the new offline demo (`npm run demo:entity-mentions`); full gate
+      re-run green; version 1.11.0; no Phase-5-completion claim; news
+      text NEVER adds to the catalog and no real catalog was seeded on
+      cloud (fixture helpers are LOCAL-D1 only).
+- [ ] Story MERGING and semantic/deterministic matching with thresholds
+      (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate discovery +
+      conservative observation assessment, and Phase 5D provides ONLY
+      controlled-alias MENTIONS with confidence 0 — merging, fuzzy or
+      semantic matching, and event detection remain explicitly future;
+      a shared entity mention is NEVER a same-event proof and NEVER
+      source independence).
 - [ ] AI adjudication path (compact claim sets) and decision persistence.
 
 _(The round 1.10.6 / 1.10.6.1 AI ADAPTER foundation does NOT complete any

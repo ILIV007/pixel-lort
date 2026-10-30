@@ -477,6 +477,7 @@ describe('evidence guard — acceptance 9: no report for a foreign snapshot or o
       generation: claim.generation,
       fenceNowMs: harness.clock.now(),
       snapshot: { sourceItemId: ITEM_ID, sourceId: SOURCE_ID, contentHash },
+      entityMentions: [],
       story: {
         id: 'edst-guard-stale',
         storyKey: 'editorial.story:guard-stale',

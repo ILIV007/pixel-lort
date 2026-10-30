@@ -26,6 +26,7 @@ import { EDITORIAL_DRAFT_VERSION } from './identity';
 import type { EvidenceGuardReport } from './evidence-guard';
 import type { CandidateDiscoveryReport } from './candidate-discovery';
 import type { CandidateAssessmentReport } from './candidate-assessment';
+import type { EntityMentionsReport } from './entity-mentions';
 
 /** Fixed draft layout id for this phase's renderer contract. */
 export const EDITORIAL_DRAFT_LAYOUT = 'news_v1' as const;
@@ -175,6 +176,16 @@ export const EDITORIAL_DRAFT_WARNINGS = [
  * what was actually OBSERVED about the candidates' relation — never a
  * same-event proof, never truth, never source independence, never a
  * merge.
+ *
+ * R1.16 (Phase 5D): the caller MUST also pass the controlled-entity
+ * ALIAS mentions report for THIS draft (possibly an honest
+ * `no_match_observed`) — embedded as one more ADDITIVE versioned field
+ * (`mentionsVersion`/`policyVersion` inside; `schemaVersion` stays 1) of
+ * the SAME `document_json` and the SAME fenced atomic commit. It records
+ * which CONTROLLED catalog aliases the item's OWN full composed text
+ * explicitly mentioned at the lookup moment — `mentioned` ONLY,
+ * confidence 0, never a verification, never a merge, and NEVER catalog
+ * enrichment of replayed/reused or historical drafts.
  */
 export function buildDraftDocument(input: {
   readonly sourceItemId: string;
@@ -188,6 +199,9 @@ export function buildDraftDocument(input: {
   /** R1.14: the versioned candidate-ASSESSMENT derived from THIS draft's
    * discovery report (required — every new draft carries one). */
   readonly candidateAssessment: CandidateAssessmentReport;
+  /** R1.16: the versioned controlled-alias mentions report (required —
+   * every new draft carries one, even an honest "nothing observed"). */
+  readonly entityMentions: EntityMentionsReport;
 }): {
   readonly layout: typeof EDITORIAL_DRAFT_LAYOUT;
   readonly title: string;
@@ -211,6 +225,7 @@ export function buildDraftDocument(input: {
     readonly evidenceGuard: EvidenceGuardReport;
     readonly candidateDiscovery: CandidateDiscoveryReport;
     readonly candidateAssessment: CandidateAssessmentReport;
+    readonly entityMentions: EntityMentionsReport;
   };
   readonly facts: readonly {
     readonly text: string;
@@ -248,6 +263,7 @@ export function buildDraftDocument(input: {
       evidenceGuard: input.evidenceGuard,
       candidateDiscovery: input.candidateDiscovery,
       candidateAssessment: input.candidateAssessment,
+      entityMentions: input.entityMentions,
     },
     facts: modelClaims.map((claim) => ({
       text: claim.text,

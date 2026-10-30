@@ -37,6 +37,7 @@ import {
 import { buildEvidenceGuardReport } from '../../src/domain/editorial/evidence-guard';
 import { buildCandidateDiscoveryReport } from '../../src/domain/editorial/candidate-discovery';
 import { buildCandidateAssessmentReport } from '../../src/domain/editorial/candidate-assessment';
+import { emptyEntityMentionsReport } from '../../src/domain/editorial/entity-mentions';
 import { canonicalizeJson } from '../../src/domain/jobs/payloads';
 import {
   exactContentAnchorValue,
@@ -408,6 +409,14 @@ async function seedHistoricalStory(
       evidenceGuard,
       candidateDiscovery: discovery,
       candidateAssessment: assessment,
+      // R1.16: the PRODUCTION-shape additive mentions report for a
+      // pre-R1.16 historical snapshot (honest "nothing observed"; the
+      // reuse contract NEVER enriches old drafts — this only keeps the
+      // seeded document shape identical to what a real commit writes).
+      entityMentions: emptyEntityMentionsReport({
+        sourceItemId: input.itemId,
+        contentHash,
+      }),
     });
     documentJson = canonicalizeJson(document.document);
   }
@@ -1223,6 +1232,7 @@ describe('R1.15 — the group anchor at the SQL layer (concurrency primitive)', 
       jobId: input.jobId,
       generation: input.generation,
       fenceNowMs: NOW,
+      entityMentions: [],
       snapshot: {
         sourceItemId: input.itemId,
         sourceId: SOURCE_X,
