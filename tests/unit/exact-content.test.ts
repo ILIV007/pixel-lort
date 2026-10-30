@@ -356,3 +356,94 @@ describe('verifyExactContentReuseCandidate — the pure immutable-basis decision
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// R1.15.2 — Posidon defensive-reader regression (Q2): null-shaped JSON in a
+// document must read as the documented UNUSABLE-basis result (`null`) —
+// never a TypeError, and never a silent reinterpretation of MALFORMED
+// PRESENT data as the legitimate absent-legacy shape.
+// ---------------------------------------------------------------------------
+describe('Posidon R1151 defensive reader regression', () => {
+  const validSourceReport = { sourceItemId: 'x', excerptText: 'text', truncated: false };
+  it.each([
+    ['sourceReport-null', JSON.stringify({ sourceReport: null })],
+    [
+      'snapshot-null',
+      JSON.stringify({ sourceReport: validSourceReport, evidenceGuard: { snapshot: null } }),
+    ],
+    // Permanent table-driven null/primitive/array mutations — every
+    // MALFORMED PRESENT shape returns the unusable-basis result.
+    ['document-number', JSON.stringify(5)],
+    ['document-string', JSON.stringify('document')],
+    ['document-array', JSON.stringify([])],
+    ['sourceReport-string', JSON.stringify({ sourceReport: 'report' })],
+    ['sourceReport-number', JSON.stringify({ sourceReport: 7 })],
+    ['sourceReport-array', JSON.stringify({ sourceReport: [validSourceReport] })],
+    [
+      'sourceReport-null-field',
+      JSON.stringify({ sourceReport: { sourceItemId: null, excerptText: 't', truncated: false } }),
+    ],
+    [
+      'evidenceGuard-null',
+      JSON.stringify({ sourceReport: validSourceReport, evidenceGuard: null }),
+    ],
+    [
+      'evidenceGuard-string',
+      JSON.stringify({ sourceReport: validSourceReport, evidenceGuard: 'guard' }),
+    ],
+    [
+      'evidenceGuard-array',
+      JSON.stringify({ sourceReport: validSourceReport, evidenceGuard: [{}] }),
+    ],
+    [
+      'snapshot-string',
+      JSON.stringify({ sourceReport: validSourceReport, evidenceGuard: { snapshot: 'h' } }),
+    ],
+    [
+      'snapshot-number',
+      JSON.stringify({ sourceReport: validSourceReport, evidenceGuard: { snapshot: 0 } }),
+    ],
+    [
+      'snapshot-array',
+      JSON.stringify({ sourceReport: validSourceReport, evidenceGuard: { snapshot: [] } }),
+    ],
+    [
+      'snapshot-sourceItemId-null',
+      JSON.stringify({
+        sourceReport: validSourceReport,
+        evidenceGuard: { snapshot: { sourceItemId: null, contentHash: 'h' } },
+      }),
+    ],
+    [
+      'snapshot-contentHash-empty',
+      JSON.stringify({
+        sourceReport: validSourceReport,
+        evidenceGuard: { snapshot: { sourceItemId: 'x', contentHash: '' } },
+      }),
+    ],
+  ])('Q2 %s must return null, not throw', (_label, documentJson) => {
+    expect(readReuseDocumentBasis(documentJson)).toBeNull();
+  });
+
+  it('Q2 legacy/absence handling is preserved: a document WITHOUT guard data still reads a coherent basis', () => {
+    // Pre-R1.12-shaped documents: NO evidenceGuard key at all (absence, not
+    // malformation) — the documented legacy handling stays intact.
+    expect(readReuseDocumentBasis(JSON.stringify({ sourceReport: validSourceReport }))).toEqual({
+      sourceItemId: 'x',
+      excerptText: 'text',
+      truncated: false,
+      guardSnapshot: null,
+    });
+    // An evidenceGuard OBJECT without a snapshot key: same documented absence.
+    expect(
+      readReuseDocumentBasis(
+        JSON.stringify({ sourceReport: validSourceReport, evidenceGuard: {} }),
+      ),
+    ).toEqual({
+      sourceItemId: 'x',
+      excerptText: 'text',
+      truncated: false,
+      guardSnapshot: null,
+    });
+  });
+});

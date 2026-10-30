@@ -140,10 +140,13 @@ export interface ReuseDocumentBasis {
 
 /**
  * Defensive, typed read of the reuse basis from one draft's `document_json`
- * (R1.15.1). ANY shape mismatch (unparseable JSON, missing/incoherent
- * sourceReport, a guard whose recorded source item differs from the
- * sourceReport's own) reads as `null` — a corrupt or foreign document is
- * NEVER a basis, and nothing is ever guessed or backfilled.
+ * (R1.15.1; R1.15.2 hardening). ANY shape mismatch (unparseable JSON,
+ * missing/incoherent sourceReport, a malformed PRESENT guard/snapshot —
+ * null, primitive, or array where an object is required — or a guard whose
+ * recorded source item differs from the sourceReport's own) reads as `null`
+ * — a corrupt or foreign document is NEVER a basis, malformed PRESENT data
+ * is NEVER silently reinterpreted as the legitimate absent-legacy shape,
+ * and nothing is ever guessed or backfilled. The read never throws.
  */
 export function readReuseDocumentBasis(documentJson: string): ReuseDocumentBasis | null {
   let parsed: unknown;
@@ -152,56 +155,85 @@ export function readReuseDocumentBasis(documentJson: string): ReuseDocumentBasis
   } catch {
     return null;
   }
-  if (parsed === null || typeof parsed !== 'object') {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
   const document = parsed as {
-    readonly sourceReport?: {
-      readonly sourceItemId?: unknown;
-      readonly excerptText?: unknown;
-      readonly truncated?: unknown;
-    };
-    readonly evidenceGuard?: {
-      readonly snapshot?: {
-        readonly sourceItemId?: unknown;
-        readonly contentHash?: unknown;
-      };
-    };
+    readonly sourceReport?: unknown;
+    readonly evidenceGuard?: unknown;
   };
-  const sourceReport = document.sourceReport;
+  // R1.15.2 (Posidon defensive-reader regression Q2): EVERY level is guarded
+  // as an UNKNOWN value BEFORE any member access — a `null`/primitive/array
+  // at the document, sourceReport, evidenceGuard, or snapshot level can
+  // never throw a TypeError. The parse is TOTAL: it returns the documented
+  // unusable-basis result (`null`) or a coherent basis, nothing else.
+  const sourceReport: unknown = document.sourceReport;
+  if (typeof sourceReport !== 'object' || sourceReport === null || Array.isArray(sourceReport)) {
+    return null;
+  }
+  const report = sourceReport as {
+    readonly sourceItemId?: unknown;
+    readonly excerptText?: unknown;
+    readonly truncated?: unknown;
+  };
   if (
-    sourceReport === undefined ||
-    typeof sourceReport.sourceItemId !== 'string' ||
-    sourceReport.sourceItemId.length === 0 ||
-    typeof sourceReport.excerptText !== 'string' ||
-    typeof sourceReport.truncated !== 'boolean'
+    typeof report.sourceItemId !== 'string' ||
+    report.sourceItemId.length === 0 ||
+    typeof report.excerptText !== 'string' ||
+    typeof report.truncated !== 'boolean'
   ) {
     return null;
   }
-  const guard = document.evidenceGuard;
-  const guardSnapshotRaw = guard?.snapshot;
+  const guard: unknown = document.evidenceGuard;
   let guardSnapshot: ReuseDocumentBasis['guardSnapshot'] = null;
-  if (
-    guardSnapshotRaw !== undefined &&
-    typeof guardSnapshotRaw.sourceItemId === 'string' &&
-    guardSnapshotRaw.sourceItemId.length > 0 &&
-    typeof guardSnapshotRaw.contentHash === 'string' &&
-    guardSnapshotRaw.contentHash.length > 0
-  ) {
-    // The document must self-agree: a guard naming a DIFFERENT source item
-    // than the sourceReport is a corrupt shape — never a basis.
-    if (guardSnapshotRaw.sourceItemId !== sourceReport.sourceItemId) {
+  if (guard !== undefined) {
+    // R1.15.2: PRESENT guard data must be a coherent object. A malformed
+    // PRESENT shape (null / primitive / array) is NEVER silently
+    // reinterpreted as the documented absent-legacy shape (pre-R1.12
+    // documents carry NO guard at all — an absent KEY stays legitimate).
+    if (guard === null || typeof guard !== 'object' || Array.isArray(guard)) {
       return null;
     }
-    guardSnapshot = {
-      sourceItemId: guardSnapshotRaw.sourceItemId,
-      contentHash: guardSnapshotRaw.contentHash,
-    };
+    const guardRecord = guard as { readonly snapshot?: unknown };
+    const guardSnapshotRaw: unknown = guardRecord.snapshot;
+    if (guardSnapshotRaw !== undefined) {
+      // R1.15.2: PRESENT snapshot data must be a coherent object with the
+      // recorded identity fields — malformed present data (including
+      // `null` and empty strings) is a corrupt shape, never "absent".
+      if (
+        typeof guardSnapshotRaw !== 'object' ||
+        guardSnapshotRaw === null ||
+        Array.isArray(guardSnapshotRaw)
+      ) {
+        return null;
+      }
+      const snapshotRecord = guardSnapshotRaw as {
+        readonly sourceItemId?: unknown;
+        readonly contentHash?: unknown;
+      };
+      if (
+        typeof snapshotRecord.sourceItemId !== 'string' ||
+        snapshotRecord.sourceItemId.length === 0 ||
+        typeof snapshotRecord.contentHash !== 'string' ||
+        snapshotRecord.contentHash.length === 0
+      ) {
+        return null;
+      }
+      // The document must self-agree: a guard naming a DIFFERENT source item
+      // than the sourceReport is a corrupt shape — never a basis.
+      if (snapshotRecord.sourceItemId !== report.sourceItemId) {
+        return null;
+      }
+      guardSnapshot = {
+        sourceItemId: snapshotRecord.sourceItemId,
+        contentHash: snapshotRecord.contentHash,
+      };
+    }
   }
   return {
-    sourceItemId: sourceReport.sourceItemId,
-    excerptText: sourceReport.excerptText,
-    truncated: sourceReport.truncated,
+    sourceItemId: report.sourceItemId,
+    excerptText: report.excerptText,
+    truncated: report.truncated,
     guardSnapshot,
   };
 }

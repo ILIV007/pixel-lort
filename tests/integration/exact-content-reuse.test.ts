@@ -23,8 +23,10 @@ import {
 
 import { claimJob } from '../../src/adapters/db/job-store';
 import {
+  exactContentReuseClaimId,
   mentionsEvidenceId,
   sourceReportClaimId,
+  storyIdForSnapshot,
   EDITORIAL_DRAFT_VERSION,
 } from '../../src/domain/editorial/identity';
 import {
@@ -1550,5 +1552,301 @@ describe('Posidon R115 independent counterexamples', () => {
     );
     expect(outcomes).toEqual(['ack:job_completed']);
     expect(h.providerCalls).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1.15.2 — Posidon snapshot-identity regression (Q1): a NEW raw snapshot of
+// the reusing item (edge-space title change → NEW content_hash) with the
+// SAME composed text (the pre-existing trim contract of
+// `buildFullEvidenceText`) must NOT be silently acknowledged by the OLD
+// snapshot's relation: its OWN versioned relation + processed flip must land
+// durably through the fenced atomic path — with ZERO new provider calls.
+// ---------------------------------------------------------------------------
+describe('Posidon R1151 snapshot regression', () => {
+  it('Q1 a new raw snapshot with equal composed text must be processed, not silently acknowledged as the old attachment', async () => {
+    const h = createHarness();
+    await seedSource(h.rawExecutor, SOURCE_X, 'X');
+    await seedSource(h.rawExecutor, SOURCE_Y, 'Y');
+    const title = 'Same composed title';
+    const body = 'Same composed body';
+    await seedItem(h.rawExecutor, { id: 'q1-a', sourceId: SOURCE_X, title, body });
+    await seedItem(h.rawExecutor, { id: 'q1-b', sourceId: SOURCE_Y, title, body });
+    expect(await enqueueAndRun(h, 'q1-a')).toEqual(['ack:job_completed']);
+    expect(await enqueueAndRun(h, 'q1-b')).toEqual(['ack:job_completed']);
+    const newTitle = `${title} `;
+    // The NEW content_hash uses the existing fixture's actual hash convention
+    // (seedItem: `${id}\u001f${title}\u001f${body}`) — a genuinely new
+    // snapshot identity for the edge-space title change.
+    const newHash = await sha256Hex(`q1-b\u001f${newTitle}\u001f${body}`);
+    expect(buildFullEvidenceText({ title: newTitle, body_excerpt: body })).toBe(
+      buildFullEvidenceText({ title, body_excerpt: body }),
+    );
+    await h.rawExecutor.run({
+      sql: "UPDATE source_items SET title=?,content_hash=?,processing_status='new' WHERE id=?",
+      params: [newTitle, newHash, 'q1-b'],
+    });
+    const result = await enqueueAndRun(h, 'q1-b');
+    const statuses = await itemStatuses(h.rawExecutor, ['q1-b']);
+    // eslint-disable-next-line no-console
+    console.log(
+      'Q1 observed',
+      JSON.stringify({ result, statuses, providerCalls: h.providerCalls }),
+    );
+    expect(result).toEqual(['ack:job_completed']);
+    expect(h.providerCalls).toBe(1);
+    expect(statuses[0]!.processing_status).toBe('processed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1.15.2 — the snapshot-identity boundary of the reuse relation: the
+// durable versioned identity, the independent path of a CHANGED text, the
+// write-free same-snapshot replay, and the mutation window between
+// new-snapshot verification and commit.
+// ---------------------------------------------------------------------------
+describe('R1.15.2 — snapshot identity of the reuse relation', () => {
+  it('the new snapshot lands its OWN versioned relation while the old relation stays intact (durable distinction, not just status)', async () => {
+    const h = createHarness();
+    await seedSource(h.rawExecutor, SOURCE_X, 'X');
+    await seedSource(h.rawExecutor, SOURCE_Y, 'Y');
+    const title = 'Durable distinction title';
+    const body = 'Durable distinction body';
+    await seedItem(h.rawExecutor, { id: 'q1d-a', sourceId: SOURCE_X, title, body });
+    await seedItem(h.rawExecutor, { id: 'q1d-b', sourceId: SOURCE_Y, title, body });
+    expect(await enqueueAndRun(h, 'q1d-a')).toEqual(['ack:job_completed']);
+    expect(await enqueueAndRun(h, 'q1d-b')).toEqual(['ack:job_completed']);
+    const oldHashB = await sha256Hex(`q1d-b\u001f${title}\u001f${body}`);
+    const storyAId = await storyIdForSnapshot(
+      'q1d-a',
+      await sha256Hex(`q1d-a\u001f${title}\u001f${body}`),
+    );
+    const oldReuseClaimId = await exactContentReuseClaimId(storyAId, 'q1d-b', oldHashB);
+    // The FIRST reuse already carried the versioned identity (old snapshot).
+    const oldClaim = await h.rawExecutor.first<{
+      id: string;
+      story_id: string;
+      claim_type: string;
+    }>({
+      sql: 'SELECT id, story_id, claim_type FROM claims WHERE id = ?',
+      params: [oldReuseClaimId],
+    });
+    expect(oldClaim).toMatchObject({
+      id: oldReuseClaimId,
+      story_id: storyAId,
+      claim_type: 'source_report',
+    });
+
+    // A NEW raw snapshot: edge-space title, NEW hash, SAME composed text.
+    const newTitle = `${title} `;
+    const newHashB = await sha256Hex(`q1d-b\u001f${newTitle}\u001f${body}`);
+    await h.rawExecutor.run({
+      sql: "UPDATE source_items SET title=?,content_hash=?,processing_status='new' WHERE id='q1d-b'",
+      params: [newTitle, newHashB],
+    });
+    expect(await enqueueAndRun(h, 'q1d-b')).toEqual(['ack:job_completed']);
+    expect(h.providerCalls).toBe(1);
+
+    // DURABLE distinction: the NEW snapshot's versioned relation exists —
+    // the old relation is never rewritten, never replaced, never deleted.
+    const newReuseClaimId = await exactContentReuseClaimId(storyAId, 'q1d-b', newHashB);
+    const newClaim = await h.rawExecutor.first<{
+      id: string;
+      story_id: string;
+      claim_type: string;
+    }>({
+      sql: 'SELECT id, story_id, claim_type FROM claims WHERE id = ?',
+      params: [newReuseClaimId],
+    });
+    expect(newClaim).toMatchObject({
+      id: newReuseClaimId,
+      story_id: storyAId,
+      claim_type: 'source_report',
+    });
+    expect(newReuseClaimId).not.toBe(oldReuseClaimId);
+    // BOTH relations are durably retrievable WITH their evidence rows.
+    expect(
+      await h.rawExecutor.first({
+        sql: 'SELECT id FROM evidence WHERE id = ?',
+        params: [await mentionsEvidenceId(oldReuseClaimId, 'q1d-b')],
+      }),
+    ).not.toBeNull();
+    expect(
+      await h.rawExecutor.first({
+        sql: 'SELECT id FROM evidence WHERE id = ?',
+        params: [await mentionsEvidenceId(newReuseClaimId, 'q1d-b')],
+      }),
+    ).not.toBeNull();
+    // Exactly THREE claims: the normal story's claim + the TWO versioned
+    // reuse relations (one per snapshot — never merged, never duplicated).
+    expect(await rowCount(h.rawExecutor, 'claims')).toBe(3);
+    expect(await rowCount(h.rawExecutor, 'evidence')).toBe(3);
+  });
+
+  it('a changed hash with CHANGED composed text takes the honest independent path (no reuse, own story, old artifacts intact)', async () => {
+    const h = createHarness();
+    await seedSource(h.rawExecutor, SOURCE_X, 'X');
+    await seedSource(h.rawExecutor, SOURCE_Y, 'Y');
+    const title = 'Independent path title';
+    const body = 'Independent path body';
+    await seedItem(h.rawExecutor, { id: 'q1i-a', sourceId: SOURCE_X, title, body });
+    await seedItem(h.rawExecutor, { id: 'q1i-b', sourceId: SOURCE_Y, title, body });
+    expect(await enqueueAndRun(h, 'q1i-a')).toEqual(['ack:job_completed']);
+    expect(await enqueueAndRun(h, 'q1i-b')).toEqual(['ack:job_completed']);
+    expect(h.providerCalls).toBe(1);
+    const storyAId = await storyIdForSnapshot(
+      'q1i-a',
+      await sha256Hex(`q1i-a\u001f${title}\u001f${body}`),
+    );
+    const oldDraft = await h.rawExecutor.first<{ document_json: string }>({
+      sql: 'SELECT document_json FROM drafts WHERE story_id = ?',
+      params: [storyAId],
+    });
+    expect(oldDraft).not.toBeNull();
+
+    // A genuinely DIFFERENT text under a NEW snapshot identity: the old
+    // relation can neither acknowledge it nor be reused for it.
+    const changedTitle = 'A genuinely different headline';
+    const changedBody = 'A genuinely different body';
+    const changedHash = await sha256Hex(`q1i-b\u001f${changedTitle}\u001f${changedBody}`);
+    await h.rawExecutor.run({
+      sql: "UPDATE source_items SET title=?,body_excerpt=?,content_hash=?,processing_status='new' WHERE id='q1i-b'",
+      params: [changedTitle, changedBody, changedHash],
+    });
+    expect(await enqueueAndRun(h, 'q1i-b')).toEqual(['ack:job_completed']);
+    // The independent path PAID its own way: one NEW provider call.
+    expect(h.providerCalls).toBe(2);
+    // The item has its OWN story (its snapshot story key), processed.
+    const ownStoryId = await storyIdForSnapshot('q1i-b', changedHash);
+    const ownClaim = await h.rawExecutor.first<{ id: string; story_id: string }>({
+      sql: 'SELECT id, story_id FROM claims WHERE id = ?',
+      params: [await sourceReportClaimId(ownStoryId, 'q1i-b')],
+    });
+    expect(ownClaim).toMatchObject({ story_id: ownStoryId });
+    expect(await rowCount(h.rawExecutor, 'stories')).toBe(2);
+    const statuses = await itemStatuses(h.rawExecutor, ['q1i-b']);
+    expect(statuses[0]!.processing_status).toBe('processed');
+    // The OLD artifacts are untouched: the reused draft's document was never
+    // rewritten, and the old versioned reuse relation still names the OLD
+    // snapshot only.
+    expect(
+      (await h.rawExecutor.first<{ document_json: string }>({
+        sql: 'SELECT document_json FROM drafts WHERE story_id = ?',
+        params: [storyAId],
+      }))!.document_json,
+    ).toBe(oldDraft!.document_json);
+    const oldRelation = await h.rawExecutor.first<{ id: string }>({
+      sql: 'SELECT id FROM claims WHERE id = ?',
+      params: [
+        await exactContentReuseClaimId(
+          storyAId,
+          'q1i-b',
+          await sha256Hex(`q1i-b\u001f${title}\u001f${body}`),
+        ),
+      ],
+    });
+    expect(oldRelation).not.toBeNull();
+  });
+
+  it('the SAME-snapshot replay of a reused item stays write-free and charge-free through the versioned identity', async () => {
+    const h = createHarness();
+    await seedSource(h.rawExecutor, SOURCE_X, 'X');
+    await seedSource(h.rawExecutor, SOURCE_Y, 'Y');
+    const title = 'Replay identity title';
+    const body = 'Replay identity body';
+    await seedItem(h.rawExecutor, { id: 'q1r-a', sourceId: SOURCE_X, title, body });
+    await seedItem(h.rawExecutor, { id: 'q1r-b', sourceId: SOURCE_Y, title, body });
+    expect(await enqueueAndRun(h, 'q1r-a')).toEqual(['ack:job_completed']);
+    expect(await enqueueAndRun(h, 'q1r-b')).toEqual(['ack:job_completed']);
+    expect(h.providerCalls).toBe(1);
+    const before = {
+      stories: await rowCount(h.rawExecutor, 'stories'),
+      drafts: await rowCount(h.rawExecutor, 'drafts'),
+      claims: await rowCount(h.rawExecutor, 'claims'),
+      evidence: await rowCount(h.rawExecutor, 'evidence'),
+      aiRuns: await rowCount(h.rawExecutor, 'ai_runs'),
+      fingerprints: await rowCount(h.rawExecutor, 'story_fingerprints'),
+    };
+
+    // The at-least-once window: the terminal bookkeeping was lost, so BOTH
+    // durable jobs become dispatchable again and the handler RE-EXECUTES
+    // for real (a NEW generation each).
+    for (const itemId of ['q1r-a', 'q1r-b']) {
+      await h.rawExecutor.run({
+        sql: "UPDATE jobs SET status = 'pending', run_after = ?, lease_until = NULL WHERE aggregate_id = ? AND status = 'succeeded'",
+        params: [NOW, itemId],
+      });
+    }
+    h.clock.advance(1);
+    const outcomes = await runPipeline(h);
+    expect(outcomes.sort()).toEqual(['ack:job_completed', 'ack:job_completed']);
+    // The reused item's replay is proven by the VERSIONED relation (claim id
+    // = exact reuse identity of the CURRENT snapshot hash): ZERO new writes,
+    // ZERO provider involvement.
+    expect(h.providerCalls).toBe(1);
+    expect(await rowCount(h.rawExecutor, 'stories')).toBe(before.stories);
+    expect(await rowCount(h.rawExecutor, 'drafts')).toBe(before.drafts);
+    expect(await rowCount(h.rawExecutor, 'claims')).toBe(before.claims);
+    expect(await rowCount(h.rawExecutor, 'evidence')).toBe(before.evidence);
+    expect(await rowCount(h.rawExecutor, 'ai_runs')).toBe(before.aiRuns);
+    expect(await rowCount(h.rawExecutor, 'story_fingerprints')).toBe(before.fingerprints);
+    const statuses = await itemStatuses(h.rawExecutor, ['q1r-b']);
+    expect(statuses[0]!.processing_status).toBe('processed');
+  });
+
+  it('a mutation between new-snapshot verification and commit never fakes the processed flip (fenced, typed, recoverable)', async () => {
+    const h = createHarness();
+    await seedSource(h.rawExecutor, SOURCE_X, 'X');
+    await seedSource(h.rawExecutor, SOURCE_Y, 'Y');
+    const title = 'Mutation window title';
+    const body = 'Mutation window body';
+    await seedItem(h.rawExecutor, { id: 'q1m-a', sourceId: SOURCE_X, title, body });
+    await seedItem(h.rawExecutor, { id: 'q1m-b', sourceId: SOURCE_Y, title, body });
+    expect(await enqueueAndRun(h, 'q1m-a')).toEqual(['ack:job_completed']);
+    expect(await enqueueAndRun(h, 'q1m-b')).toEqual(['ack:job_completed']);
+    const storyAId = await storyIdForSnapshot(
+      'q1m-a',
+      await sha256Hex(`q1m-a\u001f${title}\u001f${body}`),
+    );
+    const oldHashB = await sha256Hex(`q1m-b\u001f${title}\u001f${body}`);
+
+    // A NEW raw snapshot with the SAME composed text — the old relation can
+    // NOT prove it; the handler falls through to a verified new-snapshot
+    // reuse whose fenced commit will be mutated mid-flight.
+    const newTitle = `${title} `;
+    const newHashB = await sha256Hex(`q1m-b\u001f${newTitle}\u001f${body}`);
+    await h.rawExecutor.run({
+      sql: "UPDATE source_items SET title=?,content_hash=?,processing_status='new' WHERE id='q1m-b'",
+      params: [newTitle, newHashB],
+    });
+    h.mutateBeforeReuseCommit(async (raw) => {
+      // Mutate the item's snapshot identity BETWEEN the verification read
+      // and the atomic reuse commit — the SQL snapshot predicate must
+      // no-op EVERY statement of the batch.
+      await raw.run({
+        sql: "UPDATE source_items SET content_hash = ? WHERE id = 'q1m-b'",
+        params: [await sha256Hex('mutated-between-verification-and-commit')],
+      });
+    });
+    expect(await enqueueAndRun(h, 'q1m-b')).toEqual(['ack:job_dead_lettered']);
+    // ZERO provider involvement (the reuse path never reaches the AI) and
+    // ZERO false effects: no processed flip, NO versioned relation for the
+    // new snapshot, the old relation intact.
+    expect(h.providerCalls).toBe(1);
+    expect(await rowCount(h.rawExecutor, 'claims')).toBe(2);
+    expect(
+      await h.rawExecutor.first({
+        sql: 'SELECT id FROM claims WHERE id = ?',
+        params: [await exactContentReuseClaimId(storyAId, 'q1m-b', newHashB)],
+      }),
+    ).toBeNull();
+    expect(
+      await h.rawExecutor.first({
+        sql: 'SELECT id FROM claims WHERE id = ?',
+        params: [await exactContentReuseClaimId(storyAId, 'q1m-b', oldHashB)],
+      }),
+    ).not.toBeNull();
+    const statuses = await itemStatuses(h.rawExecutor, ['q1m-b']);
+    expect(statuses[0]!.processing_status).toBe('new');
   });
 });

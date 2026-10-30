@@ -164,6 +164,7 @@ import {
   aiRunIdForAttempt,
   draftIdForStory,
   editorialAiInputHash,
+  exactContentReuseClaimId,
   mentionsEvidenceId,
   sourceReportClaimId,
   storyIdForSnapshot,
@@ -405,30 +406,52 @@ export function createEditorialPrepareDraftHandler(
     }
     if (attachment !== null) {
       try {
-        const replayDraft = await findDraftForStory(
-          executor,
+        // R1.15.2 (Posidon snapshot-identity boundary): the stored relation
+        // answers for the CURRENT snapshot ONLY when its durable claim
+        // identity IS the versioned reuse identity of (target story, item
+        // id, CURRENT snapshot hash). Composed-text equality of the old
+        // draft's immutable basis is necessary but NEVER sufficient: a NEW
+        // raw snapshot (a different content hash — e.g. an edge-space title
+        // change under the pre-existing trim contract) must NOT be silently
+        // acknowledged by the OLD snapshot's relation. The check is a pure
+        // READ-side comparison of two authoritative identities (the stored
+        // claim row vs the derived identity); every WRITE keeps its fenced
+        // atomic path, and a relation whose identity does not name THIS
+        // snapshot falls through — the old relation stays intact and the
+        // new snapshot takes its own honest path below.
+        const expectedReuseClaimId = await exactContentReuseClaimId(
           attachment.story_id,
-          EDITORIAL_DRAFT_VERSION,
+          item.id,
+          item.content_hash,
         );
-        if (replayDraft !== null && replayDraft.status === 'ready') {
-          const replayBasis = readReuseDocumentBasis(replayDraft.document_json);
-          const replayReference =
-            replayBasis === null
-              ? null
-              : await findEditorialSourceItem(executor, replayBasis.sourceItemId);
-          const replayDecision = verifyExactContentReuseCandidate({
-            basis: replayBasis,
-            referenceRow: replayReference,
-            fullText: fullEvidenceText,
-          });
-          if (replayDecision.verified) {
-            logger?.info('editorial.prepare_draft.provenance_already_attached', {
-              storyId: attachment.story_id,
-              claimId: attachment.claim_id,
+        if (attachment.claim_id === expectedReuseClaimId) {
+          const replayDraft = await findDraftForStory(
+            executor,
+            attachment.story_id,
+            EDITORIAL_DRAFT_VERSION,
+          );
+          if (replayDraft !== null && replayDraft.status === 'ready') {
+            const replayBasis = readReuseDocumentBasis(replayDraft.document_json);
+            const replayReference =
+              replayBasis === null
+                ? null
+                : await findEditorialSourceItem(executor, replayBasis.sourceItemId);
+            const replayDecision = verifyExactContentReuseCandidate({
+              basis: replayBasis,
+              referenceRow: replayReference,
+              fullText: fullEvidenceText,
             });
-            // The durable work IS provably done for THIS snapshot:
-            // success with ZERO writes and ZERO provider involvement.
-            return { kind: 'success' };
+            if (replayDecision.verified) {
+              logger?.info('editorial.prepare_draft.provenance_already_attached', {
+                storyId: attachment.story_id,
+                claimId: attachment.claim_id,
+              });
+              // The durable work IS provably done for THIS snapshot (the
+              // versioned relation names THIS item's CURRENT snapshot hash
+              // AND the draft's immutable basis byte-verifies its text):
+              // success with ZERO writes and ZERO provider involvement.
+              return { kind: 'success' };
+            }
           }
         }
       } catch (error) {
@@ -625,7 +648,17 @@ export function createEditorialPrepareDraftHandler(
             return { kind: 'retry', reasonCode: 'job_internal_error' };
           }
           const reuseNowMs = nowMs();
-          const reuseClaimId = await sourceReportClaimId(target.storyId, item.id);
+          // R1.15.2: the reuse relation's durable claim identity is the
+          // VERSIONED reuse identity — (target story, item id, CURRENT
+          // snapshot hash) — so the committed relation demonstrably names
+          // the snapshot it processed. The fenced atomic batch (fence +
+          // snapshot + target predicates) guarantees the identity can only
+          // land while the item IS the snapshot the verification compared.
+          const reuseClaimId = await exactContentReuseClaimId(
+            target.storyId,
+            item.id,
+            item.content_hash,
+          );
           const reuseClaim = buildSourceReportClaim({ sourceName: source.name, excerpt });
           const reuseEvidence = buildMentionsEvidence({ excerpt });
           const reuse = await commitEditorialReuse(executor, {

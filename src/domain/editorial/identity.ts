@@ -86,6 +86,31 @@ export async function sourceReportClaimId(storyId: string, sourceItemId: string)
 }
 
 /**
+ * R1.15.2 — the versioned, deterministic identity of ONE exact-content
+ * REUSE relation: the durable claim that a SPECIFIC snapshot
+ * (sourceItemId + snapshotHash) of one item was attached to a SPECIFIC
+ * target story. Deliberately DISTINCT from the normal-story
+ * `sourceReportClaimId` (which stays untouched — historical normal-story
+ * identity is never rewritten): a reuse relation that does not NAME its
+ * snapshot cannot prove WHICH snapshot it processed, and a new raw
+ * snapshot (a different content hash — even with byte-equal composed text
+ * under the pre-existing trim contract) must never be silently
+ * acknowledged by an old relation.
+ */
+export async function exactContentReuseClaimId(
+  targetStoryId: string,
+  sourceItemId: string,
+  snapshotHash: string,
+): Promise<string> {
+  return prefixedId(CLAIM_ID_PREFIX, [
+    'exact_content_reuse',
+    targetStoryId,
+    sourceItemId,
+    snapshotHash,
+  ]);
+}
+
+/**
  * Deterministic `mentions` evidence id linking the source_report claim to
  * its origin source_item. The evidence UNIQUE(claim_id, source_item_id,
  * stance) constraint is the second, schema-level guard.
