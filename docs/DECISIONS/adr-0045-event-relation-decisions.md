@@ -261,3 +261,62 @@ and integration (the fail-after-provider audit before/after the retry
 with no collision/misattribution; the pending basis read and the pending
 entity probe each freed by the deadline with late-rejection absorption
 and typed ledgers — zero real sleeps).
+
+## Correction R1.17.2 (v1.12.3) — the ORIGINAL A2/D2 obligations closed
+
+A return-for-correction on 46f078e (v1.12.2) showed the previous R1.17.2
+delivery had tested a DIFFERENT error path: the ORIGINAL A2 is a drafting
+THROW at the handler's own `generateNewsDraft` call site (AFTER a real
+relation invocation, BEFORE the drafting provider call) — not a logger
+throw inside the relation service — and the ORIGINAL D2 counter counts
+reference queries STARTED after a returned basis read consumed the
+deadline; the previous ledger fix still let that eager query start. Both
+ORIGINAL counterexamples were reproduced RED on the untouched baseline
+46f078e (2 failed / 23 skipped, exit 1, outputs byte-identical to the
+task) and are GREEN after this correction; the observer-first and
+bounded-pending-reads work of the previous delivery is preserved and
+stays green.
+
+1. **A2 (ORIGINAL) — attempt-scoped post-provider cleanup.** The
+   handler's ENTIRE post-relation region (the drafting await through
+   observe/classification, the deferred/permanent/no-traced-claim
+   recordings, the evidence-guard/document/commit-input construction and
+   the fenced commit with its catalog/basis/content/snapshot/fence
+   outcomes) now sits inside ONE attempt-scoped cleanup: EVERY
+   exceptional exit after the relation step really ran records the REAL
+   invocations of THIS attempt BEFORE the engine schedules the retry —
+   the union of the record-time attempt observations with the
+   outcome-mapped rows (deterministic per-(job,generation,pair,attempt)
+   ids; the fenced standalone insert's own-row guard dedups) plus the
+   draft run when one was actually observed (an exception BEFORE the
+   provider call observes nothing — zero fabricated rows). The two audit
+   types are recorded INDEPENDENTLY (a failure cleaning one never skips
+   the other when its store works); the original error then propagates
+   UNCHANGED — the engine's typed bounded retry owns the outcome. No
+   refund, no re-inference, no exactly-once claim (a persistent store
+   outage can still defeat the best-effort record); the ownership fence,
+   the generation separation and the existing typed outcome handling
+   stay.
+
+2. **D2 (ORIGINAL) — no new async operation starts after expiry.** The
+   SAME absolute step deadline is re-checked IMMEDIATELY BEFORE every
+   new asynchronous operation: the reference-row read after a candidate
+   draft resolved (a RETURNED — not pending — basis read does not prove
+   time remains; the deadline primitive cannot retract an already-started
+   eager query) and the hash/bundle work in the pair-bundling loop. An
+   expired clock starts NO query and builds NO bundle: the candidate is
+   the typed technical state `basis_unavailable/step_deadline_expired`
+   (never a semantic verdict, never a fake empty successful lookup). The
+   bounded pending-probe/basis races, the late-rejection absorption, the
+   ≤2/≤3 caps, the shared budget and the separate drafting deadline are
+   preserved; product SQL shapes and gates are unchanged.
+
+Permanent regressions (main integration suite, `Posidon R1172 ORIGINAL
+contract verification`): the EXACT drafting-throw counterexample
+(relation calls=1 ⇒ durable `ai_runs` delta=1 BEFORE the retry,
+draftProviderCalls=0 — zero fictional draft rows) and the EXACT
+late-read counterexample (lateReferenceReads=0, counted as INITIATED
+`source_items` queries after a 20 s basis read consumed the 15 s step
+deadline; relationCalls=0). The temporary copied proof suite was removed
+after integration; the 23 pre-existing integration tests are NOT
+duplicated.

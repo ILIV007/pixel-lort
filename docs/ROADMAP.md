@@ -819,6 +819,35 @@ decision.
       permanent regressions live in the main suites (unit 16,
       integration 23); version 1.12.2; schema stays 3, ZERO DDL; NO
       Phase-5-completion / semantic-accuracy / production-ready claim.
+- [x] **R1.17.2 (v1.12.3, ADR-0045 correction): the ORIGINAL A2/D2
+      obligations closed on the return-for-correction baseline 46f078e —
+      NO new capability, NO scope claim, NO substitute counterexample.
+      ORIGINAL A2: the handler's ENTIRE post-relation region (the
+      drafting await through the document/commit-input construction and
+      the fenced commit) is covered by ONE attempt-scoped cleanup —
+      EVERY exceptional exit after a real relation invocation records the
+      union of the record-time attempt observations with the
+      outcome-mapped rows (deterministic per-(job,generation,pair,attempt)
+      ids, the fenced standalone insert's own-row guard dedups) plus the
+      draft run when one was observed, each audit type INDEPENDENTLY,
+      BEFORE the retry is scheduled; the original error propagates
+      unchanged (zero fabricated rows, no refund, no re-inference, no
+      exactly-once claim; ownership fence and generation separation
+      stay). ORIGINAL D2: the SAME absolute step deadline is re-checked
+      IMMEDIATELY BEFORE every new asynchronous operation — the
+      reference-row read after a returned basis read consumed the budget
+      and the hash/bundle work — an expired clock starts NO query and
+      builds NO bundle (typed `basis_unavailable/step_deadline_expired`).
+      Both ORIGINAL counterexamples were reproduced RED on the untouched
+      baseline (2 failed / 23 skipped, exit 1, outputs byte-identical to
+      the task) and are GREEN after the corrections; the previous
+      delivery's observer-first and bounded-pending-reads regressions
+      stay green; the permanent regressions live in the main integration
+      suite (the EXACT drafting-throw audit + the INITIATED-query count
+      after expiry; the temporary copied proof suite removed — the 23
+      pre-existing tests NOT duplicated); version 1.12.3; schema stays 3,
+      ZERO DDL; NO Phase-5-completion / semantic-accuracy /
+      production-ready claim.
 - [ ] Story MERGING and semantic/deterministic matching with thresholds
       (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate discovery +
       conservative observation assessment, and Phase 5D provides ONLY
