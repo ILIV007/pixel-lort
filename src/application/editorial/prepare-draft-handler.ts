@@ -896,6 +896,12 @@ export function createEditorialPrepareDraftHandler(
     /** The evaluated candidate bases the SQL basis gate pins at commit. */
     let relationBases: NonNullable<EditorialCommitInput['eventRelationBases']> = [];
 
+    /** The relation runs' record-time anchor (the audit rows' createdAt) —
+     * hoisted above the flag branch so the attempt-scoped post-provider
+     * cleanup below can anchor the union rows even when the relation
+     * step's own scope has already exited. */
+    const relationStepStartedAtMs = nowMs();
+
     if (!relationEnabled || relationOptions === undefined) {
       eventRelationReport = disabledEventRelationReport({
         sourceItemId: item.id,
@@ -911,8 +917,6 @@ export function createEditorialPrepareDraftHandler(
       // expiry (a pending D1 query is not cancellable — expiry frees
       // the caller, it never claims real cancellation).
       const relationStepDeadlineAtMs = nowMs() + EVENT_RELATION_BOUNDS.stepWallDeadlineMs;
-      // The relation runs' record-time anchor (the audit rows' createdAt).
-      const relationStepStartedAtMs = nowMs();
       let stepDeadlineObserved = false;
 
       try {
@@ -1029,6 +1033,21 @@ export function createEditorialPrepareDraftHandler(
             basisStates.set(relationCandidate.storyId, { ok: false, reason: 'legacy_basis' });
             continue;
           }
+          // R1.17.2 (D2 — ORIGINAL): a bounded wait that RETURNED data does
+          // not prove time remains. The SAME absolute deadline is re-checked
+          // IMMEDIATELY BEFORE every new asynchronous operation — here, the
+          // reference-row read after the candidate draft resolved. An expired
+          // clock starts NO eager query: the candidate is the typed technical
+          // state (never a semantic verdict, never a fake empty lookup) and
+          // the read can never open a post-expiry window that the deadline
+          // primitive cannot retract.
+          if (stepDeadlineObserved || nowMs() >= relationStepDeadlineAtMs) {
+            basisStates.set(relationCandidate.storyId, {
+              ok: false,
+              reason: 'step_deadline_expired',
+            });
+            continue;
+          }
           // R1.17.2 (D2): the pending reference read is bounded by the SAME
           // step deadline (the same race/absorption contract as above).
           const referenceReadWait = await awaitWithDeadline(
@@ -1075,6 +1094,20 @@ export function createEditorialPrepareDraftHandler(
           const basisState = basisStates.get(relationCandidate.storyId);
           if (basisState === undefined || !basisState.ok) {
             continue; // non-evaluable here; the candidate entry records it
+          }
+          // R1.17.2 (D2 — ORIGINAL): the SAME absolute deadline is re-checked
+          // IMMEDIATELY BEFORE the hash/bundle work — a returned basis read
+          // does not prove time remains. An expired clock builds NO new
+          // bundle and starts NO hash work: the candidate's basis flips to
+          // the typed technical state (the same honest surface the
+          // deadline-stopped basis reads record) and NO pair is ever bundled
+          // from a post-expiry window.
+          if (stepDeadlineObserved || nowMs() >= relationStepDeadlineAtMs) {
+            basisStates.set(relationCandidate.storyId, {
+              ok: false,
+              reason: 'step_deadline_expired',
+            });
+            continue;
           }
           const bundleResult = await buildEventRelationPairBundle({
             pairId: bundles.length === 0 ? 'erp-1' : 'erp-2',
@@ -1395,401 +1428,452 @@ export function createEditorialPrepareDraftHandler(
       }
     }
 
-    // ---- 6. The EXISTING AI service (real gates: flag, budget authority,
-    //         allowlist ladder, wall deadline, output validation).
-    const aiStartedAtMs = nowMs();
-    const outcome = await aiService.generateNewsDraft({
-      taskType: 'news_draft',
-      locale: 'fa',
-      evidence: [snippet],
-    });
-    const aiFinishedAtMs = nowMs();
-    const observed = observeAiRun(outcome, aiStartedAtMs, aiFinishedAtMs);
-    const step = classifyAiOutcome(outcome);
-
-    // ---- 7a. Deferred/refusal paths: record the REAL runs when they
-    //          happened (drafting AND any relation adjudication), then map
-    //          onto the engine's durable outcomes (no fake success, no
-    //          disappearance, no retry storm).
-    if (step.kind === 'retry') {
-      if (observed !== null) {
-        await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
-      }
-      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
-      logger?.info('editorial.prepare_draft.ai_deferred', { outcome: outcome.kind });
-      return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
-    }
-    if (step.kind === 'permanent') {
-      if (observed !== null) {
-        await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
-      }
-      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
-      logger?.warn('editorial.prepare_draft.ai_terminal', { reasonCode: step.reasonCode });
-      return { kind: 'permanent', reasonCode: step.reasonCode };
-    }
-
-    if (outcome.kind !== 'draft') {
-      // Unreachable (classifyAiOutcome returned 'commit' only for drafts).
-      return { kind: 'retry', reasonCode: 'job_internal_error' };
-    }
-
-    // ---- 7a'. Editorial acceptance guard (R1.11.1): at least ONE model
-    //          claim must reference the request evidence. A schema-valid
-    //          draft with empty claims (or none pointing at THIS input) is
-    //          NOT a success of this path: it never becomes a ready draft
-    //          and never processes the item. The general AI schema and
-    //          other callers' contract stay unchanged. The REAL run is
-    //          recorded as `invalid` (the provider DID run and stays
-    //          charged — no refund); the outcome is TERMINAL because the
-    //          identical input would deterministically repeat (no storm).
-    const hasTracedClaim = outcome.draft.claims.some((claim) =>
-      claim.evidenceIds.includes(snippet.id),
-    );
-    if (!hasTracedClaim) {
-      if (observed !== null) {
-        await recordRealAiRun(
-          executor,
-          jobId,
-          generation,
-          { ...observed, status: 'invalid', errorCode: 'editorial_no_traced_claim' },
-          inputHash,
-          nowMs(),
-        );
-      }
-      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
-      logger?.warn('editorial.prepare_draft.no_traced_claim', {
-        claims: outcome.draft.claims.length,
+    // R1.17.2 (A2 — ORIGINAL): ATTEMPT-SCOPED post-provider cleanup. From
+    // here until the fenced commit, EVERY exceptional exit — the drafting
+    // throw, a document/commit-input construction failure — records the
+    // REAL invocations of THIS attempt BEFORE the engine schedules the
+    // retry: the relation runs (record-time observations ∪ the
+    // outcome-mapped rows — deterministic per-(job,generation,pair,
+    // attempt) ids, the fenced standalone inserts' own-row guard dedups)
+    // and the draft run when one was actually observed. Each audit type
+    // is cleaned INDEPENDENTLY (a failure cleaning one never skips the
+    // other when its store works); the original error then propagates
+    // UNCHANGED — the engine's typed bounded retry owns the outcome. No
+    // fabricated rows (a draft call the provider never saw is never
+    // invented), no refund, no re-inference; a persistent store outage
+    // can still defeat this best-effort record — an honest limitation,
+    // never an exactly-once claim.
+    let observed: ObservedAiRun | null = null;
+    try {
+      // ---- 6. The EXISTING AI service (real gates: flag, budget authority,
+      //         allowlist ladder, wall deadline, output validation).
+      const aiStartedAtMs = nowMs();
+      const outcome = await aiService.generateNewsDraft({
+        taskType: 'news_draft',
+        locale: 'fa',
+        evidence: [snippet],
       });
-      return { kind: 'permanent', reasonCode: 'editorial_no_traced_claim' };
-    }
+      const aiFinishedAtMs = nowMs();
+      observed = observeAiRun(outcome, aiStartedAtMs, aiFinishedAtMs);
+      const step = classifyAiOutcome(outcome);
 
-    // ---- 7b. Commit path: conservative story + source_report claim +
-    //          mentions evidence + real ai_runs row + READY draft +
-    //          source_item→processed — ONE fenced atomic batch.
-    //
-    //          R1.12 (Phase 5B): BEFORE building the document, the PURE
-    //          Evidence Guard v1 evaluator judges EVERY model claim of the
-    //          validated draft against the SAME verified snapshot identity
-    //          and the SAME traceable excerpt that produced it. The report
-    //          is deterministic, versioned, honest (direct-text observation
-    //          is never "verified"; paraphrase/translation stay unresolved;
-    //          headline/summary are recorded unassessed) and travels INSIDE
-    //          document_json of the SAME fenced commit — zero new SQL
-    //          statements, zero extra rounds, and it can never outlive the
-    //          draft it describes (a lost fence/snapshot writes nothing).
-    const evidenceGuard = buildEvidenceGuardReport({
-      snapshot: {
-        sourceItemId: item.id,
-        contentHash: item.content_hash,
-      },
-      evidence: {
-        evidenceId: snippet.id,
-        excerptText: excerpt.text,
-        excerptTruncated: excerpt.truncated,
-      },
-      draftClaims: outcome.draft.claims,
-      draftHeadlineFa: outcome.draft.headlineFa,
-      draftSummaryFa: outcome.draft.summaryFa,
-      draftSourceItemId: item.id,
-    });
-    const claimId = await sourceReportClaimId(storyId, item.id);
-    const evidenceId = await mentionsEvidenceId(claimId, item.id);
-    const draftId = await draftIdForStory(storyId);
-    const aiRunId = await aiRunIdForAttempt(jobId, generation);
-    const sourceReportClaim = buildSourceReportClaim({
-      sourceName: source.name,
-      excerpt,
-    });
-    const mentionsEvidence = buildMentionsEvidence({ excerpt });
-    // R1.16.1 (C1): the commit-input builder is a closure over the STABLE
-    // attempt state (provider draft, evidence guard, fingerprints) so the
-    // bounded catalog re-resolve below can rebuild the SAME editorial
-    // result around a FRESH mentions report — the provider is never
-    // called again and no other part of the result is recomputed.
-    const buildCommitInput = (resolution: EntityMentionResolution, nowMsValue: number) => {
-      const document = buildDraftDocument({
-        sourceItemId: item.id,
-        sourceName: source.name,
-        excerpt,
-        semanticDraft: outcome.draft,
-        evidenceGuard,
-        candidateDiscovery,
-        candidateAssessment,
-        entityMentions: resolution.report,
-        // R1.17: the bounded relation step's versioned ledger — rides in
-        // the SAME fenced draft INSERT (the decision ledger of THIS input).
-        eventRelation: eventRelationReport,
-      });
-      return {
-        jobId,
-        generation,
-        fenceNowMs: nowMsValue,
-        // The snapshot identity the handler READ and verified: re-checked
-        // INSIDE the atomic batch (R1.11.1) so a source item that changed
-        // mid-flight produces zero effects with a distinct typed outcome.
+      // ---- 7a. Deferred/refusal paths: record the REAL runs when they
+      //          happened (drafting AND any relation adjudication), then map
+      //          onto the engine's durable outcomes (no fake success, no
+      //          disappearance, no retry storm).
+      if (step.kind === 'retry') {
+        if (observed !== null) {
+          await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
+        }
+        await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+        logger?.info('editorial.prepare_draft.ai_deferred', { outcome: outcome.kind });
+        return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+      }
+      if (step.kind === 'permanent') {
+        if (observed !== null) {
+          await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
+        }
+        await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+        logger?.warn('editorial.prepare_draft.ai_terminal', { reasonCode: step.reasonCode });
+        return { kind: 'permanent', reasonCode: step.reasonCode };
+      }
+
+      if (outcome.kind !== 'draft') {
+        // Unreachable (classifyAiOutcome returned 'commit' only for drafts).
+        return { kind: 'retry', reasonCode: 'job_internal_error' };
+      }
+
+      // ---- 7a'. Editorial acceptance guard (R1.11.1): at least ONE model
+      //          claim must reference the request evidence. A schema-valid
+      //          draft with empty claims (or none pointing at THIS input) is
+      //          NOT a success of this path: it never becomes a ready draft
+      //          and never processes the item. The general AI schema and
+      //          other callers' contract stay unchanged. The REAL run is
+      //          recorded as `invalid` (the provider DID run and stays
+      //          charged — no refund); the outcome is TERMINAL because the
+      //          identical input would deterministically repeat (no storm).
+      const hasTracedClaim = outcome.draft.claims.some((claim) =>
+        claim.evidenceIds.includes(snippet.id),
+      );
+      if (!hasTracedClaim) {
+        if (observed !== null) {
+          await recordRealAiRun(
+            executor,
+            jobId,
+            generation,
+            { ...observed, status: 'invalid', errorCode: 'editorial_no_traced_claim' },
+            inputHash,
+            nowMs(),
+          );
+        }
+        await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+        logger?.warn('editorial.prepare_draft.no_traced_claim', {
+          claims: outcome.draft.claims.length,
+        });
+        return { kind: 'permanent', reasonCode: 'editorial_no_traced_claim' };
+      }
+
+      // ---- 7b. Commit path: conservative story + source_report claim +
+      //          mentions evidence + real ai_runs row + READY draft +
+      //          source_item→processed — ONE fenced atomic batch.
+      //
+      //          R1.12 (Phase 5B): BEFORE building the document, the PURE
+      //          Evidence Guard v1 evaluator judges EVERY model claim of the
+      //          validated draft against the SAME verified snapshot identity
+      //          and the SAME traceable excerpt that produced it. The report
+      //          is deterministic, versioned, honest (direct-text observation
+      //          is never "verified"; paraphrase/translation stay unresolved;
+      //          headline/summary are recorded unassessed) and travels INSIDE
+      //          document_json of the SAME fenced commit — zero new SQL
+      //          statements, zero extra rounds, and it can never outlive the
+      //          draft it describes (a lost fence/snapshot writes nothing).
+      const evidenceGuard = buildEvidenceGuardReport({
         snapshot: {
           sourceItemId: item.id,
-          sourceId: item.source_id,
           contentHash: item.content_hash,
         },
-        story: {
-          id: storyId,
-          storyKey,
-          workingHeadline: null,
-          createdAt: nowMsValue,
-        },
-        claim: {
-          id: claimId,
-          storyId,
-          claimType: sourceReportClaim.claimType,
-          subject: sourceReportClaim.subject,
-          predicate: sourceReportClaim.predicate,
-          objectText: sourceReportClaim.objectText,
-          confidence: sourceReportClaim.confidence,
-          status: sourceReportClaim.status,
-          createdAt: nowMsValue,
-        },
         evidence: {
-          id: evidenceId,
-          claimId,
-          sourceItemId: item.id,
-          stance: mentionsEvidence.stance,
-          confidence: mentionsEvidence.confidence,
-          excerpt: mentionsEvidence.excerpt,
-          createdAt: nowMsValue,
+          evidenceId: snippet.id,
+          excerptText: excerpt.text,
+          excerptTruncated: excerpt.truncated,
         },
-        aiRun: {
-          id: aiRunId,
-          task: 'news_draft',
-          provider: observed?.provider ?? '',
-          model: observed?.model ?? '',
-          promptVersion: observed?.promptVersion ?? '',
-          inputHash,
-          status: observed?.status ?? 'succeeded',
-          latencyMs: observed?.latencyMs ?? null,
-          inputTokens: observed?.inputTokens ?? null,
-          outputTokens: observed?.outputTokens ?? null,
-          errorCode: observed?.errorCode ?? null,
-          errorMessage: null,
-          createdAt: aiStartedAtMs,
-          completedAt: aiFinishedAtMs,
-        },
-        draft: {
-          id: draftId,
-          storyId,
-          status: 'ready',
-          language: 'fa',
-          layout: document.layout,
-          title: document.title,
-          documentJson: canonicalizeJson(document.document),
-          factsJson: canonicalizeJson(document.facts),
-          warningsJson: canonicalizeJson(document.warnings),
-          aiRunId,
-          version: EDITORIAL_DRAFT_VERSION,
-          createdBy: EDITORIAL_CREATED_BY,
-          createdAt: nowMsValue,
-        },
-        // R1.13: the NEW story's ≤3 durable fingerprints ride in the SAME
-        // fenced batch — a lost fence or changed snapshot writes NO draft
-        // AND NO fingerprint row.
-        fingerprints: fingerprints.map((plan) => ({ kind: plan.kind, value: plan.value })),
-        // R1.15: the exact-content GROUP anchor — the group-unique value
-        // derived from THIS item's own composed text. A live cross-story
-        // owner trips the PRIMARY KEY inside this batch and rolls the WHOLE
-        // commit back (typed contentTaken below).
-        exactContentAnchor,
-        // R1.16: the deterministic unique controlled-alias mention pairs —
-        // written by the SAME fenced batch; R1.16.1 conditions the WHOLE
-        // result in SQL on the validity of EVERY relied mapping (typed
-        // catalogChanged below — the report can never claim a durable link
-        // that did not persist).
-        entityMentions: resolution.resolved,
-        // R1.17: the REAL event-relation adjudication runs settle ATOMICALLY
-        // with the ledger that references them (zero rows on the disabled/
-        // no-candidate paths — a provider that never ran is never written);
-        // and the evaluated candidate bases are re-verified INSIDE this
-        // batch by the SQL basis gate (typed eventRelationBasisChanged).
-        eventRelationAiRuns: relationRunRows.map((entry) => entry.run),
-        eventRelationBases: relationBases,
-      };
-    };
-
-    let commit: Awaited<ReturnType<typeof commitEditorialResult>>;
-    try {
-      commit = await commitEditorialResult(
-        executor,
-        buildCommitInput(entityMentionResolution, nowMs()),
-      );
-    } catch (error) {
-      // R1.17.1 (A1): the FIRST commit THREW after the providers ran (a
-      // transient store failure inside the atomic batch). The batch left
-      // ZERO state (atomic), but the REAL invocations of THIS generation
-      // — drafting AND any relation adjudication — must never vanish from
-      // the audit: they are recorded best-effort with their DETERMINISTIC
-      // per-(job,generation,pair,attempt) ids through the fenced
-      // standalone inserts (own-row guard prevents duplicates). The
-      // charges stay (never refunded); the bounded engine retry owns the
-      // next generation. A persistent store outage can defeat even this
-      // best-effort record — an honest limitation; no exactly-once
-      // guarantee is invented here.
-      logger?.warn('editorial.prepare_draft.commit_failed', {
-        error: error instanceof Error ? error.message : 'unknown',
+        draftClaims: outcome.draft.claims,
+        draftHeadlineFa: outcome.draft.headlineFa,
+        draftSummaryFa: outcome.draft.summaryFa,
+        draftSourceItemId: item.id,
       });
-      if (observed !== null) {
-        await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
-      }
-      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
-      return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
-    }
-
-    if (commit.catalogChanged) {
-      // R1.16.1 (C1): at least ONE relied alias mapping was invalidated
-      // inside the lookup→commit window — the SQL catalog gate zeroed the
-      // WHOLE batch (zero effects, zero orphans, nothing persisted). The
-      // bounded honest retry: ONE re-resolve against the CURRENT catalog
-      // (a FRESH SQL lookup — never a JS reuse of the stale rows) and ONE
-      // re-commit of the SAME provider draft. ZERO provider calls, ZERO
-      // new charges, no fabricated outcome, no blind engine re-run.
-      try {
-        const retryScan = buildEntityMentionPhrases(fullEvidenceText);
-        let retryRows: readonly { normalized_alias: string; entity_id: string }[] = [];
-        let retryOverflow = false;
-        if (retryScan.phrases.length > 0) {
-          const retryLookup = await findEntityMentionMatches(executor, retryScan.phrases);
-          retryRows = retryLookup.rows;
-          retryOverflow = retryLookup.overflow;
-        }
-        entityMentionResolution = buildEntityMentionsReport({
-          snapshot: { sourceItemId: item.id, contentHash: item.content_hash },
-          scan: retryScan,
-          matches: retryRows,
-          resultOverflow: retryOverflow,
+      const claimId = await sourceReportClaimId(storyId, item.id);
+      const evidenceId = await mentionsEvidenceId(claimId, item.id);
+      const draftId = await draftIdForStory(storyId);
+      const aiRunId = await aiRunIdForAttempt(jobId, generation);
+      const sourceReportClaim = buildSourceReportClaim({
+        sourceName: source.name,
+        excerpt,
+      });
+      const mentionsEvidence = buildMentionsEvidence({ excerpt });
+      // R1.16.1 (C1): the commit-input builder is a closure over the STABLE
+      // attempt state (provider draft, evidence guard, fingerprints) so the
+      // bounded catalog re-resolve below can rebuild the SAME editorial
+      // result around a FRESH mentions report — the provider is never
+      // called again and no other part of the result is recomputed.
+      const buildCommitInput = (resolution: EntityMentionResolution, nowMsValue: number) => {
+        const document = buildDraftDocument({
+          sourceItemId: item.id,
+          sourceName: source.name,
+          excerpt,
+          semanticDraft: outcome.draft,
+          evidenceGuard,
+          candidateDiscovery,
+          candidateAssessment,
+          entityMentions: resolution.report,
+          // R1.17: the bounded relation step's versioned ledger — rides in
+          // the SAME fenced draft INSERT (the decision ledger of THIS input).
+          eventRelation: eventRelationReport,
         });
+        return {
+          jobId,
+          generation,
+          fenceNowMs: nowMsValue,
+          // The snapshot identity the handler READ and verified: re-checked
+          // INSIDE the atomic batch (R1.11.1) so a source item that changed
+          // mid-flight produces zero effects with a distinct typed outcome.
+          snapshot: {
+            sourceItemId: item.id,
+            sourceId: item.source_id,
+            contentHash: item.content_hash,
+          },
+          story: {
+            id: storyId,
+            storyKey,
+            workingHeadline: null,
+            createdAt: nowMsValue,
+          },
+          claim: {
+            id: claimId,
+            storyId,
+            claimType: sourceReportClaim.claimType,
+            subject: sourceReportClaim.subject,
+            predicate: sourceReportClaim.predicate,
+            objectText: sourceReportClaim.objectText,
+            confidence: sourceReportClaim.confidence,
+            status: sourceReportClaim.status,
+            createdAt: nowMsValue,
+          },
+          evidence: {
+            id: evidenceId,
+            claimId,
+            sourceItemId: item.id,
+            stance: mentionsEvidence.stance,
+            confidence: mentionsEvidence.confidence,
+            excerpt: mentionsEvidence.excerpt,
+            createdAt: nowMsValue,
+          },
+          aiRun: {
+            id: aiRunId,
+            task: 'news_draft',
+            provider: observed?.provider ?? '',
+            model: observed?.model ?? '',
+            promptVersion: observed?.promptVersion ?? '',
+            inputHash,
+            status: observed?.status ?? 'succeeded',
+            latencyMs: observed?.latencyMs ?? null,
+            inputTokens: observed?.inputTokens ?? null,
+            outputTokens: observed?.outputTokens ?? null,
+            errorCode: observed?.errorCode ?? null,
+            errorMessage: null,
+            createdAt: aiStartedAtMs,
+            completedAt: aiFinishedAtMs,
+          },
+          draft: {
+            id: draftId,
+            storyId,
+            status: 'ready',
+            language: 'fa',
+            layout: document.layout,
+            title: document.title,
+            documentJson: canonicalizeJson(document.document),
+            factsJson: canonicalizeJson(document.facts),
+            warningsJson: canonicalizeJson(document.warnings),
+            aiRunId,
+            version: EDITORIAL_DRAFT_VERSION,
+            createdBy: EDITORIAL_CREATED_BY,
+            createdAt: nowMsValue,
+          },
+          // R1.13: the NEW story's ≤3 durable fingerprints ride in the SAME
+          // fenced batch — a lost fence or changed snapshot writes NO draft
+          // AND NO fingerprint row.
+          fingerprints: fingerprints.map((plan) => ({ kind: plan.kind, value: plan.value })),
+          // R1.15: the exact-content GROUP anchor — the group-unique value
+          // derived from THIS item's own composed text. A live cross-story
+          // owner trips the PRIMARY KEY inside this batch and rolls the WHOLE
+          // commit back (typed contentTaken below).
+          exactContentAnchor,
+          // R1.16: the deterministic unique controlled-alias mention pairs —
+          // written by the SAME fenced batch; R1.16.1 conditions the WHOLE
+          // result in SQL on the validity of EVERY relied mapping (typed
+          // catalogChanged below — the report can never claim a durable link
+          // that did not persist).
+          entityMentions: resolution.resolved,
+          // R1.17: the REAL event-relation adjudication runs settle ATOMICALLY
+          // with the ledger that references them (zero rows on the disabled/
+          // no-candidate paths — a provider that never ran is never written);
+          // and the evaluated candidate bases are re-verified INSIDE this
+          // batch by the SQL basis gate (typed eventRelationBasisChanged).
+          eventRelationAiRuns: relationRunRows.map((entry) => entry.run),
+          eventRelationBases: relationBases,
+        };
+      };
+
+      let commit: Awaited<ReturnType<typeof commitEditorialResult>>;
+      try {
         commit = await commitEditorialResult(
           executor,
           buildCommitInput(entityMentionResolution, nowMs()),
         );
       } catch (error) {
-        // The re-resolve or its commit failed after the provider ran: the
-        // REAL runs stay recorded (charged, never refunded) and the
-        // bounded engine retry owns the next generation.
+        // R1.17.1 (A1): the FIRST commit THREW after the providers ran (a
+        // transient store failure inside the atomic batch). The batch left
+        // ZERO state (atomic), but the REAL invocations of THIS generation
+        // — drafting AND any relation adjudication — must never vanish from
+        // the audit: they are recorded best-effort with their DETERMINISTIC
+        // per-(job,generation,pair,attempt) ids through the fenced
+        // standalone inserts (own-row guard prevents duplicates). The
+        // charges stay (never refunded); the bounded engine retry owns the
+        // next generation. A persistent store outage can defeat even this
+        // best-effort record — an honest limitation; no exactly-once
+        // guarantee is invented here.
+        logger?.warn('editorial.prepare_draft.commit_failed', {
+          error: error instanceof Error ? error.message : 'unknown',
+        });
         if (observed !== null) {
           await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
         }
         await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
-        logger?.warn('editorial.prepare_draft.entity_catalog_revalidate_failed', {
-          error: error instanceof Error ? error.message : 'unknown',
+        return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+      }
+
+      if (commit.catalogChanged) {
+        // R1.16.1 (C1): at least ONE relied alias mapping was invalidated
+        // inside the lookup→commit window — the SQL catalog gate zeroed the
+        // WHOLE batch (zero effects, zero orphans, nothing persisted). The
+        // bounded honest retry: ONE re-resolve against the CURRENT catalog
+        // (a FRESH SQL lookup — never a JS reuse of the stale rows) and ONE
+        // re-commit of the SAME provider draft. ZERO provider calls, ZERO
+        // new charges, no fabricated outcome, no blind engine re-run.
+        try {
+          const retryScan = buildEntityMentionPhrases(fullEvidenceText);
+          let retryRows: readonly { normalized_alias: string; entity_id: string }[] = [];
+          let retryOverflow = false;
+          if (retryScan.phrases.length > 0) {
+            const retryLookup = await findEntityMentionMatches(executor, retryScan.phrases);
+            retryRows = retryLookup.rows;
+            retryOverflow = retryLookup.overflow;
+          }
+          entityMentionResolution = buildEntityMentionsReport({
+            snapshot: { sourceItemId: item.id, contentHash: item.content_hash },
+            scan: retryScan,
+            matches: retryRows,
+            resultOverflow: retryOverflow,
+          });
+          commit = await commitEditorialResult(
+            executor,
+            buildCommitInput(entityMentionResolution, nowMs()),
+          );
+        } catch (error) {
+          // The re-resolve or its commit failed after the provider ran: the
+          // REAL runs stay recorded (charged, never refunded) and the
+          // bounded engine retry owns the next generation.
+          if (observed !== null) {
+            await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
+          }
+          await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+          logger?.warn('editorial.prepare_draft.entity_catalog_revalidate_failed', {
+            error: error instanceof Error ? error.message : 'unknown',
+          });
+          return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+        }
+        if (commit.catalogChanged) {
+          // STILL invalidated after one honest re-resolve: the catalog is
+          // mutating under this attempt. Zero effects landed twice — the
+          // real provider runs stay recorded (charged, never refunded) and
+          // the bounded engine retry re-runs the NEXT generation against a
+          // settled catalog. No third in-handler attempt, no fabricated
+          // report, no forced invalid link.
+          if (observed !== null) {
+            await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
+          }
+          await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+          logger?.warn('editorial.prepare_draft.entity_catalog_changed_twice');
+          return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+        }
+      }
+
+      if (commit.eventRelationBasisChanged) {
+        // R1.17: at least ONE evaluated candidate basis was mutated, deleted,
+        // or version-changed inside the lookup→commit window — the SQL basis
+        // gate zeroed the WHOLE batch (zero stale decision, zero partial
+        // editorial effects, zero orphan runs). The REAL runs (drafting AND
+        // relation adjudication) stay recorded honestly (charged, never
+        // refunded); the bounded engine retry owns the next generation, which
+        // re-decides against the CURRENT bases. No stale verdict is ever
+        // stored; no C1-style no-op link can ride along.
+        if (observed !== null) {
+          await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
+        }
+        await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+        logger?.warn('editorial.prepare_draft.event_relation_basis_changed', {
+          evaluatedBases: relationBases.length,
         });
         return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
       }
-      if (commit.catalogChanged) {
-        // STILL invalidated after one honest re-resolve: the catalog is
-        // mutating under this attempt. Zero effects landed twice — the
-        // real provider runs stay recorded (charged, never refunded) and
-        // the bounded engine retry re-runs the NEXT generation against a
-        // settled catalog. No third in-handler attempt, no fabricated
-        // report, no forced invalid link.
+
+      if (commit.contentTaken) {
+        // The exact-content anchor collided: ANOTHER story already owns this
+        // exact full content (the concurrent-commit race). The WHOLE batch
+        // rolled back — ZERO editorial rows, ZERO processed flip. The REAL
+        // provider run above is recorded honestly (it happened and stays
+        // charged; it is referenced by NO draft — never presented as used in
+        // any final output), then a bounded recoverable retry: the next
+        // generation's lookup sees the winner and takes the verified reuse
+        // path. No overwrite, no second stable result, no fake free lunch.
         if (observed !== null) {
           await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
         }
         await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
-        logger?.warn('editorial.prepare_draft.entity_catalog_changed_twice');
+        logger?.warn('editorial.prepare_draft.content_result_exists');
         return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
       }
-    }
 
-    if (commit.eventRelationBasisChanged) {
-      // R1.17: at least ONE evaluated candidate basis was mutated, deleted,
-      // or version-changed inside the lookup→commit window — the SQL basis
-      // gate zeroed the WHOLE batch (zero stale decision, zero partial
-      // editorial effects, zero orphan runs). The REAL runs (drafting AND
-      // relation adjudication) stay recorded honestly (charged, never
-      // refunded); the bounded engine retry owns the next generation, which
-      // re-decides against the CURRENT bases. No stale verdict is ever
-      // stored; no C1-style no-op link can ride along.
-      if (observed !== null) {
-        await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
+      if (commit.snapshotChanged) {
+        // The source snapshot changed between the read and the atomic
+        // commit (R1.11.1): ZERO editorial rows and ZERO processed flips
+        // landed — the SQL snapshot predicate no-oped the whole batch. A
+        // DISTINCT terminal outcome — never conflated with a lost fence.
+        // The provider call happened and stays charged (no refund); the
+        // real runs are recorded honestly as failed with the editorial code.
+        if (observed !== null) {
+          await recordRealAiRun(
+            executor,
+            jobId,
+            generation,
+            { ...observed, status: 'failed', errorCode: 'editorial_snapshot_changed' },
+            inputHash,
+            nowMs(),
+          );
+        }
+        await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+        logger?.warn('editorial.prepare_draft.source_snapshot_changed');
+        return { kind: 'permanent', reasonCode: 'editorial_snapshot_changed' };
       }
-      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
-      logger?.warn('editorial.prepare_draft.event_relation_basis_changed', {
-        evaluatedBases: relationBases.length,
+
+      if (commit.fenceLost) {
+        // Zero fenced effects landed — a newer generation owns the work.
+        // The engine's own fenced terminal write will also fail; report a
+        // recoverable retry and never touch the newer generation's state.
+        await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+        logger?.warn('editorial.prepare_draft.ownership_fence_lost');
+        return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+      }
+
+      logger?.info('editorial.prepare_draft.committed', {
+        storyInserted: commit.storyInserted,
+        draftId,
+        sourceItemProcessed: commit.sourceItemProcessed,
+        fingerprintsInserted: commit.fingerprintsInserted,
+        entityMentionsInserted: commit.entityMentionsInserted,
+        eventRelationRunsInserted: commit.eventRelationRunsInserted,
       });
-      return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
-    }
-
-    if (commit.contentTaken) {
-      // The exact-content anchor collided: ANOTHER story already owns this
-      // exact full content (the concurrent-commit race). The WHOLE batch
-      // rolled back — ZERO editorial rows, ZERO processed flip. The REAL
-      // provider run above is recorded honestly (it happened and stays
-      // charged; it is referenced by NO draft — never presented as used in
-      // any final output), then a bounded recoverable retry: the next
-      // generation's lookup sees the winner and takes the verified reuse
-      // path. No overwrite, no second stable result, no fake free lunch.
+      // R1.16.1 (C1) invariant tripwire: with the whole-result catalog gate a
+      // committed result ALWAYS inserts exactly the distinct entities the
+      // report claims (multi-alias mentions of one entity dedup through the
+      // statement's own PK guard). A mismatch would mean the persisted report
+      // and the durable story_entities rows diverged — never ignore it,
+      // never weaken the report, never fake a link.
+      const distinctMentionedEntities = new Set(
+        entityMentionResolution.resolved.map((pair) => pair.entityId),
+      ).size;
+      if (commit.entityMentionsInserted !== distinctMentionedEntities) {
+        logger?.warn('editorial.prepare_draft.entity_mention_link_count_mismatch', {
+          resolvedPairs: entityMentionResolution.resolved.length,
+          distinctEntities: distinctMentionedEntities,
+          inserted: commit.entityMentionsInserted,
+        });
+      }
+      return { kind: 'success' };
+    } catch (error) {
+      // R1.17.2 (A2 — ORIGINAL): the attempt-scoped cleanup — the REAL
+      // invocations of THIS attempt are recorded BEFORE the retry is
+      // scheduled: the relation runs (record-time observations ∪ the
+      // outcome-mapped rows — deterministic ids, the own-row guard
+      // dedups) and the draft run when one was observed (an exception
+      // BEFORE the provider call observes nothing — zero fictional
+      // rows). The two audit types are recorded INDEPENDENTLY; the
+      // original error then propagates unchanged (the engine's typed
+      // handling owns the outcome; the charge stays, never refunded; a
+      // persistent store outage can still defeat this best-effort
+      // record — an honest limitation, never an exactly-once claim).
+      logger?.warn('editorial.prepare_draft.post_provider_failure', {
+        error: error instanceof Error ? error.message : 'unknown',
+      });
       if (observed !== null) {
         await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
       }
-      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
-      logger?.warn('editorial.prepare_draft.content_result_exists');
-      return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
-    }
-
-    if (commit.snapshotChanged) {
-      // The source snapshot changed between the read and the atomic
-      // commit (R1.11.1): ZERO editorial rows and ZERO processed flips
-      // landed — the SQL snapshot predicate no-oped the whole batch. A
-      // DISTINCT terminal outcome — never conflated with a lost fence.
-      // The provider call happened and stays charged (no refund); the
-      // real runs are recorded honestly as failed with the editorial code.
-      if (observed !== null) {
-        await recordRealAiRun(
-          executor,
+      await recordRealRelationRuns(
+        executor,
+        jobId,
+        generation,
+        await unionRealRelationRunRows(
+          relationRunRows,
+          relationAttemptObservations,
           jobId,
           generation,
-          { ...observed, status: 'failed', errorCode: 'editorial_snapshot_changed' },
-          inputHash,
+          relationStepStartedAtMs,
           nowMs(),
-        );
-      }
-      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
-      logger?.warn('editorial.prepare_draft.source_snapshot_changed');
-      return { kind: 'permanent', reasonCode: 'editorial_snapshot_changed' };
+        ),
+        nowMs(),
+      );
+      throw error;
     }
-
-    if (commit.fenceLost) {
-      // Zero fenced effects landed — a newer generation owns the work.
-      // The engine's own fenced terminal write will also fail; report a
-      // recoverable retry and never touch the newer generation's state.
-      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
-      logger?.warn('editorial.prepare_draft.ownership_fence_lost');
-      return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
-    }
-
-    logger?.info('editorial.prepare_draft.committed', {
-      storyInserted: commit.storyInserted,
-      draftId,
-      sourceItemProcessed: commit.sourceItemProcessed,
-      fingerprintsInserted: commit.fingerprintsInserted,
-      entityMentionsInserted: commit.entityMentionsInserted,
-      eventRelationRunsInserted: commit.eventRelationRunsInserted,
-    });
-    // R1.16.1 (C1) invariant tripwire: with the whole-result catalog gate a
-    // committed result ALWAYS inserts exactly the distinct entities the
-    // report claims (multi-alias mentions of one entity dedup through the
-    // statement's own PK guard). A mismatch would mean the persisted report
-    // and the durable story_entities rows diverged — never ignore it,
-    // never weaken the report, never fake a link.
-    const distinctMentionedEntities = new Set(
-      entityMentionResolution.resolved.map((pair) => pair.entityId),
-    ).size;
-    if (commit.entityMentionsInserted !== distinctMentionedEntities) {
-      logger?.warn('editorial.prepare_draft.entity_mention_link_count_mismatch', {
-        resolvedPairs: entityMentionResolution.resolved.length,
-        distinctEntities: distinctMentionedEntities,
-        inserted: commit.entityMentionsInserted,
-      });
-    }
-    return { kind: 'success' };
   }
 
   return { type: 'editorial.prepare_draft', execute };

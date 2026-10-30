@@ -88,6 +88,13 @@ function insufficient(input: RelationScriptInput): string {
 
 interface Harness {
   readonly engine: JobsEngine;
+  // R1.17.2 (ORIGINAL A2): a ONE-SHOT drafting throw injected by the
+  // handler-level service wrapper — BEFORE the drafting provider call,
+  // AFTER the relation step has really run.
+  throwNextDraft: () => void;
+  // R1.17.2 (ORIGINAL D2): counts `FROM source_items WHERE id` first-reads
+  // STARTED after a returned basis read consumed the step deadline.
+  readonly lateReferenceReads: number;
   setBasisReadDelay: (ms: number) => void;
   setEntityProbeDelay: (ms: number) => void;
   firePendingDeadlines: () => number;
@@ -149,6 +156,12 @@ function createHarness(input?: {
   };
   const rawExecutor = createDbExecutor(env.DB, { clock });
 
+  // R1.17.2 (ORIGINAL A2/D2) harness extensions — the exact Posidon
+  // counterexample surfaces, armed only by their own regressions.
+  let throwDraft = false;
+  let basisReturnedExpired = false;
+  let lateReferenceReads = 0;
+
   let basisReadDelay = 0;
   let entityProbeDelay = 0;
   let hangBudgetAuth = false;
@@ -195,6 +208,12 @@ function createHarness(input?: {
       return result;
     },
     first: async <T>(statement: Parameters<DbExecutor['first']>[0]) => {
+      // R1.17.2 (ORIGINAL D2): a `source_items` read STARTED after a
+      // returned basis read consumed the deadline is counted — the
+      // permanent counterexample counts initiated queries, not outcomes.
+      if (basisReturnedExpired && statement.sql.includes('FROM source_items WHERE id')) {
+        lateReferenceReads += 1;
+      }
       // R1.17.2 (D2): a PENDING basis read — the read never settles; the
       // step deadline must free the CALLER (the bounded race), and a late
       // rejection must be absorbed — never an unhandled rejection.
@@ -209,6 +228,7 @@ function createHarness(input?: {
       // change — only elapsed step time).
       if (basisReadDelay > 0 && statement.sql.includes('FROM drafts WHERE story_id')) {
         clock.advance(basisReadDelay);
+        basisReturnedExpired = true;
         basisReadDelay = 0;
       }
       return result;
@@ -336,7 +356,18 @@ function createHarness(input?: {
       handlers: createJobHandlerRegistry([
         createEditorialPrepareDraftHandler({
           executor,
-          aiService,
+          // R1.17.2 (ORIGINAL A2): the handler-level service wrapper the
+          // counterexample throws through — the SAME call site production
+          // uses (never a service-internal logger substitute).
+          aiService: {
+            generateNewsDraft: async (request) => {
+              if (throwDraft) {
+                throwDraft = false;
+                throw new Error('posidon_original_drafting_throw');
+              }
+              return aiService.generateNewsDraft(request);
+            },
+          },
           ...(useManualScheduler ? { deadlineScheduler: manualDeadlineScheduler } : {}),
           eventRelation: {
             // R1.17.1 (G1): the effective gate — global AND feature flag.
@@ -367,6 +398,12 @@ function createHarness(input?: {
   );
   return {
     engine,
+    throwNextDraft: () => {
+      throwDraft = true;
+    },
+    get lateReferenceReads() {
+      return lateReferenceReads;
+    },
     setBasisReadDelay: (ms) => {
       basisReadDelay = ms;
     },
@@ -2003,5 +2040,97 @@ describe('R1.17.2 A2/D2 — record-time audit + bounded pending reads', () => {
     expect(report.lookup).toMatchObject({ probedEntities: [], unprobedEntityCount: 1 });
     expect(report.observation).toBe('no_candidates_observed');
     expect(report.counts.providerAttempts).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1.17.2 — Posidon ORIGINAL counterexamples (permanent regressions).
+// These are the EXACT independent counterexamples of the ORIGINAL A2/D2
+// obligations (the return-for-correction on 46f078e), integrated verbatim:
+//
+// ORIGINAL A2: a drafting THROW at the handler's own generateNewsDraft call
+//     site — AFTER the relation step really invoked the provider, BEFORE the
+//     drafting provider call — must still record the REAL relation invocation
+//     durably BEFORE the retry is scheduled (relationCalls=1 ⇒ durable
+//     ai_runs delta=1), with ZERO fictional draft-run rows (the throw
+//     observes no draft run — none is invented) and the charge untouched.
+//     The service-logger-throw regression above closes an ADDITIONAL hole;
+//     it never substitutes for this one.
+// ORIGINAL D2: a returned (non-pending) basis read consuming the step
+//     deadline must not START any new reference-row read afterwards — the
+//     permanent counterexample COUNTS initiated `source_items` queries after
+//     expiry (lateReferenceReads=0), never merely providerCalls=0.
+// ---------------------------------------------------------------------------
+describe('Posidon R1172 ORIGINAL contract verification', () => {
+  beforeEach(async () => {
+    const executor = createDbExecutor(env.DB);
+    await executor.run({
+      sql: "DELETE FROM jobs WHERE status IN ('pending','queued','retry_wait')",
+      params: [],
+    });
+  });
+  async function base(prefix: string) {
+    const h = createHarness();
+    await seedSource(h.executor, `src-${prefix}`, 'Posidon source');
+    await seedEntity(h.executor, { id: `ent-${prefix}`, slug: prefix, name: `Probe ${prefix}` });
+    await seedAlias(h.executor, { entityId: `ent-${prefix}`, alias: `Probe ${prefix}` });
+    await seedItem(h.executor, {
+      id: `${prefix}-a`,
+      sourceId: `src-${prefix}`,
+      title: `Probe ${prefix} first news`,
+      body: 'Original candidate evidence.',
+    });
+    expect(await enqueueAndRun(h, `${prefix}-a`)).toEqual(['ack:job_completed']);
+    await seedItem(h.executor, {
+      id: `${prefix}-b`,
+      sourceId: `src-${prefix}`,
+      title: `Probe ${prefix} second news`,
+      body: 'Different current evidence.',
+    });
+    return h;
+  }
+  it('ORIGINAL A2: drafting throw after real relation invocation preserves its audit', async () => {
+    const h = await base('origa2');
+    const rowsBefore = await relationRunCount(h.executor);
+    const callsBefore = providerRelationCalls(h);
+    const draftCallsBefore = h.providerCalls.draft;
+    h.throwNextDraft();
+    const outcome = await enqueueAndRun(h, 'origa2-b');
+    const calls = providerRelationCalls(h) - callsBefore;
+    const rows = (await relationRunCount(h.executor)) - rowsBefore;
+    // eslint-disable-next-line no-console
+    console.log(
+      'POSIDON_ORIGINAL_A2',
+      JSON.stringify({
+        outcome,
+        relationCalls: calls,
+        durableRows: rows,
+        draftProviderCalls: h.providerCalls.draft - draftCallsBefore,
+      }),
+    );
+    expect(calls).toBe(1);
+    expect(rows).toBe(calls);
+    // Zero fictional draft invocation: the throw happened BEFORE the drafting
+    // provider call, and NO draft ai_run row is fabricated for the attempt.
+    expect(h.providerCalls.draft).toBe(draftCallsBefore);
+  });
+  it('D2: a returned basis read consuming the deadline must not START a new reference read', async () => {
+    const h = await base('origd2');
+    const callsBefore = providerRelationCalls(h);
+    h.setBasisReadDelay(20_000);
+    const start = h.clock.now();
+    const outcome = await enqueueAndRun(h, 'origd2-b');
+    // eslint-disable-next-line no-console
+    console.log(
+      'POSIDON_D2_NEW_READ',
+      JSON.stringify({
+        outcome,
+        elapsedMs: h.clock.now() - start,
+        lateReferenceReads: h.lateReferenceReads,
+        relationCalls: providerRelationCalls(h) - callsBefore,
+      }),
+    );
+    expect(h.lateReferenceReads).toBe(0);
+    expect(providerRelationCalls(h)).toBe(callsBefore);
   });
 });
