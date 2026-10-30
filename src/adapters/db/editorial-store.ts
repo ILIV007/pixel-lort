@@ -341,7 +341,9 @@ export async function findEntityMentionMatches(
  * or physical order (the R1.13.1 lesson), and a full page is the honest
  * overflow probe. A DB error PROPAGATES to the caller — a failed lookup is
  * NEVER reported as a successful empty one. An empty entity list → ZERO
- * SQL (the bounded no-op).
+ * SQL (the bounded no-op). R1.17.1 (D1): a NEW probe never STARTS after
+ * the caller's absolute step deadline (the shortfall is detectable by the
+ * outcome count — never hidden).
  */
 export interface StoryEntityCandidateOutcome {
   readonly entityId: string;
@@ -354,9 +356,24 @@ export async function findStoryCandidatesByEntities(
   entityIds: readonly string[],
   excludeStoryId: string,
   probeLimit: number,
+  options?: {
+    /** R1.17.1 (D1): the step's ABSOLUTE deadline — a NEW probe never
+     * STARTS after expiry (already-completed probes stay; the caller
+     * detects the shortfall by the outcome count). A pending D1 query is
+     * NOT cancellable — expiry frees the CALLER only, never a claimed
+     * real cancellation. */
+    readonly deadlineAtMs?: number;
+    readonly nowMs?: () => number;
+  },
 ): Promise<readonly StoryEntityCandidateOutcome[]> {
   const outcomes: StoryEntityCandidateOutcome[] = [];
   for (const entityId of entityIds) {
+    if (
+      options?.deadlineAtMs !== undefined &&
+      (options.nowMs ?? Date.now)() >= options.deadlineAtMs
+    ) {
+      break; // the step's time budget is spent — no new probe starts
+    }
     const { rows } = await executor.query<{ story_id: string }>({
       sql: `SELECT story_id FROM story_entities
              WHERE entity_id = ? AND story_id <> ?

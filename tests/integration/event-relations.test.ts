@@ -16,6 +16,7 @@ import { createEditorialPrepareDraftHandler } from '../../src/application/editor
 import { createAiDraftService } from '../../src/application/ai/draft-service';
 import { createEventRelationService } from '../../src/application/ai/event-relation-service';
 import type { AiCallOutcome, AiProviderPort } from '../../src/domain/ai/types';
+import type { DeadlineTimeoutScheduler } from '../../src/shared/time/deadline-wait';
 import { normalizeEntityMentionText } from '../../src/domain/editorial/entity-mentions';
 import {
   readEventRelationDecision,
@@ -23,6 +24,8 @@ import {
 } from '../../src/domain/editorial/event-relation-decision';
 import { canonicalizeJson } from '../../src/domain/jobs/payloads';
 import { storyIdForSnapshot } from '../../src/domain/editorial/identity';
+import { resolveJobsEngine } from '../../src/application/jobs/engine-env';
+import type { WorkerEnv } from '../../src/shared/types/env';
 
 /**
  * R1.17 (Phase 5E-1) acceptance suite — REAL workerd D1, REAL pipeline,
@@ -37,6 +40,14 @@ import { storyIdForSnapshot } from '../../src/domain/editorial/identity';
  * boundary (two stories stay independent; no duplicate marker; no
  * status/trust raise). Fixture verdicts prove PLUMBING/contract
  * correctness — never live-model semantic accuracy.
+ *
+ * R1.17.1 (G1/A1/D1): the harness mirrors the CORRECTED production wiring
+ * (the global AI gate rides BOTH the draft service and the relation
+ * service configs AND the handler's relation step), and adds the bounded
+ * delay/manual-deadline extensions the correction regressions need
+ * (setBasisReadDelay / setEntityProbeDelay / firePendingDeadlines /
+ * hangBudgetAuthorization / hangProviderCalls). ZERO real sleeps, ZERO
+ * network.
  */
 
 const NOW = 1_760_000_000_000;
@@ -77,6 +88,13 @@ function insufficient(input: RelationScriptInput): string {
 
 interface Harness {
   readonly engine: JobsEngine;
+  setBasisReadDelay: (ms: number) => void;
+  setEntityProbeDelay: (ms: number) => void;
+  firePendingDeadlines: () => number;
+  pendingDeadlineCount: () => number;
+  hangBudgetAuthorization: () => void;
+  hangProviderCalls: () => void;
+  rejectPendingProviderCalls: (error: unknown) => void;
   readonly executor: DbExecutor;
   readonly rawExecutor: DbExecutor;
   readonly clock: ReturnType<typeof fixedClock>;
@@ -88,12 +106,31 @@ interface Harness {
   setRelationScript: (script: (input: RelationScriptInput) => string) => void;
 }
 
-function createHarness(input?: { readonly relationEnabled?: boolean }): Harness {
+function createHarness(input?: {
+  readonly relationEnabled?: boolean;
+  readonly aiEnabled?: boolean;
+  readonly manualDeadlineScheduler?: boolean;
+}): Harness {
   const relationEnabled = input?.relationEnabled ?? true;
-  const clock = fixedClock(NOW);
+  // R1.17.1: the harness mirrors the corrected production wiring —
+  // the GLOBAL AI gate reaches the draft service, the relation service,
+  // AND the handler's relation step.
+  const aiEnabled = input?.aiEnabled ?? true;
+  // Each harness gets its OWN Tehran budget day: the shared disposable D1
+  // accumulates REAL charges across this file's tests, and the shared
+  // workers-ai daily cap (40) must never deny a later test's honest
+  // fixtures — a test's charge isolation comes from its own day bucket,
+  // never from a raised cap and never from another test's leftovers.
+  const harnessDayOffsetMs = (harnessJobIdCounter += 1) * 86_400_000;
+  const clock = fixedClock(NOW + harnessDayOffsetMs);
   const logger = createLogger({ level: 'error', clock });
   const rawExecutor = createDbExecutor(env.DB, { clock });
 
+  let basisReadDelay = 0;
+  let entityProbeDelay = 0;
+  let hangBudgetAuth = false;
+  let hangProvider = false;
+  const pendingProviderRejects: ((error: unknown) => void)[] = [];
   const providerCalls = { draft: 0, relation: 0 };
   const failBatchesHook: {
     fn: ((statements: readonly { sql: string }[]) => Promise<void>) | null;
@@ -114,11 +151,48 @@ function createHarness(input?: { readonly relationEnabled?: boolean }): Harness 
         await afterAliasHook.fn?.();
         afterAliasHook.fn = null;
       }
+      // R1.17.1 (D1): a slow ENTITY PROBE read — the clock advances when
+      // the first probe result returns (the read itself is instant; the
+      // FAKE clock models the elapsed step time).
+      if (entityProbeDelay > 0 && statement.sql.includes('FROM story_entities')) {
+        clock.advance(entityProbeDelay);
+        entityProbeDelay = 0;
+      }
       return result;
     },
-    first: rawExecutor.first.bind(rawExecutor),
-    run: rawExecutor.run.bind(rawExecutor),
+    first: async <T>(statement: Parameters<DbExecutor['first']>[0]) => {
+      const result = await rawExecutor.first<T>(statement);
+      // R1.17.1 (D1): a slow BASIS read — the clock advances when the
+      // first real candidate-draft read returns (no DB change, no output
+      // change — only elapsed step time).
+      if (basisReadDelay > 0 && statement.sql.includes('FROM drafts WHERE story_id')) {
+        clock.advance(basisReadDelay);
+        basisReadDelay = 0;
+      }
+      return result;
+    },
+    run: async (statement: Parameters<DbExecutor['run']>[0]) => {
+      // R1.17.1 (D1): a PENDING budget write through the run path (the
+      // authorize batch is covered in the batch hook above) — ONE-SHOT.
+      if (hangBudgetAuth && statement.sql.includes('INTO budgets')) {
+        hangBudgetAuth = false;
+        return new Promise<never>(() => undefined); // never settles
+      }
+      return rawExecutor.run(statement);
+    },
     batch: async (statements) => {
+      // R1.17.1 (D1): a PENDING budget authorization — ONE-SHOT (the
+      // relation task's authorization is the FIRST 'ai' budget write of
+      // the step; the later drafting authorization proceeds normally).
+      // The durable charge never completes; the manual deadline frees the
+      // caller (the bounded race — never a claimed real cancellation).
+      if (
+        hangBudgetAuth &&
+        statements.some((statement) => statement.sql.includes('INTO budgets'))
+      ) {
+        hangBudgetAuth = false;
+        return new Promise<never>(() => undefined); // never settles
+      }
       await failBatchesHook.fn?.(statements);
       await batchMutationHook.fn?.();
       batchMutationHook.fn = null;
@@ -133,6 +207,14 @@ function createHarness(input?: { readonly relationEnabled?: boolean }): Harness 
       if (userContent?.includes('شناسهٔ جفت (pairId):')) {
         // The event_relation task prompt — scripted fixture output.
         providerCalls.relation += 1;
+        // R1.17.1 (D1): a NONCOOPERATIVE provider — the call never
+        // settles on its own; the manual deadline frees the caller and a
+        // LATE rejection (if armed) is absorbed by the deadline primitive.
+        if (hangProvider) {
+          return new Promise<never>((_resolve, reject) => {
+            pendingProviderRejects.push(reject);
+          });
+        }
         const pairId = /شناسهٔ جفت \(pairId\): (erp-\d+)/.exec(userContent)?.[1] ?? 'erp-unknown';
         const sideAEvidenceId =
           /طرف A — شناسهٔ شواهد: ([^\n]+)/.exec(userContent)?.[1] ?? 'unknown-a';
@@ -160,13 +242,26 @@ function createHarness(input?: { readonly relationEnabled?: boolean }): Harness 
     },
   };
 
+  // R1.17.1 (D1): the injected manual deadline scheduler — deterministic
+  // deadline firing (the test calls firePendingDeadlines()); NO real
+  // sleeps anywhere.
+  const pendingDeadlineCallbacks: (() => void)[] = [];
+  const manualDeadlineScheduler: DeadlineTimeoutScheduler = (callback) => {
+    pendingDeadlineCallbacks.push(callback);
+    return () => {
+      const index = pendingDeadlineCallbacks.indexOf(callback);
+      if (index >= 0) pendingDeadlineCallbacks.splice(index, 1);
+    };
+  };
+  const useManualScheduler = input?.manualDeadlineScheduler === true;
+
   const aiService = createAiDraftService({
     executor,
     ports: { 'workers-ai': port },
     clock,
     logger,
     config: {
-      aiEnabled: true,
+      aiEnabled,
       geminiEnabled: false,
       workersAiBindingPresent: true,
       geminiApiKeyPresent: false,
@@ -177,8 +272,10 @@ function createHarness(input?: { readonly relationEnabled?: boolean }): Harness 
     ports: { 'workers-ai': port },
     clock,
     logger,
+    ...(useManualScheduler ? { deadlineScheduler: manualDeadlineScheduler } : {}),
     config: {
       eventRelationEnabled: relationEnabled,
+      aiEnabled,
       workersAiBindingPresent: true,
       geminiApiKeyPresent: false,
     },
@@ -199,7 +296,8 @@ function createHarness(input?: { readonly relationEnabled?: boolean }): Harness 
           executor,
           aiService,
           eventRelation: {
-            enabled: relationEnabled,
+            // R1.17.1 (G1): the effective gate — global AND feature flag.
+            enabled: relationEnabled && aiEnabled,
             service: eventRelationService,
           },
           nowMs: () => clock.now(),
@@ -226,6 +324,30 @@ function createHarness(input?: { readonly relationEnabled?: boolean }): Harness 
   );
   return {
     engine,
+    setBasisReadDelay: (ms) => {
+      basisReadDelay = ms;
+    },
+    setEntityProbeDelay: (ms) => {
+      entityProbeDelay = ms;
+    },
+    firePendingDeadlines: () => {
+      const callbacks = [...pendingDeadlineCallbacks];
+      pendingDeadlineCallbacks.length = 0;
+      for (const callback of callbacks) callback();
+      return callbacks.length;
+    },
+    pendingDeadlineCount: () => pendingDeadlineCallbacks.length,
+    hangBudgetAuthorization: () => {
+      hangBudgetAuth = true;
+    },
+    hangProviderCalls: () => {
+      hangProvider = true;
+    },
+    rejectPendingProviderCalls: (error) => {
+      const rejects = [...pendingProviderRejects];
+      pendingProviderRejects.length = 0;
+      for (const reject of rejects) reject(error);
+    },
     executor,
     rawExecutor,
     clock,
@@ -909,6 +1031,556 @@ describe('R1.17 — shared-entity candidate → evaluation → durable decision 
       }
     }
   });
+
+  it('R1.17.1 A1: a first-commit throw durably records EVERY real relation invocation BEFORE the retry (multi-pair, no collision, no misattribution)', async () => {
+    // TWO committed candidates sharing the entity ⇒ the failing item gets
+    // the FULL multi-pair bundle (erp-1 + erp-2) — one REAL row per
+    // invocation, ladder included.
+    const harness = createHarness();
+    await seedSource(harness.executor, 'src-a1', 'Source A1');
+    await seedEntity(harness.executor, { id: 'ent-a1', slug: 'a1-entity', name: 'A1 Entity' });
+    await seedAlias(harness.executor, { entityId: 'ent-a1', alias: 'A1 Entity' });
+    for (const index of [1, 2]) {
+      await seedItem(harness.executor, {
+        id: `item-a1-c${index}`,
+        sourceId: 'src-a1',
+        title: `A1 Entity candidate coverage ${index}`,
+        body: `Candidate body ${index} about A1 Entity.`,
+      });
+      expect(await enqueueAndRun(harness, `item-a1-c${index}`)).toEqual(['ack:job_completed']);
+    }
+
+    // Fail ONLY the first commit batch of the NEXT item — after BOTH
+    // providers ran (drafting AND the 2-pair relation adjudication).
+    let failedOnce = false;
+    harness.failBatchesMatching((statements) => {
+      if (
+        !failedOnce &&
+        statements.some((statement) => statement.sql.includes('INSERT INTO story_fingerprints'))
+      ) {
+        failedOnce = true;
+        return true;
+      }
+      return false;
+    });
+    const hashFail = await seedItem(harness.executor, {
+      id: 'item-a1-fail',
+      sourceId: 'src-a1',
+      title: 'A1 Entity racing report in Persian',
+      body: 'گزارش رقیب A1 Entity با متن کاملاً متفاوت.',
+    });
+    const runsBeforeGen1 = await relationRunCount(harness.executor);
+    const budgetsBeforeGen1 = await budgetAiRequests(harness.executor);
+    const relationCallsBeforeGen1 = providerRelationCalls(harness);
+    const runIdsBeforeGen1 = new Set(
+      (
+        await harness.executor.query<{ id: string }>({
+          sql: `SELECT id FROM ai_runs WHERE task = 'event_relation'`,
+          params: [],
+        })
+      ).rows.map((row) => row.id),
+    );
+    expect(await enqueueAndRun(harness, 'item-a1-fail')).toEqual(['ack:retry_scheduled']);
+    expect(await processedStatus(harness.executor, 'item-a1-fail')).toBe('new');
+
+    // BEFORE the retry: this generation's REAL invocations are compared —
+    // provider attempts == charged attempts == durable rows. The atomic
+    // batch left zero editorial state, but the audit no longer loses the
+    // relation invocations (the pre-R1.17.1 handler lost them entirely:
+    // providerCalls=1 with durable delta=0).
+    const providerAttemptsGen1 = providerRelationCalls(harness) - relationCallsBeforeGen1;
+    expect(providerAttemptsGen1).toBe(2);
+    const budgetsAfterGen1 = await budgetAiRequests(harness.executor);
+    expect((budgetsAfterGen1 ?? 0) - (budgetsBeforeGen1 ?? 0)).toBe(3); // 1 draft + 2 relation — charged, never refunded
+    const runRowsGen1 = (await relationRunCount(harness.executor)) - runsBeforeGen1;
+    expect(runRowsGen1).toBe(2); // one REAL row per invocation
+    const gen1RunIds = (
+      await harness.executor.query<{ id: string }>({
+        sql: `SELECT id FROM ai_runs WHERE task = 'event_relation' ORDER BY id ASC`,
+        params: [],
+      })
+    ).rows
+      .map((row) => row.id)
+      .filter((runId) => !runIdsBeforeGen1.has(runId));
+    expect(gen1RunIds.length).toBe(runRowsGen1);
+    for (const runId of gen1RunIds) {
+      expect(runId).toMatch(/^edai_[0-9a-f]{32}$/);
+      const run = await harness.executor.first<{ status: string; task: string }>({
+        sql: `SELECT status, task FROM ai_runs WHERE id = ?`,
+        params: [runId],
+      });
+      // The provider DID succeed — the run is honestly 'succeeded' and
+      // referenced by NO draft (a used-by-nobody run is never presented
+      // as consumed by the next generation's draft).
+      expect(run?.status).toBe('succeeded');
+      expect(run?.task).toBe('event_relation');
+    }
+
+    // The bounded engine retry owns the NEXT generation: its own provider
+    // invocations happen again (the lost generation's runs are NOT its
+    // substitute — no fabricated free lunch) and get their OWN rows.
+    harness.clock.advance(10_000);
+    await runPipeline(harness);
+    expect(await processedStatus(harness.executor, 'item-a1-fail')).toBe('processed');
+    expect(providerRelationCalls(harness)).toBe(relationCallsBeforeGen1 + providerAttemptsGen1 + 2);
+    expect(await relationRunCount(harness.executor)).toBe(runsBeforeGen1 + 4);
+
+    // The winning generation's ledger references ONLY its own durable
+    // runs — no collision with generation 1's deterministic ids, no
+    // misattribution of the orphaned-but-real generation-1 rows.
+    const storyFail = await storyIdForSnapshot('item-a1-fail', hashFail);
+    const document = await readDraftDocument(harness.executor, storyFail);
+    const report = eventRelationOf(document!);
+    const winningRunIds: string[] = [];
+    for (const pair of report.pairs) {
+      for (const runId of pair.aiRunIds) {
+        winningRunIds.push(runId);
+        expect(gen1RunIds).not.toContain(runId);
+        const run = await harness.executor.first<{ id: string }>({
+          sql: `SELECT id FROM ai_runs WHERE id = ?`,
+          params: [runId],
+        });
+        expect(run?.id).toBe(runId);
+      }
+    }
+    expect(winningRunIds.length).toBe(2);
+    // Generation 1's rows still exist — never replaced, never deleted.
+    for (const runId of gen1RunIds) {
+      const run = await harness.executor.first<{ id: string }>({
+        sql: `SELECT id FROM ai_runs WHERE id = ?`,
+        params: [runId],
+      });
+      expect(run?.id).toBe(runId);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1.17.1 (G1) — the global AI kill switch gates the relation task.
+// ---------------------------------------------------------------------------
+
+describe('R1.17.1 G1 — the global AI kill switch gates the relation task', () => {
+  beforeEach(async () => {
+    // The wiring engines run on the SYSTEM clock while the harness engines
+    // run on the suite's FAKE clock — stale pending/retry jobs from other
+    // tests would be re-dispatched here (cross-clock contamination). The
+    // wiring probes own their seeded rows; stale non-terminal jobs are
+    // removed before each wiring case (never touching terminal history).
+    await createDbExecutor(env.DB).run({
+      sql: "DELETE FROM jobs WHERE status IN ('pending', 'queued', 'retry_wait')",
+      params: [],
+    });
+  });
+
+  it('global AI OFF × relation ON ⇒ ZERO relation provider calls, ZERO budget writes, ZERO runs (harness wiring)', async () => {
+    // The committed base candidate (its harness had the global gate ON).
+    const base = createHarness();
+    await seedSource(base.executor, 'src-g1', 'Source G1');
+    await seedEntity(base.executor, { id: 'ent-g1', slug: 'g1-entity', name: 'G1 Entity' });
+    await seedAlias(base.executor, { entityId: 'ent-g1', alias: 'G1 Entity' });
+    await seedItem(base.executor, {
+      id: 'item-g1-base',
+      sourceId: 'src-g1',
+      title: 'G1 base coverage',
+      body: 'The committed candidate snapshot.',
+    });
+    expect(await enqueueAndRun(base, 'item-g1-base')).toEqual(['ack:job_completed']);
+
+    // A SECOND harness over the SAME D1 with the GLOBAL AI gate OFF while
+    // the relation feature flag stays ON. The pre-R1.17.1 wiring let the
+    // relation task bypass the global kill switch (provider call + budget
+    // authorization + usage write); the corrected effective gate — global
+    // AND feature flag, both fail-closed — must prevent ALL of it.
+    const gated = createHarness({ aiEnabled: false });
+    const budgetsBefore = await budgetAiRequests(gated.executor);
+    const runsBefore = await relationRunCount(gated.executor);
+    await seedItem(gated.executor, {
+      id: 'item-g1-off',
+      sourceId: 'src-g1',
+      title: 'G1 second coverage in Persian',
+      body: 'خبر دوم با متن متفاوت.',
+    });
+    // The draft service also refuses (same global gate) ⇒ the bounded
+    // typed retry — no fake success, no processed flip.
+    expect(await enqueueAndRun(gated, 'item-g1-off')).toEqual(['ack:retry_scheduled']);
+    expect(gated.providerCalls.relation).toBe(0);
+    expect(gated.providerCalls.draft).toBe(0);
+    expect(await budgetAiRequests(gated.executor)).toBe(budgetsBefore);
+    expect(await relationRunCount(gated.executor)).toBe(runsBefore);
+    expect(await processedStatus(gated.executor, 'item-g1-off')).toBe('new');
+  });
+
+  it('global AI OFF × relation ON ⇒ the production wiring itself never reaches the provider or the budget (real engine-env resolution, native-binding stub)', async () => {
+    // The base candidate through the REAL resolved wiring (global ON).
+    const stubOn = createWiringStub();
+    const baseResolution = resolveWiring({ ai: 'true', relation: 'true', stub: stubOn });
+    expect(baseResolution.kind).toBe('ready');
+    await seedSource(createDbExecutor(env.DB), 'src-g1w', 'Source G1W');
+    await seedEntity(createDbExecutor(env.DB), {
+      id: 'ent-g1w',
+      slug: 'g1w-entity',
+      name: 'G1W Entity',
+    });
+    await seedAlias(createDbExecutor(env.DB), { entityId: 'ent-g1w', alias: 'G1W Entity' });
+    await seedItem(createDbExecutor(env.DB), {
+      id: 'item-g1w-base',
+      sourceId: 'src-g1w',
+      title: 'G1W base coverage',
+      body: 'The committed candidate snapshot.',
+    });
+    expect(
+      await enqueueAndRunResolved(baseResolution.engine, baseResolution.envelopes, 'item-g1w-base'),
+    ).toEqual(['ack:job_completed']);
+    expect(stubOn.calls).toBe(1); // the base news_draft call — nothing else
+
+    // The SAME environment resolved with the GLOBAL gate OFF while the
+    // relation flag stays ON: the production wiring passes the global
+    // gate into BOTH services AND the handler's relation step — the item
+    // with the SAME shared entity produces ZERO provider touches and
+    // ZERO budget writes.
+    const stubOff = createWiringStub();
+    const gatedResolution = resolveWiring({ ai: 'false', relation: 'true', stub: stubOff });
+    expect(gatedResolution.kind).toBe('ready');
+    const budgetsBefore = await budgetAiRequests(createDbExecutor(env.DB));
+    await seedItem(createDbExecutor(env.DB), {
+      id: 'item-g1w-off',
+      sourceId: 'src-g1w',
+      title: 'G1W second coverage in Persian',
+      body: 'خبر دوم با متن متفاوت.',
+    });
+    expect(
+      await enqueueAndRunResolved(
+        gatedResolution.engine,
+        gatedResolution.envelopes,
+        'item-g1w-off',
+      ),
+    ).toEqual(['ack:retry_scheduled']);
+    expect(stubOff.calls).toBe(0);
+    expect(await budgetAiRequests(createDbExecutor(env.DB))).toBe(budgetsBefore);
+    expect(await processedStatus(createDbExecutor(env.DB), 'item-g1w-off')).toBe('new');
+  });
+
+  it('global ON × relation OFF ⇒ the production wiring commits with the honest disabled ledger and zero relation calls', async () => {
+    const stub = createWiringStub();
+    const resolution = resolveWiring({ ai: 'true', relation: 'false', stub });
+    expect(resolution.kind).toBe('ready');
+    await seedSource(createDbExecutor(env.DB), 'src-g1x', 'Source G1X');
+    await seedEntity(createDbExecutor(env.DB), {
+      id: 'ent-g1x',
+      slug: 'g1x-entity',
+      name: 'G1X Entity',
+    });
+    await seedAlias(createDbExecutor(env.DB), { entityId: 'ent-g1x', alias: 'G1X Entity' });
+    await seedItem(createDbExecutor(env.DB), {
+      id: 'item-g1x-base',
+      sourceId: 'src-g1x',
+      title: 'G1X base coverage',
+      body: 'The committed candidate snapshot.',
+    });
+    expect(
+      await enqueueAndRunResolved(resolution.engine, resolution.envelopes, 'item-g1x-base'),
+    ).toEqual(['ack:job_completed']);
+
+    const relationCallsBefore = stub.relationCalls;
+    await seedItem(createDbExecutor(env.DB), {
+      id: 'item-g1x-second',
+      sourceId: 'src-g1x',
+      title: 'G1X second coverage in Persian',
+      body: 'خبر دوم با متن متفاوت.',
+    });
+    expect(
+      await enqueueAndRunResolved(resolution.engine, resolution.envelopes, 'item-g1x-second'),
+    ).toEqual(['ack:job_completed']);
+    expect(stub.relationCalls).toBe(relationCallsBefore);
+    const hashSecond = await sha256Hex(
+      'item-g1x-second\u001fG1X second coverage in Persian\u001fخبر دوم با متن متفاوت.',
+    );
+    const storySecond = await storyIdForSnapshot('item-g1x-second', hashSecond);
+    const document = await readDraftDocument(createDbExecutor(env.DB), storySecond);
+    expect(document).not.toBeNull();
+    expect(eventRelationOf(document!)).toMatchObject({ observation: 'disabled' });
+  });
+
+  it('relation ON with the binding ABSENT ⇒ typed no_free_path deferral, zero calls, zero charges (production wiring)', async () => {
+    const stub = createWiringStub();
+    const resolution = resolveWiring({ ai: 'true', relation: 'true', stub, withBinding: false });
+    expect(resolution.kind).toBe('ready');
+    await seedSource(createDbExecutor(env.DB), 'src-g1y', 'Source G1Y');
+    await seedEntity(createDbExecutor(env.DB), {
+      id: 'ent-g1y',
+      slug: 'g1y-entity',
+      name: 'G1Y Entity',
+    });
+    await seedAlias(createDbExecutor(env.DB), { entityId: 'ent-g1y', alias: 'G1Y Entity' });
+    await seedItem(createDbExecutor(env.DB), {
+      id: 'item-g1y-base',
+      sourceId: 'src-g1y',
+      title: 'G1Y base coverage',
+      body: 'The committed candidate snapshot.',
+    });
+    // The base cannot commit without the binding (typed retry, zero calls,
+    // zero budget rows for THIS item — delta-checked, the bucket may carry
+    // earlier tests' rows in the shared disposable D1).
+    const budgetsBeforeNoBinding = await budgetAiRequests(createDbExecutor(env.DB));
+    expect(
+      await enqueueAndRunResolved(resolution.engine, resolution.envelopes, 'item-g1y-base'),
+    ).toEqual(['ack:retry_scheduled']);
+    expect(stub.calls).toBe(0);
+    expect(await budgetAiRequests(createDbExecutor(env.DB))).toBe(budgetsBeforeNoBinding);
+  });
+
+  it('present-but-invalid flag values fail closed BEFORE the engine is built (config_invalid)', () => {
+    const stub = createWiringStub();
+    const invalidRelation = resolveWiringRaw({
+      ai: 'true',
+      relation: 'maybe',
+      stub,
+    });
+    expect(invalidRelation.kind).toBe('config_invalid');
+    expect(invalidRelation.issues.join('\n')).toContain('EVENT_RELATION_ENABLED');
+    const invalidGlobal = resolveWiringRaw({ ai: 'maybe', relation: 'true', stub });
+    expect(invalidGlobal.kind).toBe('config_invalid');
+    expect(invalidGlobal.issues.join('\n')).toContain('AI_ENABLED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1.17.1 (D1) — the step deadline covers retrieval, basis packaging,
+// budget authorization, the provider call and usage: the ABSOLUTE deadline
+// is set at the FIRST relation work and can only be SHORTENED by the
+// service. Expiry is a TYPED technical state — never a semantic verdict —
+// and NO new provider work starts after it. Deterministic: fake-clock
+// delays and an injected manual deadline scheduler — ZERO real sleeps.
+// ---------------------------------------------------------------------------
+
+describe('R1.17.1 D1 — the step deadline covers retrieval, basis, budget and provider', () => {
+  beforeEach(async () => {
+    await createDbExecutor(env.DB).run({
+      sql: "DELETE FROM jobs WHERE status IN ('pending', 'queued', 'retry_wait')",
+      params: [],
+    });
+  });
+
+  it('a slow ENTITY probe consumes the step budget; no provider window opens; the unread candidate stays typed', async () => {
+    const harness = createHarness();
+    await seedSource(harness.executor, 'src-d1p', 'Source D1P');
+    await seedEntity(harness.executor, { id: 'ent-d1p', slug: 'd1p-entity', name: 'D1P Entity' });
+    await seedAlias(harness.executor, { entityId: 'ent-d1p', alias: 'D1P Entity' });
+    await seedItem(harness.executor, {
+      id: 'item-d1p-base',
+      sourceId: 'src-d1p',
+      title: 'D1P Entity base coverage',
+      body: 'The committed candidate snapshot.',
+    });
+    expect(await enqueueAndRun(harness, 'item-d1p-base')).toEqual(['ack:job_completed']);
+
+    const relationCallsBefore = providerRelationCalls(harness);
+    harness.setEntityProbeDelay(20_000);
+    const start = harness.clock.now();
+    const hashSecond = await seedItem(harness.executor, {
+      id: 'item-d1p-second',
+      sourceId: 'src-d1p',
+      title: 'D1P Entity second coverage in Persian',
+      body: 'متن متفاوت دربارهٔ D1P Entity.',
+    });
+    const outcomes = await enqueueAndRun(harness, 'item-d1p-second');
+    // The 20 s probe delay counts against the 15 s step deadline...
+    expect(harness.clock.now() - start).toBeGreaterThan(15_000);
+    // ...and NO provider window opens afterwards.
+    expect(providerRelationCalls(harness)).toBe(relationCallsBefore);
+    // The draft path is unaffected — the item still commits.
+    expect(outcomes).toEqual(['ack:job_completed']);
+
+    const storySecond = await storyIdForSnapshot('item-d1p-second', hashSecond);
+    const document = await readDraftDocument(harness.executor, storySecond);
+    const report = eventRelationOf(document!);
+    // The candidate was OBSERVED (the probe completed) but its basis was
+    // never read: the typed technical state — never a semantic verdict,
+    // never a fabricated basis claim.
+    expect(report.observation).toBe('no_evaluable_basis');
+    expect(report.candidates[0]).toMatchObject({
+      basisState: 'basis_unavailable',
+      basisUnavailableReason: 'step_deadline_expired',
+    });
+    expect(report.counts.pairsAttempted).toBe(0);
+    expect(report.counts.providerAttempts).toBe(0);
+  });
+
+  it('a slow FIRST basis read consumes the step budget; the bundled pair is typed skipped_deadline with ZERO provider calls', async () => {
+    const harness = createHarness();
+    await seedSource(harness.executor, 'src-d1b', 'Source D1B');
+    await seedEntity(harness.executor, { id: 'ent-d1b', slug: 'd1b-entity', name: 'D1B Entity' });
+    await seedAlias(harness.executor, { entityId: 'ent-d1b', alias: 'D1B Entity' });
+    await seedItem(harness.executor, {
+      id: 'item-d1b-base',
+      sourceId: 'src-d1b',
+      title: 'D1B Entity base coverage',
+      body: 'The committed candidate snapshot.',
+    });
+    expect(await enqueueAndRun(harness, 'item-d1b-base')).toEqual(['ack:job_completed']);
+
+    const relationCallsBefore = providerRelationCalls(harness);
+    harness.setBasisReadDelay(20_000);
+    const start = harness.clock.now();
+    const hashSecond = await seedItem(harness.executor, {
+      id: 'item-d1b-second',
+      sourceId: 'src-d1b',
+      title: 'D1B Entity second coverage in Persian',
+      body: 'متن متفاوت دربارهٔ D1B Entity.',
+    });
+    const outcomes = await enqueueAndRun(harness, 'item-d1b-second');
+    expect(harness.clock.now() - start).toBeGreaterThan(15_000);
+    expect(providerRelationCalls(harness)).toBe(relationCallsBefore);
+    expect(outcomes).toEqual(['ack:job_completed']);
+
+    const storySecond = await storyIdForSnapshot('item-d1b-second', hashSecond);
+    const document = await readDraftDocument(harness.executor, storySecond);
+    const report = eventRelationOf(document!);
+    // The basis read COMPLETED (the bundle was built) but the service saw
+    // the expired absolute deadline: the pair is TYPED skipped_deadline
+    // with zero run rows — the late read can never open a fresh window.
+    expect(report.observation).toBe('evaluation_incomplete');
+    expect(report.pairs[0]).toMatchObject({
+      state: 'skipped_deadline',
+      deferredReason: 'step_deadline',
+      aiRunIds: [],
+    });
+    expect(report.counts.providerAttempts).toBe(0);
+  });
+
+  it('a PENDING budget authorization is freed by the deadline — zero provider calls, zero fabricated charge, typed ledger', async () => {
+    const harness = createHarness({ manualDeadlineScheduler: true });
+    await seedSource(harness.executor, 'src-d1c', 'Source D1C');
+    await seedEntity(harness.executor, { id: 'ent-d1c', slug: 'd1c-entity', name: 'D1C Entity' });
+    await seedAlias(harness.executor, { entityId: 'ent-d1c', alias: 'D1C Entity' });
+    await seedItem(harness.executor, {
+      id: 'item-d1c-base',
+      sourceId: 'src-d1c',
+      title: 'D1C Entity base coverage',
+      body: 'The committed candidate snapshot.',
+    });
+    expect(await enqueueAndRun(harness, 'item-d1c-base')).toEqual(['ack:job_completed']);
+
+    const relationCallsBefore = providerRelationCalls(harness);
+    const budgetsBefore = await budgetAiRequests(harness.executor);
+    const hashSecond = await seedItem(harness.executor, {
+      id: 'item-d1c-second',
+      sourceId: 'src-d1c',
+      title: 'D1C Entity second coverage in Persian',
+      body: 'متن متفاوت دربارهٔ D1C Entity.',
+    });
+    harness.hangBudgetAuthorization(); // ONE-SHOT: the relation task's authorization
+    const pipeline = (async () => {
+      expect(
+        await enqueueEditorialPrepareDraft({
+          engine: harness.engine,
+          executor: harness.rawExecutor,
+          sourceItemId: 'item-d1c-second',
+        }),
+      ).toMatchObject({ kind: 'created' });
+      return runPipeline(harness);
+    })();
+    // The pipeline reaches the hanging authorization; the manual deadline
+    // frees the caller (the bounded race — no real cancellation claimed).
+    for (let i = 0; i < 500 && harness.pendingDeadlineCount() === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(harness.pendingDeadlineCount()).toBeGreaterThan(0);
+    harness.firePendingDeadlines();
+    const outcomes = await pipeline;
+    expect(providerRelationCalls(harness)).toBe(relationCallsBefore);
+    // The hung authorization never completed — NO relation charge was
+    // fabricated. The drafting authorization (its one-shot unblocked)
+    // proceeds normally: the ONLY delta is the draft's own +1.
+    expect(await budgetAiRequests(harness.executor)).toBe((budgetsBefore ?? 0) + 1);
+    expect(outcomes).toEqual(['ack:job_completed']);
+
+    const storySecond = await storyIdForSnapshot('item-d1c-second', hashSecond);
+    const document = await readDraftDocument(harness.executor, storySecond);
+    const report = eventRelationOf(document!);
+    expect(report.pairs[0]).toMatchObject({
+      state: 'skipped_deadline',
+      deferredReason: 'step_deadline',
+      aiRunIds: [],
+    });
+  });
+
+  it('a NONCOOPERATIVE provider times out at the step deadline; the attempt is recorded honestly and a LATE rejection is absorbed', async () => {
+    const harness = createHarness({ manualDeadlineScheduler: true });
+    await seedSource(harness.executor, 'src-d1d', 'Source D1D');
+    await seedEntity(harness.executor, { id: 'ent-d1d', slug: 'd1d-entity', name: 'D1D Entity' });
+    await seedAlias(harness.executor, { entityId: 'ent-d1d', alias: 'D1D Entity' });
+    await seedItem(harness.executor, {
+      id: 'item-d1d-base',
+      sourceId: 'src-d1d',
+      title: 'D1D Entity base coverage',
+      body: 'The committed candidate snapshot.',
+    });
+    expect(await enqueueAndRun(harness, 'item-d1d-base')).toEqual(['ack:job_completed']);
+
+    const relationCallsBefore = providerRelationCalls(harness);
+    const runsBefore = await relationRunCount(harness.executor);
+    const runIdsBefore = new Set(
+      (
+        await harness.executor.query<{ id: string }>({
+          sql: `SELECT id FROM ai_runs WHERE task = 'event_relation'`,
+          params: [],
+        })
+      ).rows.map((row) => row.id),
+    );
+    const hashSecond = await seedItem(harness.executor, {
+      id: 'item-d1d-second',
+      sourceId: 'src-d1d',
+      title: 'D1D Entity second coverage in Persian',
+      body: 'متن متفاوت دربارهٔ D1D Entity.',
+    });
+    harness.hangProviderCalls();
+    const pipeline = (async () => {
+      expect(
+        await enqueueEditorialPrepareDraft({
+          engine: harness.engine,
+          executor: harness.rawExecutor,
+          sourceItemId: 'item-d1d-second',
+        }),
+      ).toMatchObject({ kind: 'created' });
+      return runPipeline(harness);
+    })();
+    for (let i = 0; i < 500 && harness.pendingDeadlineCount() === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(harness.pendingDeadlineCount()).toBeGreaterThan(0);
+    harness.firePendingDeadlines();
+    const outcomes = await pipeline;
+    expect(outcomes).toEqual(['ack:job_completed']); // the draft still commits
+    // The attempt HAPPENED (the provider was reached) and stays charged.
+    const providerAttempts = providerRelationCalls(harness) - relationCallsBefore;
+    expect(providerAttempts).toBe(1);
+
+    const storySecond = await storyIdForSnapshot('item-d1d-second', hashSecond);
+    const document = await readDraftDocument(harness.executor, storySecond);
+    const report = eventRelationOf(document!);
+    expect(report.pairs[0]).toMatchObject({
+      state: 'skipped_deadline',
+      deferredReason: 'step_deadline',
+    });
+    // The REAL invocation is durably recorded — status failed with the
+    // typed deadline code, exactly one row per invocation.
+    expect(report.pairs[0]?.aiRunIds).toHaveLength(1);
+    const attemptRunId = report.pairs[0]!.aiRunIds[0]!;
+    expect(runIdsBefore.has(attemptRunId)).toBe(false);
+    const runRow = await harness.executor.first<{ status: string; error_code: string | null }>({
+      sql: `SELECT status, error_code FROM ai_runs WHERE id = ?`,
+      params: [attemptRunId],
+    });
+    expect(runRow?.status).toBe('failed');
+    expect(runRow?.error_code).toBe('deadline_exceeded');
+    expect(await relationRunCount(harness.executor)).toBe(runsBefore + 1);
+
+    // The LATE rejection (arriving after the deadline freed the caller)
+    // is observed and absorbed — never unhandled, never a state change.
+    harness.rejectPendingProviderCalls(new Error('late_provider_rejection'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 });
 
 /** Relation provider calls observed through the harness port. */
@@ -922,4 +1594,134 @@ async function rawUpdate(
   params: readonly unknown[],
 ): Promise<void> {
   await executor.run({ sql, params });
+}
+
+// ---------------------------------------------------------------------------
+// R1.17.1 (G1) wiring helpers — REAL engine-env resolution over a stubbed
+// native binding. The stub counts calls and returns the SAME accepted
+// draft fixture for news_draft prompts; a live-binding call for ANY other
+// prompt (relation included) fails the test via the forbidden-network
+// throw. ZERO network anywhere.
+// ---------------------------------------------------------------------------
+
+function createWiringStub(): {
+  readonly calls: number;
+  readonly relationCalls: number;
+  binding: unknown;
+} {
+  const state = { calls: 0, relationCalls: 0 };
+  const binding = {
+    run: async (_modelId: string, inputs: { messages: { role: string; content: string }[] }) => {
+      state.calls += 1;
+      const userContent = inputs.messages.find((message) => message.role === 'user')?.content;
+      if (userContent?.includes('شناسهٔ جفت (pairId):')) {
+        state.relationCalls += 1;
+        throw new Error('live relation inference is forbidden in tests');
+      }
+      const evidenceId =
+        /شناسه: ([^\n]+)\n<<<SHAHED_SHOROO>>/.exec(userContent ?? '')?.[1] ?? 'missing-id';
+      return {
+        // A minimal Workers-AI-shaped response (the adapter normalizes it).
+        response: JSON.stringify({
+          headlineFa: 'تیتر آزمایشی خبر',
+          summaryFa: 'خلاصهٔ آزمایشی خبر بر اساس شواهد ارائه‌شده.',
+          claims: [
+            { text: 'استودیوی آزمایشی از عرضهٔ نسخهٔ جدید خبر داد.', evidenceIds: [evidenceId] },
+          ],
+        }),
+        usage: { prompt_tokens: 42, completion_tokens: 17 },
+      };
+    },
+  };
+  // LIVE counters (getters): the closure mutates `state`, and the tests
+  // must observe the mutations, never a return-time snapshot.
+  return {
+    get calls() {
+      return state.calls;
+    },
+    get relationCalls() {
+      return state.relationCalls;
+    },
+    binding,
+  };
+}
+
+interface WiringResolutionReady {
+  engine: ReturnType<typeof createJobsEngine>;
+  envelopes: unknown[];
+}
+
+function resolveWiringRaw(flags: {
+  readonly ai: string;
+  readonly relation: string;
+  readonly stub: { binding: unknown };
+  readonly withBinding?: boolean;
+}): { kind: string; issues: readonly string[]; engine?: unknown } {
+  return resolveJobsEngine({
+    DB: env.DB,
+    JOBS_ENABLED: 'true',
+    SOURCE_INGESTION_ENABLED: 'false',
+    EDITORIAL_ENABLED: 'true',
+    AI_ENABLED: flags.ai,
+    EVENT_RELATION_ENABLED: flags.relation,
+    AI: flags.withBinding === false ? undefined : (flags.stub.binding as never),
+    JOBS: { send: async () => undefined },
+    DLQ: { send: async () => undefined },
+  } as unknown as WorkerEnv) as { kind: string; issues: readonly string[]; engine?: unknown };
+}
+
+function resolveWiring(flags: {
+  readonly ai: string;
+  readonly relation: string;
+  readonly stub: { binding: unknown };
+  readonly withBinding?: boolean;
+}): WiringResolutionReady & { kind: 'ready' } {
+  const envelopes: unknown[] = [];
+  const resolution = resolveJobsEngine({
+    DB: env.DB,
+    JOBS_ENABLED: 'true',
+    SOURCE_INGESTION_ENABLED: 'false',
+    EDITORIAL_ENABLED: 'true',
+    AI_ENABLED: flags.ai,
+    EVENT_RELATION_ENABLED: flags.relation,
+    AI: flags.withBinding === false ? undefined : (flags.stub.binding as never),
+    JOBS: {
+      send: async (envelope: unknown) => {
+        envelopes.push(envelope);
+      },
+    },
+    DLQ: { send: async () => undefined },
+  } as unknown as WorkerEnv);
+  if (resolution.kind !== 'ready') {
+    throw new Error(`fixture wiring resolution: ${resolution.kind}`);
+  }
+  return { kind: 'ready', engine: resolution.engine, envelopes };
+}
+
+/** Dispatch + consume through a RESOLVED production wiring engine. */
+async function enqueueAndRunResolved(
+  engine: WiringResolutionReady['engine'],
+  envelopes: unknown[],
+  sourceItemId: string,
+): Promise<string[]> {
+  const rawExecutor = createDbExecutor(env.DB);
+  expect(
+    await enqueueEditorialPrepareDraft({ engine, executor: rawExecutor, sourceItemId }),
+  ).toMatchObject({ kind: 'created' });
+  await engine.dispatchDueJobs();
+  const outcomes: string[] = [];
+  for (const envelope of envelopes.splice(0)) {
+    const action = await engine.consumeMessage(`msg-${outcomes.length}`, envelope);
+    outcomes.push(`${action.action}:${action.outcome}`);
+  }
+  return outcomes;
+}
+
+/** The shared 'ai' budget bucket's total authorized requests (null if none). */
+async function budgetAiRequests(executor: DbExecutor): Promise<number | null> {
+  const row = await executor.first<{ n: number | null }>({
+    sql: `SELECT SUM(requests) AS n FROM budgets WHERE scope = 'ai'`,
+    params: [],
+  });
+  return row?.n ?? null;
 }

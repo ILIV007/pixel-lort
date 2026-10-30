@@ -626,7 +626,21 @@ describe('scenario 4 — mid-commit failure rolls back and honestly retries', ()
     expect(await rowCount(harness.rawExecutor, 'claims')).toBe(0);
     expect(await rowCount(harness.rawExecutor, 'evidence')).toBe(0);
     expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(0);
-    expect(await rowCount(harness.rawExecutor, 'ai_runs')).toBe(0);
+    // R1.17.1 (A1): the commit-throw no longer ERASES the audit — the ONE
+    // real drafting invocation of this generation is durably recorded
+    // (fenced standalone insert, deterministic id, own-row guard). It is
+    // referenced by NO draft (the batch rolled back) and stays charged;
+    // the next generation's runs are its own rows.
+    expect(await rowCount(harness.rawExecutor, 'ai_runs')).toBe(1);
+    const orphanRun = await harness.rawExecutor.first<{
+      status: string;
+      task: string;
+    }>({
+      sql: `SELECT status, task FROM ai_runs`,
+      params: [],
+    });
+    expect(orphanRun?.status).toBe('succeeded');
+    expect(orphanRun?.task).toBe('news_draft');
     const item = await harness.rawExecutor.first<{ processing_status: string }>({
       sql: 'SELECT processing_status FROM source_items WHERE id = ?',
       params: ['item-4'],
@@ -643,10 +657,21 @@ describe('scenario 4 — mid-commit failure rolls back and honestly retries', ()
     const second = await runPipeline(harness);
     expect(second).toEqual(['ack:job_completed']);
     expect(harness.providerCalls).toHaveLength(2);
+    // Two generations, two honest run rows — the retry never reuses or
+    // replaces the first generation's recorded invocation.
+    expect(await rowCount(harness.rawExecutor, 'ai_runs')).toBe(2);
     expect(await readAiBudget(harness.rawExecutor, { provider: 'workers-ai', nowMs: NOW })).toBe(2);
     expect(await rowCount(harness.rawExecutor, 'stories')).toBe(1);
     expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(1);
-    expect(await rowCount(harness.rawExecutor, 'ai_runs')).toBe(1); // only gen-2's row
+    // R1.17.1 (A1): BOTH generations' real invocations remain — gen-1's
+    // orphaned-but-real row (referenced by NO draft) and gen-2's row that
+    // the committed draft references. No collision, no replacement.
+    expect(await rowCount(harness.rawExecutor, 'ai_runs')).toBe(2);
+    const draftRun = await harness.rawExecutor.first<{ task: string }>({
+      sql: `SELECT r.task FROM drafts d JOIN ai_runs r ON r.id = d.ai_run_id`,
+      params: [],
+    });
+    expect(draftRun?.task).toBe('news_draft');
     const processed = await harness.rawExecutor.first<{ processing_status: string }>({
       sql: 'SELECT processing_status FROM source_items WHERE id = ?',
       params: ['item-4'],

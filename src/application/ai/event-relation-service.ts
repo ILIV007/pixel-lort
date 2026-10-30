@@ -25,6 +25,17 @@
  * ZERO calls, ZERO budget writes, ZERO binding access. No new daily cap,
  * eligibility, or allowlist entry is introduced by this task.
  *
+ * R1.17.1 (G1): the flag's independence is NOT a license to bypass the
+ * GLOBAL kill switch. The effective gate is `AI_ENABLED AND
+ * EVENT_RELATION_ENABLED` — BOTH fail-closed, checked as the FIRST
+ * decision, and enforced in TWO layers: the production wiring passes the
+ * global gate into this service's config, AND this service refuses
+ * directly on `aiEnabled === false` even if a caller wires it wrong.
+ * With the global gate OFF: ZERO relation provider calls, ZERO budget
+ * authorizations, ZERO usage writes — the typed deferred `ai_disabled`.
+ * A caller-supplied ABSOLUTE step deadline (also R1.17.1/D1) can only
+ * SHORTEN the local 15 s cap — the service never resets or extends it.
+ *
  * Logging is sanitized by construction: stable event names, provider/model
  * ids, outcome kinds, attempt counts — never side text, never raw model
  * output, never reasons/conflicts (they travel only inside the ledger).
@@ -86,10 +97,24 @@ const relationRequestSchema = z
 export interface EventRelationServiceConfig {
   /** Validated EVENT_RELATION_ENABLED flag (parseAiConfig). */
   readonly eventRelationEnabled: boolean;
+  /** R1.17.1 (G1): the validated GLOBAL AI_ENABLED gate (parseAiConfig).
+   * The effective relation gate is this AND `eventRelationEnabled` — both
+   * fail-closed; the independent feature flag never bypasses the global
+   * inference kill switch. */
+  readonly aiEnabled: boolean;
   /** Whether the native Workers AI binding is present in the runtime. */
   readonly workersAiBindingPresent: boolean;
   /** Whether a Gemini API key is configured (presence only). */
   readonly geminiApiKeyPresent: boolean;
+}
+
+/** R1.17.1 (D1): optional caller-supplied ABSOLUTE step deadline (epoch
+ * ms), set at the START of the first relation work (retrieval/basis
+ * packaging included). Trusted internal context — never a model-settable
+ * field. It can only SHORTEN the service's own local 15 s cap; the
+ * service never resets or extends it. */
+export interface EventRelationEvaluationOptions {
+  readonly deadlineAtMs?: number;
 }
 
 export interface EventRelationServiceDeps {
@@ -105,7 +130,10 @@ export interface EventRelationServiceDeps {
 }
 
 export interface EventRelationService {
-  evaluateEventRelations(request: unknown): Promise<EventRelationOutcome>;
+  evaluateEventRelations(
+    request: unknown,
+    options?: EventRelationEvaluationOptions,
+  ): Promise<EventRelationOutcome>;
 }
 
 interface Candidate {
@@ -122,9 +150,16 @@ export function createEventRelationService(deps: EventRelationServiceDeps): Even
   const encoder = new TextEncoder();
   const systemPrompt = buildEventRelationSystemPrompt();
 
-  async function evaluateEventRelations(request: unknown): Promise<EventRelationOutcome> {
-    // ---- Gate 1: the independent task flag is the FIRST decision.
-    if (!deps.config.eventRelationEnabled) {
+  async function evaluateEventRelations(
+    request: unknown,
+    options?: EventRelationEvaluationOptions,
+  ): Promise<EventRelationOutcome> {
+    // ---- Gate 1: the EFFECTIVE gate is the first decision (R1.17.1/G1):
+    //      the global AI kill switch AND the independent task flag — both
+    //      fail-closed. Layered defense: even a wrongly-wired caller that
+    //      enables only the feature flag can never reach the provider,
+    //      budget authority, or the binding through this service.
+    if (!deps.config.aiEnabled || !deps.config.eventRelationEnabled) {
       return { kind: 'deferred', reason: 'ai_disabled' };
     }
     // ---- Gate 2: bounded request validation (fail closed, zero side effects).
@@ -166,7 +201,17 @@ export function createEventRelationService(deps: EventRelationServiceDeps): Even
     }
 
     const startedAt = deps.clock.now();
-    const deadlineAtMs = startedAt + EVENT_RELATION_BOUNDS.stepWallDeadlineMs;
+    const localDeadlineAtMs = startedAt + EVENT_RELATION_BOUNDS.stepWallDeadlineMs;
+    // R1.17.1 (D1): a caller-supplied absolute deadline (set at the start
+    // of the FIRST relation work — retrieval and basis packaging included)
+    // can only SHORTEN the local cap. A non-finite supplied value is
+    // treated as absent (the local cap still bounds the step — fail
+    // closed), and the service NEVER resets or extends the deadline.
+    const suppliedDeadlineAtMs = options?.deadlineAtMs;
+    const deadlineAtMs =
+      suppliedDeadlineAtMs !== undefined && Number.isFinite(suppliedDeadlineAtMs)
+        ? Math.min(suppliedDeadlineAtMs, localDeadlineAtMs)
+        : localDeadlineAtMs;
     const skippedProviders = new Set<AiProvider>();
     let providerAttemptsUsed = 0;
     const pairOutcomes: EventRelationPairOutcome[] = [];

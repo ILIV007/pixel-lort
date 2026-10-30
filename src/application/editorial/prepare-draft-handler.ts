@@ -200,6 +200,7 @@ import {
   EVENT_RELATION_MAX_PAIR_EVALUATIONS,
   EVENT_RELATION_MAX_ROWS_PER_PROBE,
 } from '../../domain/editorial/event-relation-candidates';
+import { EVENT_RELATION_BOUNDS } from '../../domain/ai/event-relation-policy';
 import {
   buildEventRelationPairBundle,
   type EventRelationPairBundle,
@@ -887,7 +888,17 @@ export function createEditorialPrepareDraftHandler(
       logger?.debug('editorial.prepare_draft.event_relation_disabled');
     } else {
       try {
-        // (a) ≤3 shared-entity probes over the resolved entities.
+        // R1.17.1 (D1): the step's ABSOLUTE deadline is set at the START of
+        // the FIRST relation work — the retrieval probes INCLUDED — and
+        // holds from retrieval/basis packaging through budget/provider/
+        // output/usage. The service receives it as caller context it can
+        // only SHORTEN (never reset or extend); reads stop STARTING after
+        // expiry (a pending D1 query is not cancellable — expiry frees
+        // the caller, it never claims real cancellation).
+        const relationStepDeadlineAtMs = nowMs() + EVENT_RELATION_BOUNDS.stepWallDeadlineMs;
+
+        // (a) ≤3 shared-entity probes over the resolved entities — none
+        //     STARTS after the step deadline (the shortfall is honest).
         const resolvedEntityIds = [
           ...new Set(entityMentionResolution.resolved.map((pair) => pair.entityId)),
         ];
@@ -899,8 +910,12 @@ export function createEditorialPrepareDraftHandler(
             probePlan.selected,
             storyId,
             EVENT_RELATION_MAX_ROWS_PER_PROBE,
+            { deadlineAtMs: relationStepDeadlineAtMs, nowMs },
           );
         }
+        // Deadline-stopped probes are the HONEST unprobed truth (the
+        // planner's unprobedCount covers only the probe-cap shortfall).
+        const deadlineUnprobed = probePlan.selected.length - entityProbeOutcomes.length;
 
         // (b) The deterministic union with THIS moment's fingerprint
         //     discovery candidates (multi-signal candidates checked once).
@@ -911,7 +926,7 @@ export function createEditorialPrepareDraftHandler(
             storyIds: probeOutcome.storyIds,
             overflow: probeOutcome.overflow,
           })),
-          unprobedEntityCount: probePlan.unprobedCount,
+          unprobedEntityCount: probePlan.unprobedCount + deadlineUnprobed,
           fingerprintCandidates: candidateDiscovery.candidates.map((candidate) => ({
             storyId: candidate.storyId,
             matchedSignalKinds: candidate.matchedSignals.map((signal) => signal.kind),
@@ -939,6 +954,16 @@ export function createEditorialPrepareDraftHandler(
           | { readonly ok: false; readonly reason: string }
         >();
         for (const relationCandidate of relationCandidates.candidates) {
+          // R1.17.1 (D1): a NEW basis read never STARTS after the step
+          // deadline — the unread candidate is a TYPED technical state
+          // (never a semantic verdict, never a fabricated basis claim).
+          if (nowMs() >= relationStepDeadlineAtMs) {
+            basisStates.set(relationCandidate.storyId, {
+              ok: false,
+              reason: 'step_deadline_expired',
+            });
+            continue;
+          }
           const candidateDraft = await findDraftForStory(
             executor,
             relationCandidate.storyId,
@@ -1035,29 +1060,43 @@ export function createEditorialPrepareDraftHandler(
         // (e) The SEPARATE relation task over the shared protections.
         let relationOutcome: EventRelationOutcome = { kind: 'decisions', pairs: [] };
         if (bundles.length > 0) {
-          relationOutcome = await relationOptions.service.evaluateEventRelations({
-            pairs: bundles.map((bundle) => ({
-              pairId: bundle.pairId,
-              sideA: {
-                evidenceId: bundle.sideA.evidenceId,
-                text: bundle.sideA.text,
-                storyId: bundle.sideA.storyId,
-                sourceItemId: bundle.sideA.sourceItemId,
-                contentHash: bundle.sideA.contentHash,
-              },
-              sideB: {
-                evidenceId: bundle.sideB.evidenceId,
-                text: bundle.sideB.text,
-                storyId: bundle.sideB.storyId,
-                sourceItemId: bundle.sideB.sourceItemId,
-                contentHash: bundle.sideB.contentHash,
-              },
-              canonicalInputHash: bundle.canonicalInputHash,
-            })),
-          });
+          relationOutcome = await relationOptions.service.evaluateEventRelations(
+            {
+              pairs: bundles.map((bundle) => ({
+                pairId: bundle.pairId,
+                sideA: {
+                  evidenceId: bundle.sideA.evidenceId,
+                  text: bundle.sideA.text,
+                  storyId: bundle.sideA.storyId,
+                  sourceItemId: bundle.sideA.sourceItemId,
+                  contentHash: bundle.sideA.contentHash,
+                },
+                sideB: {
+                  evidenceId: bundle.sideB.evidenceId,
+                  text: bundle.sideB.text,
+                  storyId: bundle.sideB.storyId,
+                  sourceItemId: bundle.sideB.sourceItemId,
+                  contentHash: bundle.sideB.contentHash,
+                },
+                canonicalInputHash: bundle.canonicalInputHash,
+              })),
+            },
+            // R1.17.1 (D1): the ABSOLUTE step deadline — the service can
+            // only shorten it; retrieval time already counts against it.
+            { deadlineAtMs: relationStepDeadlineAtMs },
+          );
         }
 
         // (f) Map the typed outcomes onto the ledger + the REAL run rows.
+        // R1.17.1: EVERY ledger pair carries the REAL self-side identity —
+        // a deferred pair is still an honest record of THIS snapshot (the
+        // reader rejects an empty sideA evidence id, and the audit needs
+        // the pair's own basis, not a default placeholder).
+        const relationSelfSideA = {
+          evidenceId: item.id,
+          sourceItemId: item.id,
+          contentHash: item.content_hash,
+        };
         if (relationOutcome.kind === 'deferred') {
           // Step-level typed deferral (flag/input): zero runs exist.
           logger?.warn('editorial.prepare_draft.event_relation_step_deferred', {
@@ -1068,6 +1107,7 @@ export function createEditorialPrepareDraftHandler(
               storyId: bundle.sideB.storyId,
               pairId: bundle.pairId,
               state: 'provider_deferred' as EventRelationPairState,
+              sideA: relationSelfSideA,
               deferredReason: relationOutcome.reason,
               canonicalInputHash: bundle.canonicalInputHash,
               aiRunIds: [],
@@ -1123,6 +1163,7 @@ export function createEditorialPrepareDraftHandler(
                 storyId: bundle.sideB.storyId,
                 pairId: bundle.pairId,
                 state: 'provider_deferred' as EventRelationPairState,
+                sideA: relationSelfSideA,
                 deferredReason: 'no_pair_outcome',
                 canonicalInputHash: bundle.canonicalInputHash,
                 aiRunIds: attemptRunIds,
@@ -1161,6 +1202,7 @@ export function createEditorialPrepareDraftHandler(
                   storyId: bundle.sideB.storyId,
                   pairId: bundle.pairId,
                   state: 'provider_refused' as EventRelationPairState,
+                  sideA: relationSelfSideA,
                   sideB: sharedSideB,
                   canonicalInputHash: bundle.canonicalInputHash,
                   aiRunIds: attemptRunIds,
@@ -1171,6 +1213,7 @@ export function createEditorialPrepareDraftHandler(
                   storyId: bundle.sideB.storyId,
                   pairId: bundle.pairId,
                   state: 'provider_invalid_output' as EventRelationPairState,
+                  sideA: relationSelfSideA,
                   sideB: sharedSideB,
                   canonicalInputHash: bundle.canonicalInputHash,
                   aiRunIds: attemptRunIds,
@@ -1188,6 +1231,7 @@ export function createEditorialPrepareDraftHandler(
                         : pairOutcome.reason === 'step_attempt_cap'
                           ? ('skipped_step_capacity' as EventRelationPairState)
                           : ('provider_deferred' as EventRelationPairState),
+                  sideA: relationSelfSideA,
                   sideB: sharedSideB,
                   deferredReason: pairOutcome.reason,
                   canonicalInputHash: bundle.canonicalInputHash,
@@ -1257,12 +1301,17 @@ export function createEditorialPrepareDraftHandler(
           providerAttempts: eventRelationReport.counts.providerAttempts,
         });
       } catch (error) {
-        // A DB error in the relation reads is NEVER a fabricated empty
-        // report: typed bounded retry — the relation lookups run strictly
-        // BEFORE the provider (zero relation provider calls so far).
+        // R1.17.1 (A1): this catch no longer ASSUMES zero provider calls —
+        // if the relation provider already ran for this step and real
+        // invocation rows were collected before the failure, they are
+        // recorded best-effort (fenced standalone inserts, deterministic
+        // ids); a step that never reached the provider contributes ZERO
+        // fabricated rows. Either way the step is a typed bounded retry —
+        // NEVER a fabricated empty report and never a semantic verdict.
         logger?.warn('editorial.prepare_draft.event_relation_step_failed', {
           error: error instanceof Error ? error.message : 'unknown',
         });
+        await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
         return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
       }
     }
@@ -1486,10 +1535,33 @@ export function createEditorialPrepareDraftHandler(
       };
     };
 
-    let commit = await commitEditorialResult(
-      executor,
-      buildCommitInput(entityMentionResolution, nowMs()),
-    );
+    let commit: Awaited<ReturnType<typeof commitEditorialResult>>;
+    try {
+      commit = await commitEditorialResult(
+        executor,
+        buildCommitInput(entityMentionResolution, nowMs()),
+      );
+    } catch (error) {
+      // R1.17.1 (A1): the FIRST commit THREW after the providers ran (a
+      // transient store failure inside the atomic batch). The batch left
+      // ZERO state (atomic), but the REAL invocations of THIS generation
+      // — drafting AND any relation adjudication — must never vanish from
+      // the audit: they are recorded best-effort with their DETERMINISTIC
+      // per-(job,generation,pair,attempt) ids through the fenced
+      // standalone inserts (own-row guard prevents duplicates). The
+      // charges stay (never refunded); the bounded engine retry owns the
+      // next generation. A persistent store outage can defeat even this
+      // best-effort record — an honest limitation; no exactly-once
+      // guarantee is invented here.
+      logger?.warn('editorial.prepare_draft.commit_failed', {
+        error: error instanceof Error ? error.message : 'unknown',
+      });
+      if (observed !== null) {
+        await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
+      }
+      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+      return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+    }
 
     if (commit.catalogChanged) {
       // R1.16.1 (C1): at least ONE relied alias mapping was invalidated
@@ -1686,9 +1758,15 @@ async function recordRealAiRun(
 
 /**
  * R1.17 — record the REAL event-relation adjudication runs for every
- * NON-commit path (fenced standalone inserts): a provider that ran stays
- * charged and honestly auditable even when no draft/decision lands; a pair
- * that never reached the provider contributes ZERO fabricated rows.
+ * NON-commit path AND every post-provider failure exit (R1.17.1/A1):
+ * first-commit throw, catalog re-commit throw, basis/drafting deferrals,
+ * the relation-step catch — a provider that ran stays charged and honestly
+ * auditable even when no draft/decision lands; a pair that never reached
+ * the provider contributes ZERO fabricated rows. The fenced standalone
+ * insert's own-row guard (deterministic per-attempt ids) prevents any
+ * duplicate on re-recording. A persistent store outage can defeat this
+ * best-effort record — an honest limitation, never a claimed
+ * exactly-once guarantee.
  */
 async function recordRealRelationRuns(
   executor: DbExecutor,

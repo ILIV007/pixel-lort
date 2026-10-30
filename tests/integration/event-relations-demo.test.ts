@@ -301,6 +301,7 @@ describe('event relations demo — offline runner (R1.17 Phase 5E-1)', () => {
       logger,
       config: {
         eventRelationEnabled: true,
+        aiEnabled: true,
         workersAiBindingPresent: true,
         geminiApiKeyPresent: false,
       },

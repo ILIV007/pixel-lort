@@ -5,6 +5,7 @@ import {
   type EventRelationServiceConfig,
 } from '../../src/application/ai/event-relation-service';
 import type { AiCallOutcome, AiProvider, AiProviderPort } from '../../src/domain/ai/types';
+import type { DeadlineTimeoutScheduler } from '../../src/shared/time/deadline-wait';
 import { createLogger } from '../../src/observability/logger';
 
 /**
@@ -105,6 +106,7 @@ function pairRequest(pairId: 'erp-1' | 'erp-2', sideBStoryId: string) {
 
 const enabledConfig: EventRelationServiceConfig = {
   eventRelationEnabled: true,
+  aiEnabled: true,
   workersAiBindingPresent: true,
   geminiApiKeyPresent: false,
 };
@@ -118,6 +120,26 @@ describe('createEventRelationService — the fail-closed gates', () => {
       clock: fixedClock,
       logger: silentLogger,
       config: { ...enabledConfig, eventRelationEnabled: false },
+    });
+    const outcome = await service.evaluateEventRelations({
+      pairs: [pairRequest('erp-1', 'edst_other')],
+    });
+    expect(outcome).toEqual({ kind: 'deferred', reason: 'ai_disabled' });
+    expect(port.calls).toBe(0);
+  });
+
+  it('R1.17.1 G1: is typed `ai_disabled` with ZERO calls/charges when the GLOBAL AI gate is OFF (layered defense)', async () => {
+    // The feature flag ON alone must NEVER bypass the global kill switch:
+    // the service refuses directly (its own layer), even for a caller that
+    // wired only the feature flag through.
+    const port = createFakePort('workers-ai', [validOkOutput('erp-1', 'item-self', 'item-other')]);
+    const executor = createFakeExecutor();
+    const service = createEventRelationService({
+      executor,
+      ports: { 'workers-ai': port },
+      clock: fixedClock,
+      logger: silentLogger,
+      config: { ...enabledConfig, aiEnabled: false },
     });
     const outcome = await service.evaluateEventRelations({
       pairs: [pairRequest('erp-1', 'edst_other')],
@@ -332,5 +354,160 @@ describe('createEventRelationService — the bounded step', () => {
         verdict: 'insufficient_evidence',
       });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1.17.1 (D1) — the step deadline covers retrieval through usage: a
+// caller-supplied ABSOLUTE deadline can only SHORTEN the local 15 s cap;
+// expiry is a TYPED technical state, never a semantic verdict; no new
+// provider work starts after it. Deterministic: an injected manual
+// scheduler + a mutable clock — ZERO real sleeps.
+// ---------------------------------------------------------------------------
+
+describe('createEventRelationService — the step deadline (R1.17.1 D1)', () => {
+  it('a supplied ALREADY-EXPIRED deadline ⇒ every pair typed step_deadline with ZERO calls', async () => {
+    const port = createFakePort('workers-ai', [validOkOutput('erp-1', 'item-self', 'item-other')]);
+    const service = createEventRelationService({
+      executor: createFakeExecutor(),
+      ports: { 'workers-ai': port },
+      clock: fixedClock,
+      logger: silentLogger,
+      config: enabledConfig,
+    });
+    // The caller (handler) spent its whole step budget on retrieval/basis
+    // reads — the supplied deadline is already in the past.
+    const outcome = await service.evaluateEventRelations(
+      { pairs: [pairRequest('erp-1', 'edst_other')] },
+      { deadlineAtMs: 1_700_000_000_000 - 1 },
+    );
+    expect(outcome).toEqual({
+      kind: 'decisions',
+      pairs: [{ pairId: 'erp-1', kind: 'deferred', reason: 'step_deadline', attempts: [] }],
+    });
+    expect(port.calls).toBe(0);
+  });
+
+  it('expiry between pairs ⇒ the remaining pair typed step_deadline with ZERO new provider work', async () => {
+    // Pair 1's provider call advances the mutable clock PAST the supplied
+    // deadline (modeled elapsed time); pair 2 must never start.
+    let now = 1_700_000_000_000;
+    const clock = { now: () => now };
+    let calls = 0;
+    const port: AiProviderPort = {
+      provider: 'workers-ai',
+      complete: async () => {
+        calls += 1;
+        if (calls === 1) {
+          now += 20_000; // the first pair's call spent the whole step budget
+          return validOkOutput('erp-1', 'item-self', 'item-other');
+        }
+        return validOkOutput('erp-2', 'item-self', 'item-other');
+      },
+    };
+    const service = createEventRelationService({
+      executor: createFakeExecutor(),
+      ports: { 'workers-ai': port },
+      clock,
+      logger: silentLogger,
+      config: enabledConfig,
+    });
+    const outcome = await service.evaluateEventRelations(
+      { pairs: [pairRequest('erp-1', 'edst_a'), pairRequest('erp-2', 'edst_b')] },
+      { deadlineAtMs: 1_700_000_000_000 + 15_000 },
+    );
+    expect(outcome.kind).toBe('decisions');
+    if (outcome.kind === 'decisions') {
+      expect(outcome.pairs[0]).toMatchObject({ kind: 'evaluated' });
+      expect(outcome.pairs[1]).toMatchObject({ kind: 'deferred', reason: 'step_deadline' });
+      const secondPair = outcome.pairs[1];
+      if (secondPair?.kind === 'deferred') {
+        expect(secondPair.attempts).toHaveLength(0);
+      }
+    }
+    expect(calls).toBe(1);
+  });
+
+  it('a supplied deadline SHORTENS the local cap (scheduled delay = the SUPPLIED remaining time); late rejection absorbed', async () => {
+    // A hanging (never-settling-on-its-own) provider port with a late
+    // rejection the test arms after the deadline fired.
+    const pendingReject: { reject: ((error: unknown) => void) | null } = { reject: null };
+    const hangingPort: AiProviderPort = {
+      provider: 'workers-ai',
+      complete: () =>
+        new Promise((_resolve, reject) => {
+          pendingReject.reject = reject;
+        }),
+    };
+    const scheduled: { delayMs: number; fire: () => void }[] = [];
+    const manualScheduler: DeadlineTimeoutScheduler = (callback, delayMs) => {
+      scheduled.push({ delayMs, fire: callback });
+      return () => undefined;
+    };
+    const service = createEventRelationService({
+      executor: createFakeExecutor(),
+      ports: { 'workers-ai': hangingPort },
+      clock: fixedClock,
+      logger: silentLogger,
+      config: enabledConfig,
+      deadlineScheduler: manualScheduler,
+    });
+    const outcomePromise = service.evaluateEventRelations(
+      { pairs: [pairRequest('erp-1', 'edst_other')] },
+      // Supplied deadline 5 s out vs the 15 s local cap: the SHORTER wins.
+      { deadlineAtMs: 1_700_000_000_000 + 5_000 },
+    );
+    // TWO bounded waits are scheduled before the provider hangs: the
+    // budget authorization (completes on its own) and the provider call
+    // (the hang). Poll until BOTH exist.
+    for (let i = 0; i < 200 && scheduled.length < 2; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    // Each wait is bounded by the SUPPLIED deadline (5 s remaining), never
+    // the local 15 s — the service neither resets nor extends it.
+    expect(scheduled.length).toBe(2);
+    expect(scheduled[0]!.delayMs).toBe(5_000);
+    expect(scheduled[1]!.delayMs).toBe(5_000);
+    // Fire ONLY the provider-call wait: the authorization completed on its
+    // own (its charge stands), the CALL times out at the supplied deadline.
+    scheduled[1]!.fire();
+    const outcome = await outcomePromise;
+    expect(outcome.kind).toBe('decisions');
+    if (outcome.kind === 'decisions') {
+      expect(outcome.pairs[0]).toMatchObject({ kind: 'deferred', reason: 'step_deadline' });
+      const pair = outcome.pairs[0];
+      if (pair?.kind === 'deferred') {
+        expect(pair.attempts).toHaveLength(1);
+        expect(pair.attempts[0]).toMatchObject({
+          status: 'failed',
+          errorCode: 'deadline_exceeded',
+        });
+      }
+    }
+    // The LATE rejection (arriving after the race decided) is observed and
+    // absorbed by the deadline primitive — never unhandled, never
+    // resurrecting the decided outcome.
+    pendingReject.reject?.(new Error('late_provider_rejection'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  it('a non-finite supplied deadline is treated as absent — the local cap still bounds the step', async () => {
+    const port = createFakePort('workers-ai', [validOkOutput('erp-1', 'item-self', 'item-other')]);
+    const service = createEventRelationService({
+      executor: createFakeExecutor(),
+      ports: { 'workers-ai': port },
+      clock: fixedClock,
+      logger: silentLogger,
+      config: enabledConfig,
+    });
+    const outcome = await service.evaluateEventRelations(
+      { pairs: [pairRequest('erp-1', 'edst_other')] },
+      { deadlineAtMs: Number.NaN },
+    );
+    expect(outcome.kind).toBe('decisions');
+    if (outcome.kind === 'decisions') {
+      expect(outcome.pairs[0]).toMatchObject({ kind: 'evaluated' });
+    }
+    expect(port.calls).toBe(1);
   });
 });

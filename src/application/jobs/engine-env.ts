@@ -224,8 +224,11 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
       },
     });
     // R1.17 (Phase 5E-1): the SEPARATE event-relation service shares the
-    // SAME ports/budget authority while its INDEPENDENT fail-closed flag
-    // stays in full control of whether ANY relation work happens.
+    // SAME ports/budget authority. R1.17.1 (G1): the effective gate is the
+    // GLOBAL AI_ENABLED kill switch AND the independent
+    // EVENT_RELATION_ENABLED flag — BOTH fail-closed, BOTH passed here so
+    // the service's own layered defense holds in production wiring (the
+    // feature flag never bypasses the global inference gate).
     const eventRelationService = createEventRelationService({
       executor,
       ports,
@@ -233,6 +236,7 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
       logger: logger ?? createFallbackLogger(),
       config: {
         eventRelationEnabled: ai.config.EVENT_RELATION_ENABLED,
+        aiEnabled: ai.config.AI_ENABLED,
         workersAiBindingPresent,
         geminiApiKeyPresent: env.GEMINI_API_KEY !== undefined,
       },
@@ -242,7 +246,11 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
         executor,
         aiService,
         eventRelation: {
-          enabled: ai.config.EVENT_RELATION_ENABLED,
+          // R1.17.1 (G1): the handler's relation step honors the SAME
+          // effective gate (global AND feature flag) — with the global
+          // gate off the step never runs at all (honest `disabled` ledger
+          // if a draft were ever committed, zero calls/charges otherwise).
+          enabled: ai.config.AI_ENABLED && ai.config.EVENT_RELATION_ENABLED,
           service: eventRelationService,
         },
         nowMs: () => clock.now(),
