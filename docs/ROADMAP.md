@@ -792,6 +792,33 @@ decision.
       native-binding stub and zero network); full suite 118 files / 1640
       tests green; version 1.12.1; schema stays 3, ZERO DDL; NO
       Phase-5-completion / semantic-accuracy / production-ready claim.
+- [x] **R1.17.2 (v1.12.2, ADR-0045 correction): EVENT-RELATION AUDIT
+      DURABILITY & BOUNDED PENDING READS — exactly two second-generation
+      findings closed, NO new capability, NO Phase-5 scope claim. A2: the
+      durable relation audit no longer depends on the relation step's
+      post-return outcome mapping — the service surfaces EVERY REAL
+      provider attempt at RECORD time (before the outcome mapping and
+      before any observability sink that may itself fail) through a
+      trusted caller collector, and the handler unions the record-time
+      observations with the outcome-mapped rows on every post-provider
+      failure exit (deterministic per-(job,generation,pair,attempt) ids,
+      the fenced standalone insert's own-row guard dedups; charges stay,
+      no refund, no collision across generations, no misattribution, no
+      free lunch; zero fabricated rows). D2: the pending retrieval/basis/
+      reference reads are BOUNDED by the same absolute step deadline
+      through the accepted race primitive — expiry frees the CALLER (a
+      pending D1 query is never claimed cancellable), a late settlement
+      is observed and absorbed (never an unhandled rejection), an expiry
+      observed by a race stops ALL further relation reads (TYPED
+      `basis_unavailable/step_deadline_expired`, honest unprobed
+      accounting), and a basis whose reference identity was not verified
+      before expiry is NEVER bundled. Both counterexamples were
+      reproduced RED on the untouched baseline (A2 {relationCalls:1,
+      rowsDelta:0}; D2 {pending read ⇒ no deadline race, the step
+      suspends past expiry}) and are GREEN after the corrections; the
+      permanent regressions live in the main suites (unit 16,
+      integration 23); version 1.12.2; schema stays 3, ZERO DDL; NO
+      Phase-5-completion / semantic-accuracy / production-ready claim.
 - [ ] Story MERGING and semantic/deterministic matching with thresholds
       (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate discovery +
       conservative observation assessment, and Phase 5D provides ONLY

@@ -206,3 +206,58 @@ and integration (the real engine-env wiring matrix with a native-binding
 stub and zero network; the multi-pair commit-throw audit before/after the
 retry; slow probe/basis/authorization/provider with the injected
 fake-clock and manual scheduler — zero real sleeps).
+
+## Correction R1.17.2 (v1.12.2) — two second-generation findings
+
+Bounded to corrections ONLY (no new capability, no Phase-5 scope claim).
+Each counterexample was reproduced RED on the untouched baseline a783058
+before its fix and GREEN after.
+
+1. **A2 — the durable audit no longer depends on the step returning.**
+   The R1.17.1 fix recorded the relation invocations through the step's
+   post-return outcome mapping; a failure in the relation task's OWN
+   result path after the provider answered (the injected fault class: the
+   attempt-record observability write throws) still erased the invocation
+   from `ai_runs` (providerCalls=1, durable delta=0 — the exact A1
+   signature on a NEW exit). The service now surfaces EVERY REAL attempt
+   at RECORD time — before the outcome mapping and before any
+   observability sink that may itself fail — through a trusted caller
+   collector (`EventRelationAttemptObservation`: pairId, attemptIndex,
+   canonicalInputHash, attempt; zero fabricated observations — only
+   attempts that actually reached the provider). The handler unions the
+   record-time observations with the outcome-mapped rows on every
+   post-provider failure exit (deterministic per-(job,generation,pair,
+   attempt) ids; the fenced standalone insert's own-row guard dedups).
+   Charges stay (no refund); the retry generation owns its own
+   invocations (no collision, no misattribution, no free lunch).
+
+2. **D2 — the pending reads are bounded by the step deadline.** The
+   R1.17.1 delivery guarded read STARTS but left the awaited retrieval/
+   basis/reference queries unbounded — a pending D1 read could suspend
+   the whole relation step past expiry (expiry freed nobody; the
+   "bounded race frees the caller" contract was claimed but not applied
+   to the reads). The entity-probe queries
+   (`findStoryCandidatesByEntities`) and the handler's basis/reference
+   reads now run through `awaitWithDeadline` under the SAME absolute
+   step deadline: expiry frees the CALLER while the read is still
+   pending (a pending D1 query is never claimed cancellable), the late
+   settlement is observed and absorbed by the primitive (handlers stay
+   attached for the promise's whole lifetime — never an unhandled
+   rejection), and an expiry OBSERVED by a race stops ALL further
+   relation reads (typed `basis_unavailable/step_deadline_expired`; the
+   honest unprobed/basis accounting is recorded). A basis whose
+   reference identity was not verified before expiry is NEVER bundled
+   (the bundle pins the reference content hash) — the R1.17.1
+   slow-basis-read scenario's ledger surface moved from pair-level
+   `skipped_deadline` to the candidate-level typed technical state with
+   the assertion meaning unchanged (budget consumed, ZERO provider
+   calls, the draft still commits). The ≤2/≤3 caps, the 15 s step
+   deadline, the separate drafting deadline and the G1/A1/D1 corrections
+   are untouched; product SQL shapes and gates are unchanged.
+
+Permanent regressions: unit (the record-time observation contract incl.
+the injected result-path fault; the absent-safe/zero-fabricated observer)
+and integration (the fail-after-provider audit before/after the retry
+with no collision/misattribution; the pending basis read and the pending
+entity probe each freed by the deadline with late-rejection absorption
+and typed ledgers — zero real sleeps).
