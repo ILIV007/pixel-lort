@@ -16,12 +16,14 @@
  *   never a model guess, and every extra equivalence needs its own
  *   documented collision test (none is invented here).
  * - BOUNDED candidate phrases from the text itself: token runs are
- *   maximal spans of Unicode letters/numbers/marks (ZWNJ U+200C is
- *   word-INTERNAL — a conscious, tested نیم‌فاصله decision); phrases are
- *   byte-exact substrings between token boundaries, generated width-major
- *   (all 1-token phrases first), so `Half-Life` matches while `Doom`
- *   inside `Doomlike` or `Doom2` can NEVER be a candidate phrase (the
- *   boundary characters would be token chars).
+ *   maximal spans of Unicode letters/numbers/marks walked by CODE POINT
+ *   (R1.16.1 — a letter outside the BMP is one character, never a
+ *   boundary; ZWNJ U+200C is word-INTERNAL — a conscious, tested
+ *   نیم‌فاصله decision); phrases are byte-exact substrings between token
+ *   boundaries, generated width-major (all 1-token phrases first), so
+ *   `Half-Life` matches while `Doom` inside `Doomlike` or `Doom2` can
+ *   NEVER be a candidate phrase (the boundary characters would be token
+ *   chars).
  * - Deterministic resolution of ONE indexed lookup's rows: a
  *   `normalized_alias` mapping to EXACTLY ONE entity resolves that
  *   entity; a shared alias (≥2 distinct owners) is AMBIGUOUS — ZERO auto
@@ -98,24 +100,38 @@ function tokenizeBounded(normalizedText: string): {
 } {
   const tokens: TokenSpan[] = [];
   let index = 0;
-  while (index < normalizedText.length) {
-    if (!TOKEN_CHAR.test(normalizedText[index]!)) {
-      index += 1;
+  const length = normalizedText.length;
+  while (index < length) {
+    // R1.16.1 (U1): walk UNICODE CODE POINTS, never UTF-16 code units —
+    // indexing the string hands out half surrogates, so a letter outside
+    // the BMP (one code point, two units) would falsely read as a
+    // separator and split a word around itself. `codePointAt` + the full
+    // `String.fromCodePoint` form keep every astral letter/number/mark a
+    // FIRST-CLASS token character; an unpaired surrogate stays a separator
+    // (it is no character at all) and advances by exactly one unit.
+    const code = normalizedText.codePointAt(index)!;
+    if (!TOKEN_CHAR.test(String.fromCodePoint(code))) {
+      index += code > 0xffff ? 2 : 1;
       continue;
     }
+    // R1.16.1 (U1): the scan-token cap is enforced DURING the traversal —
+    // the first token start beyond the cap is the honest truncation probe
+    // (recorded, never built) and the scan stops here instead of building
+    // every token and slicing afterwards.
+    if (tokens.length === ENTITY_MENTION_MAX_SCAN_TOKENS) {
+      return { tokens, tokensTruncated: true };
+    }
     const start = index;
-    while (index < normalizedText.length && TOKEN_CHAR.test(normalizedText[index]!)) {
-      index += 1;
+    while (index < length) {
+      const next = normalizedText.codePointAt(index)!;
+      if (!TOKEN_CHAR.test(String.fromCodePoint(next))) {
+        break;
+      }
+      index += next > 0xffff ? 2 : 1;
     }
     tokens.push({ start, end: index });
   }
-  if (tokens.length <= ENTITY_MENTION_MAX_SCAN_TOKENS) {
-    return { tokens, tokensTruncated: false };
-  }
-  return {
-    tokens: tokens.slice(0, ENTITY_MENTION_MAX_SCAN_TOKENS),
-    tokensTruncated: true,
-  };
+  return { tokens, tokensTruncated: false };
 }
 
 /** The bounded phrase scan of one full evidence text (pure input). */
@@ -454,7 +470,10 @@ function isNonNegativeInteger(value: unknown): value is number {
  * Consumers must treat `absent`/`unsupported_version`/`malformed` as "no
  * current mention result" — none of them validates anything. The check
  * validates the REAL v1 builder invariants (count/order/identity), so a
- * payload that merely CLAIMS the version never passes as current.
+ * payload that merely CLAIMS the version never passes as current. R1.16.1
+ * (R1) tightens the ambiguity identity: ONE alias can never claim TWO
+ * distinct owners (strict ALIAS ascent), no alias may sit in BOTH lists,
+ * and both lists share the candidate-phrase bound.
  */
 export function readEntityMentionsReport(document: unknown): EntityMentionsRead {
   if (typeof document !== 'object' || document === null || Array.isArray(document)) {
@@ -559,10 +578,13 @@ export function readEntityMentionsReport(document: unknown): EntityMentionsRead 
     return { kind: 'malformed' };
   }
 
-  // ---- Matched: deterministic strict ascent, no duplicate pairs, every
-  //      alias distinct, bounded by the phrase cap.
+  // ---- Matched: STRICT ALIAS ascent (R1.16.1, R1) — one normalized
+  //      alias can never resolve to TWO distinct owners, so the alias
+  //      itself must be strictly ascending (sorting the (alias, entity)
+  //      pairs is NOT the invariant); every entry a non-empty string pair,
+  //      bounded by the phrase cap.
   const matchedPairs: { normalizedAlias: string; entityId: string }[] = [];
-  let previous: { alias: string; entity: string } | null = null;
+  let previousAlias: string | null = null;
   for (const entry of matched as unknown[]) {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
       return { kind: 'malformed' };
@@ -577,22 +599,19 @@ export function readEntityMentionsReport(document: unknown): EntityMentionsRead 
     ) {
       return { kind: 'malformed' };
     }
-    if (
-      previous !== null &&
-      !(previous.alias < alias || (previous.alias === alias && previous.entity < entityId))
-    ) {
+    if (previousAlias !== null && !(previousAlias < alias)) {
       return { kind: 'malformed' };
     }
-    previous = { alias, entity: entityId };
+    previousAlias = alias;
     matchedPairs.push({ normalizedAlias: alias, entityId });
   }
   if (matchedPairs.length > phrasesConsidered) {
     return { kind: 'malformed' };
   }
 
-  // ---- Ambiguous: ownerCount ≥ 2, strict ascent, disjoint from matched.
+  // ---- Ambiguous: ownerCount ≥ 2, strict ascent.
   const ambiguousAliases: { normalizedAlias: string; ownerCount: number }[] = [];
-  let previousAlias: string | null = null;
+  let previousAmbiguousAlias: string | null = null;
   for (const entry of ambiguous as unknown[]) {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
       return { kind: 'malformed' };
@@ -607,11 +626,24 @@ export function readEntityMentionsReport(document: unknown): EntityMentionsRead 
     ) {
       return { kind: 'malformed' };
     }
-    if (previousAlias !== null && !(previousAlias < alias)) {
+    if (previousAmbiguousAlias !== null && !(previousAmbiguousAlias < alias)) {
       return { kind: 'malformed' };
     }
-    previousAlias = alias;
+    previousAmbiguousAlias = alias;
     ambiguousAliases.push({ normalizedAlias: alias, ownerCount });
+  }
+
+  // ---- R1.16.1 (R1): the REAL builder ambiguity invariants across the
+  //      TWO lists — an ambiguous alias (≥2 owners) can NEVER also be a
+  //      resolved match (disjointness), and BOTH lists share ONE bound:
+  //      every observed alias is a candidate phrase, so the combined
+  //      distinct-alias total can never exceed `phrasesConsidered`.
+  const matchedAliases = new Set(matchedPairs.map((entry) => entry.normalizedAlias));
+  if (ambiguousAliases.some((entry) => matchedAliases.has(entry.normalizedAlias))) {
+    return { kind: 'malformed' };
+  }
+  if (matchedPairs.length + ambiguousAliases.length > phrasesConsidered) {
+    return { kind: 'malformed' };
   }
 
   // ---- Counts must EXACTLY describe the payload they accompany.

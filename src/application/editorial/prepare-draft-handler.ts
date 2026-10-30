@@ -200,6 +200,7 @@ import { buildCandidateAssessmentReport } from '../../domain/editorial/candidate
 import {
   buildEntityMentionPhrases,
   buildEntityMentionsReport,
+  type EntityMentionResolution,
   type EntityMentionsReport,
 } from '../../domain/editorial/entity-mentions';
 import type { Logger } from '../../observability/logger';
@@ -783,7 +784,10 @@ export function createEditorialPrepareDraftHandler(
         return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
       }
     }
-    const entityMentionResolution = buildEntityMentionsReport({
+    // `let` (R1.16.1, C1): the bounded catalog re-resolve below rebuilds
+    // the resolution against the CURRENT catalog and the rebuilt report is
+    // what the persisted draft carries.
+    let entityMentionResolution = buildEntityMentionsReport({
       snapshot: { sourceItemId: item.id, contentHash: item.content_hash },
       scan: entityMentionScan,
       matches: entityMentionRows,
@@ -899,101 +903,167 @@ export function createEditorialPrepareDraftHandler(
       excerpt,
     });
     const mentionsEvidence = buildMentionsEvidence({ excerpt });
-    const document = buildDraftDocument({
-      sourceItemId: item.id,
-      sourceName: source.name,
-      excerpt,
-      semanticDraft: outcome.draft,
-      evidenceGuard,
-      candidateDiscovery,
-      candidateAssessment,
-      entityMentions,
-    });
-    const now = nowMs();
+    // R1.16.1 (C1): the commit-input builder is a closure over the STABLE
+    // attempt state (provider draft, evidence guard, fingerprints) so the
+    // bounded catalog re-resolve below can rebuild the SAME editorial
+    // result around a FRESH mentions report — the provider is never
+    // called again and no other part of the result is recomputed.
+    const buildCommitInput = (resolution: EntityMentionResolution, nowMsValue: number) => {
+      const document = buildDraftDocument({
+        sourceItemId: item.id,
+        sourceName: source.name,
+        excerpt,
+        semanticDraft: outcome.draft,
+        evidenceGuard,
+        candidateDiscovery,
+        candidateAssessment,
+        entityMentions: resolution.report,
+      });
+      return {
+        jobId,
+        generation,
+        fenceNowMs: nowMsValue,
+        // The snapshot identity the handler READ and verified: re-checked
+        // INSIDE the atomic batch (R1.11.1) so a source item that changed
+        // mid-flight produces zero effects with a distinct typed outcome.
+        snapshot: {
+          sourceItemId: item.id,
+          sourceId: item.source_id,
+          contentHash: item.content_hash,
+        },
+        story: {
+          id: storyId,
+          storyKey,
+          workingHeadline: null,
+          createdAt: nowMsValue,
+        },
+        claim: {
+          id: claimId,
+          storyId,
+          claimType: sourceReportClaim.claimType,
+          subject: sourceReportClaim.subject,
+          predicate: sourceReportClaim.predicate,
+          objectText: sourceReportClaim.objectText,
+          confidence: sourceReportClaim.confidence,
+          status: sourceReportClaim.status,
+          createdAt: nowMsValue,
+        },
+        evidence: {
+          id: evidenceId,
+          claimId,
+          sourceItemId: item.id,
+          stance: mentionsEvidence.stance,
+          confidence: mentionsEvidence.confidence,
+          excerpt: mentionsEvidence.excerpt,
+          createdAt: nowMsValue,
+        },
+        aiRun: {
+          id: aiRunId,
+          task: 'news_draft',
+          provider: observed?.provider ?? '',
+          model: observed?.model ?? '',
+          promptVersion: observed?.promptVersion ?? '',
+          inputHash,
+          status: observed?.status ?? 'succeeded',
+          latencyMs: observed?.latencyMs ?? null,
+          inputTokens: observed?.inputTokens ?? null,
+          outputTokens: observed?.outputTokens ?? null,
+          errorCode: observed?.errorCode ?? null,
+          errorMessage: null,
+          createdAt: aiStartedAtMs,
+          completedAt: aiFinishedAtMs,
+        },
+        draft: {
+          id: draftId,
+          storyId,
+          status: 'ready',
+          language: 'fa',
+          layout: document.layout,
+          title: document.title,
+          documentJson: canonicalizeJson(document.document),
+          factsJson: canonicalizeJson(document.facts),
+          warningsJson: canonicalizeJson(document.warnings),
+          aiRunId,
+          version: EDITORIAL_DRAFT_VERSION,
+          createdBy: EDITORIAL_CREATED_BY,
+          createdAt: nowMsValue,
+        },
+        // R1.13: the NEW story's ≤3 durable fingerprints ride in the SAME
+        // fenced batch — a lost fence or changed snapshot writes NO draft
+        // AND NO fingerprint row.
+        fingerprints: fingerprints.map((plan) => ({ kind: plan.kind, value: plan.value })),
+        // R1.15: the exact-content GROUP anchor — the group-unique value
+        // derived from THIS item's own composed text. A live cross-story
+        // owner trips the PRIMARY KEY inside this batch and rolls the WHOLE
+        // commit back (typed contentTaken below).
+        exactContentAnchor,
+        // R1.16: the deterministic unique controlled-alias mention pairs —
+        // written by the SAME fenced batch; R1.16.1 conditions the WHOLE
+        // result in SQL on the validity of EVERY relied mapping (typed
+        // catalogChanged below — the report can never claim a durable link
+        // that did not persist).
+        entityMentions: resolution.resolved,
+      };
+    };
 
-    const commit = await commitEditorialResult(executor, {
-      jobId,
-      generation,
-      fenceNowMs: now,
-      // The snapshot identity the handler READ and verified: re-checked
-      // INSIDE the atomic batch (R1.11.1) so a source item that changed
-      // mid-flight produces zero effects with a distinct typed outcome.
-      snapshot: {
-        sourceItemId: item.id,
-        sourceId: item.source_id,
-        contentHash: item.content_hash,
-      },
-      story: {
-        id: storyId,
-        storyKey,
-        workingHeadline: null,
-        createdAt: now,
-      },
-      claim: {
-        id: claimId,
-        storyId,
-        claimType: sourceReportClaim.claimType,
-        subject: sourceReportClaim.subject,
-        predicate: sourceReportClaim.predicate,
-        objectText: sourceReportClaim.objectText,
-        confidence: sourceReportClaim.confidence,
-        status: sourceReportClaim.status,
-        createdAt: now,
-      },
-      evidence: {
-        id: evidenceId,
-        claimId,
-        sourceItemId: item.id,
-        stance: mentionsEvidence.stance,
-        confidence: mentionsEvidence.confidence,
-        excerpt: mentionsEvidence.excerpt,
-        createdAt: now,
-      },
-      aiRun: {
-        id: aiRunId,
-        task: 'news_draft',
-        provider: observed?.provider ?? '',
-        model: observed?.model ?? '',
-        promptVersion: observed?.promptVersion ?? '',
-        inputHash,
-        status: observed?.status ?? 'succeeded',
-        latencyMs: observed?.latencyMs ?? null,
-        inputTokens: observed?.inputTokens ?? null,
-        outputTokens: observed?.outputTokens ?? null,
-        errorCode: observed?.errorCode ?? null,
-        errorMessage: null,
-        createdAt: aiStartedAtMs,
-        completedAt: aiFinishedAtMs,
-      },
-      draft: {
-        id: draftId,
-        storyId,
-        status: 'ready',
-        language: 'fa',
-        layout: document.layout,
-        title: document.title,
-        documentJson: canonicalizeJson(document.document),
-        factsJson: canonicalizeJson(document.facts),
-        warningsJson: canonicalizeJson(document.warnings),
-        aiRunId,
-        version: EDITORIAL_DRAFT_VERSION,
-        createdBy: EDITORIAL_CREATED_BY,
-        createdAt: now,
-      },
-      // R1.13: the NEW story's ≤3 durable fingerprints ride in the SAME
-      // fenced batch — a lost fence or changed snapshot writes NO draft
-      // AND NO fingerprint row.
-      fingerprints: fingerprints.map((plan) => ({ kind: plan.kind, value: plan.value })),
-      // R1.15: the exact-content GROUP anchor — the group-unique value
-      // derived from THIS item's own composed text. A live cross-story
-      // owner trips the PRIMARY KEY inside this batch and rolls the WHOLE
-      // commit back (typed contentTaken below).
-      exactContentAnchor,
-      // R1.16: the deterministic unique controlled-alias mention pairs —
-      // written by the SAME fenced batch; each link's SQL predicate
-      // re-checks its alias mapping INSIDE the transaction.
-      entityMentions: entityMentionResolution.resolved,
-    });
+    let commit = await commitEditorialResult(
+      executor,
+      buildCommitInput(entityMentionResolution, nowMs()),
+    );
+
+    if (commit.catalogChanged) {
+      // R1.16.1 (C1): at least ONE relied alias mapping was invalidated
+      // inside the lookup→commit window — the SQL catalog gate zeroed the
+      // WHOLE batch (zero effects, zero orphans, nothing persisted). The
+      // bounded honest retry: ONE re-resolve against the CURRENT catalog
+      // (a FRESH SQL lookup — never a JS reuse of the stale rows) and ONE
+      // re-commit of the SAME provider draft. ZERO provider calls, ZERO
+      // new charges, no fabricated outcome, no blind engine re-run.
+      try {
+        const retryScan = buildEntityMentionPhrases(fullEvidenceText);
+        let retryRows: readonly { normalized_alias: string; entity_id: string }[] = [];
+        let retryOverflow = false;
+        if (retryScan.phrases.length > 0) {
+          const retryLookup = await findEntityMentionMatches(executor, retryScan.phrases);
+          retryRows = retryLookup.rows;
+          retryOverflow = retryLookup.overflow;
+        }
+        entityMentionResolution = buildEntityMentionsReport({
+          snapshot: { sourceItemId: item.id, contentHash: item.content_hash },
+          scan: retryScan,
+          matches: retryRows,
+          resultOverflow: retryOverflow,
+        });
+        commit = await commitEditorialResult(
+          executor,
+          buildCommitInput(entityMentionResolution, nowMs()),
+        );
+      } catch (error) {
+        // The re-resolve or its commit failed after the provider ran: the
+        // REAL run stays recorded (charged, never refunded) and the
+        // bounded engine retry owns the next generation.
+        if (observed !== null) {
+          await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
+        }
+        logger?.warn('editorial.prepare_draft.entity_catalog_revalidate_failed', {
+          error: error instanceof Error ? error.message : 'unknown',
+        });
+        return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+      }
+      if (commit.catalogChanged) {
+        // STILL invalidated after one honest re-resolve: the catalog is
+        // mutating under this attempt. Zero effects landed twice — the
+        // real provider run stays recorded (charged, never refunded) and
+        // the bounded engine retry re-runs the NEXT generation against a
+        // settled catalog. No third in-handler attempt, no fabricated
+        // report, no forced invalid link.
+        if (observed !== null) {
+          await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
+        }
+        logger?.warn('editorial.prepare_draft.entity_catalog_changed_twice');
+        return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+      }
+    }
 
     if (commit.contentTaken) {
       // The exact-content anchor collided: ANOTHER story already owns this
@@ -1047,12 +1117,19 @@ export function createEditorialPrepareDraftHandler(
       fingerprintsInserted: commit.fingerprintsInserted,
       entityMentionsInserted: commit.entityMentionsInserted,
     });
-    if (commit.entityMentionsInserted < entityMentionResolution.resolved.length) {
-      // The lookup→commit alias-mutation window: at least one mapping
-      // changed before the fenced insert — THAT link alone no-oped (in
-      // SQL), the draft/report stay coherent. Honest, bounded, typed.
-      logger?.warn('editorial.prepare_draft.entity_mention_link_suppressed', {
-        resolved: entityMentionResolution.resolved.length,
+    // R1.16.1 (C1) invariant tripwire: with the whole-result catalog gate a
+    // committed result ALWAYS inserts exactly the distinct entities the
+    // report claims (multi-alias mentions of one entity dedup through the
+    // statement's own PK guard). A mismatch would mean the persisted report
+    // and the durable story_entities rows diverged — never ignore it,
+    // never weaken the report, never fake a link.
+    const distinctMentionedEntities = new Set(
+      entityMentionResolution.resolved.map((pair) => pair.entityId),
+    ).size;
+    if (commit.entityMentionsInserted !== distinctMentionedEntities) {
+      logger?.warn('editorial.prepare_draft.entity_mention_link_count_mismatch', {
+        resolvedPairs: entityMentionResolution.resolved.length,
+        distinctEntities: distinctMentionedEntities,
         inserted: commit.entityMentionsInserted,
       });
     }

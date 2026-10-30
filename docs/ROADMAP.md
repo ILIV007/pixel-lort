@@ -662,6 +662,37 @@ decision.
       re-run green; version 1.11.0; no Phase-5-completion claim; news
       text NEVER adds to the catalog and no real catalog was seeded on
       cloud (fixture helpers are LOCAL-D1 only).
+- [x] **Phase 5D corrections (R1.16.1, v1.11.1, ADR-0044): ENTITY MENTIONS
+      CORRECTNESS — exactly the THREE independently reproduced R1.16
+      defects (Posidon probes C1/U1/R1: 3 failed / 18 skipped / exit 1)
+      closed with RED→GREEN recorded on the caa7402 baseline inside the
+      PERMANENT suites; NO new capability started, schema stays 3, ZERO
+      DDL, the accepted reuse contract untouched. C1: the WHOLE editorial
+      commit result is now SQL-conditioned on the validity of EVERY relied
+      (alias, entity) mapping — a whole-result catalog-mapping gate (ONE
+      bound `json_each` pairs parameter + ONE expected-count parameter per
+      statement, heaviest statement 23/100 of the D1 bound limit; EXPLAIN
+      QUERY PLAN seeks `idx_entity_alias_lookup` per claimed pair, no table
+      scan, LOCAL PROXY only) zeroes EVERY statement on one invalidated
+      mapping → typed `catalogChanged` → ONE bounded in-handler re-resolve
+      against the CURRENT catalog (fresh SQL lookup, the SAME provider
+      draft, ZERO new provider calls/charges) before any engine retry — a
+      committed report now EQUALS the durable `story_entities` rows (the
+      weak no-op-only-link contract and its docs/tests are corrected with
+      the reason recorded). U1: the tokenizer walks UNICODE CODE POINTS
+      (`codePointAt`/`fromCodePoint`), never UTF-16 units — astral
+      letters/numbers/marks are token characters and can never split a word
+      around `Doom`; unpaired surrogates and emoji stay separators;
+      Persian/ZWNJ/NFC/`Doomlike`/`Doom2`/`Half-Life` behavior preserved;
+      the 256-token cap is enforced DURING traversal with an honest
+      truncation probe. R1: the typed reader enforces strict ALIAS ascent
+      (one alias can never claim TWO owners), matched ∩ ambiguous = ∅, and
+      the shared candidate-phrase bound (matched + ambiguous ≤
+      phrasesConsidered); the malformed/round-trip tables unchanged, no
+      invented format constraints. Tests: unit 43/43, integration 20/20
+      (REAL workerd D1; incl. the new gate EXPLAIN probe and the corrected
+      REMAPPED expectation), demo 1/1, full gate 113 files / 1577 tests
+      green; version 1.11.1; no Phase-5-completion claim.
 - [ ] Story MERGING and semantic/deterministic matching with thresholds
       (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate discovery +
       conservative observation assessment, and Phase 5D provides ONLY

@@ -85,6 +85,56 @@ describe('entity mention policy em1 — normalization and phrase windows', () =>
     expect(spaced.scan.phrases).not.toContain('بازی‌سازی');
   });
 
+  // R1.16.1 (U1): the tokenizer walks UNICODE CODE POINTS, never UTF-16
+  // code units — a letter outside the BMP is ONE character (its surrogate
+  // pair is never tested alone), so it can never act as a word boundary.
+  it('R1.16.1 U1: astral letters are word-INTERNAL — U+10400 never splits a word around Doom', () => {
+    // U+10400 DESERET CAPITAL LETTER LONG I is a Unicode LETTER: the whole
+    // span is ONE word and 'Doom' inside it can NEVER be a standalone
+    // candidate phrase (the boundary characters would be token chars).
+    const astral = fullScan('\u{10400}Doom\u{10400}');
+    expect(astral.scan.phrases).not.toContain('Doom');
+    expect(astral.scan.phrases).toContain('\u{10400}Doom\u{10400}');
+    expect(astral.scan.scannedTokens).toBe(1);
+  });
+
+  it('R1.16.1 U1: astral digits and marks are token chars; emoji stays a separator (code-point width)', () => {
+    // U+104A0 DESERET DIGIT TWO (\p{N}) and U+16F51 MIAO TONE (\p{M}) are
+    // token characters — glue-free words around them stay whole.
+    const digits = fullScan('Doom\u{104A0}II');
+    expect(digits.scan.phrases).toContain('Doom\u{104A0}II');
+    const marks = fullScan('Doom\u{16F51}II');
+    expect(marks.scan.phrases).toContain('Doom\u{16F51}II');
+    // U+1F600 (emoji, \p{So}) is a SEPARATOR: glued to both words with no
+    // spaces it still splits them into TWO tokens — the emoji itself never
+    // becomes or joins a token (multi-token windows keep internal
+    // separators byte-exact by design, like 'Half-Life' keeps its hyphen).
+    const glued = fullScan('Doom\u{1F600}news');
+    expect(glued.scan.phrases).toContain('Doom');
+    expect(glued.scan.phrases).toContain('news');
+    expect(glued.scan.scannedTokens).toBe(2);
+  });
+
+  it('R1.16.1 U1: the token cap is enforced DURING traversal with an honest truncation probe', () => {
+    const words = Array.from({ length: ENTITY_MENTION_MAX_SCAN_TOKENS }, (_, i) => `w${i}`);
+    const exact = fullScan(words.join(' '));
+    expect(exact.scan.scannedTokens).toBe(ENTITY_MENTION_MAX_SCAN_TOKENS);
+    expect(exact.scan.tokensTruncated).toBe(false);
+    // ONE token beyond the cap is the probe: recorded, not built.
+    const over = fullScan([...words, 'w-over'].join(' '));
+    expect(over.scan.scannedTokens).toBe(ENTITY_MENTION_MAX_SCAN_TOKENS);
+    expect(over.scan.tokensTruncated).toBe(true);
+    expect(over.scan.phrases.some((phrase) => phrase.includes('w-over'))).toBe(false);
+    // Astral tokens count as ONE token each (not two).
+    const astralWords = Array.from(
+      { length: ENTITY_MENTION_MAX_SCAN_TOKENS },
+      (_, i) => `\u{10400}w${i}`,
+    );
+    const overAstral = fullScan([...astralWords, 'tail'].join(' '));
+    expect(overAstral.scan.scannedTokens).toBe(ENTITY_MENTION_MAX_SCAN_TOKENS);
+    expect(overAstral.scan.tokensTruncated).toBe(true);
+  });
+
   it('is bounded: >256 tokens truncates the scan honestly; >90 distinct phrases truncates the window', () => {
     const manyTokens = Array.from({ length: 400 }, (_, i) => `w${i}`).join(' ');
     const { scan, resolution } = fullScan(manyTokens);
@@ -377,5 +427,67 @@ describe('typed reader — round-trip and the malformed table', () => {
       counts: { uniqueAliasesMatched: 2, ambiguousAliasesObserved: 0, entitiesLinked: 2 },
     };
     expect(readEntityMentionsReport({ entityMentions: unordered }).kind).toBe('malformed');
+  });
+
+  // R1.16.1 (R1): the reader enforces the REAL builder ambiguity invariants
+  // — ONE alias can never resolve to TWO distinct owners, and no alias may
+  // sit in BOTH lists. Sorting the (alias, entity) pairs is not enough: the
+  // strict ALIAS ascent is the identity invariant.
+  it('R1.16.1 R1: ONE resolved alias can never claim TWO distinct entity owners', () => {
+    const report = structuredClone(
+      buildEntityMentionsReport({
+        snapshot: SNAPSHOT,
+        scan: buildEntityMentionPhrases('Doom news'),
+        matches: [{ normalized_alias: 'Doom', entity_id: 'ent-a' }],
+        resultOverflow: false,
+      }).report,
+    );
+    (report.matched as { normalizedAlias: string; entityId: string }[]).push({
+      normalizedAlias: 'Doom',
+      entityId: 'ent-b',
+    });
+    (report.counts as { entitiesLinked: number }).entitiesLinked = 2;
+    expect(readEntityMentionsReport({ entityMentions: report }).kind).toBe('malformed');
+  });
+
+  it('R1.16.1 R1: an alias observed in BOTH matched and ambiguous is malformed', () => {
+    const base = validReport();
+    const crossListed = {
+      ...base,
+      ambiguous: [{ normalizedAlias: 'Doom', ownerCount: 3 }],
+      counts: { uniqueAliasesMatched: 1, ambiguousAliasesObserved: 1, entitiesLinked: 1 },
+    };
+    expect(readEntityMentionsReport({ entityMentions: crossListed }).kind).toBe('malformed');
+  });
+
+  it('R1.16.1 R1: observed aliases share the phrase bound (matched + ambiguous ≤ phrasesConsidered)', () => {
+    // 'Doom news' → exactly 3 candidate phrases; every observed alias must
+    // be one of them, so the TWO lists share ONE combined bound.
+    const scan = buildEntityMentionPhrases('Doom news');
+    const base = buildEntityMentionsReport({
+      snapshot: SNAPSHOT,
+      scan,
+      matches: [{ normalized_alias: 'A', entity_id: 'ent-a' }],
+      resultOverflow: false,
+    }).report;
+    const atBound = {
+      ...base,
+      matched: [
+        { normalizedAlias: 'A', entityId: 'ent-a' },
+        { normalizedAlias: 'B', entityId: 'ent-b' },
+      ],
+      ambiguous: [{ normalizedAlias: 'C', ownerCount: 2 }],
+      counts: { uniqueAliasesMatched: 2, ambiguousAliasesObserved: 1, entitiesLinked: 2 },
+    };
+    expect(readEntityMentionsReport({ entityMentions: atBound }).kind).toBe('entity_mentions_v1');
+    const over = {
+      ...atBound,
+      ambiguous: [
+        { normalizedAlias: 'C', ownerCount: 2 },
+        { normalizedAlias: 'D', ownerCount: 2 },
+      ],
+      counts: { uniqueAliasesMatched: 2, ambiguousAliasesObserved: 2, entitiesLinked: 2 },
+    };
+    expect(readEntityMentionsReport({ entityMentions: over }).kind).toBe('malformed');
   });
 });

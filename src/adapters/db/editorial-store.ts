@@ -440,13 +440,14 @@ export interface EditorialCommitInput {
    * R1.16 (Phase 5D): the DETERMINISTIC unique controlled-alias mentions
    * resolved for THIS draft (policy `em1` — ambiguous aliases are NEVER
    * here). Each pair becomes ONE `story_entities` statement in the SAME
-   * atomic batch, whose SQL predicate re-checks INSIDE the batch that the
-   * alias STILL maps to EXACTLY this entity: a mapping deleted, remapped,
-   * or given a second owner between the lookup and the commit no-ops ONLY
-   * that link (never an invalid link, never a partial editorial state).
-   * The PK (story_id, entity_id, relation) dedups multi-alias mentions of
-   * one entity; confidence is the fixed conservative 0; INSERT OR REPLACE
-   * and link deletion are forbidden.
+   * atomic batch, and the WHOLE RESULT is SQL-conditioned on the validity
+   * of EVERY relied mapping (R1.16.1, C1): a mapping deleted, remapped,
+   * or given a second owner between the lookup and the commit zeroes EVERY
+   * statement (typed `catalogChanged` — zero effects, zero orphans, no
+   * draft/report claiming links that did not persist), never an invalid
+   * link and never a partial editorial state. The PK (story_id, entity_id,
+   * relation) dedups multi-alias mentions of one entity; confidence is the
+   * fixed conservative 0; INSERT OR REPLACE and link deletion are forbidden.
    */
   readonly entityMentions: readonly {
     readonly normalizedAlias: string;
@@ -466,10 +467,23 @@ export interface EditorialCommitResult {
    * predicate failure — never orphaned, never half-written). */
   readonly fingerprintsInserted: number;
   /** R1.16: durable `story_entities` mention links inserted by THIS batch
-   * (≤ resolved count; a suppressed link means the alias mapping changed
-   * inside the lookup→commit window — the SQL predicate no-oped ONLY that
-   * link, honestly and without any invalid row). */
+   * (on a committed result this EQUALS the distinct entity count of the
+   * resolved pairs — R1.16.1's whole-result catalog gate guarantees every
+   * relied mapping was valid inside the batch, so the report counts and
+   * the durable rows can never diverge). */
   readonly entityMentionsInserted: number;
+  /**
+   * R1.16.1 (C1): the WHOLE editorial result was withheld — at least one
+   * alias mapping the report relied on was deleted, remapped, or given a
+   * second owner inside the lookup→commit window, so the SQL catalog gate
+   * zeroed EVERY statement of the batch (zero effects, zero orphans, no
+   * draft/report claiming links that did not persist). DISTINCT from
+   * `fenceLost`/`snapshotChanged`/`contentTaken` on purpose: the caller
+   * re-resolves against the CURRENT catalog (one fresh SQL lookup, NO new
+   * provider call) and only then retries — never a blind re-run, never a
+   * fabricated outcome.
+   */
+  readonly catalogChanged: boolean;
   /**
    * R1.15: the exact-content anchor PRIMARY KEY collided — ANOTHER story
    * already owns this exact full content, so the WHOLE batch (including
@@ -503,13 +517,15 @@ const SNAPSHOT_PREDICATE = `EXISTS (SELECT 1 FROM source_items
  * already owns the `sc1:<digest>` anchor, the PRIMARY KEY collision is the
  * SIGNAL that aborts the whole atomic batch (typed `contentTaken`). The
  * own-row guard keeps the statement re-runnable for the SAME story only.
- * Fence and snapshot predicates still gate the insert, so a stale
- * generation or a changed snapshot can NEVER plant an anchor.
+ * Fence, snapshot and catalog-gate (R1.16.1) predicates still gate the
+ * insert, so a stale generation, a changed snapshot or an invalidated
+ * relied alias mapping can NEVER plant an anchor.
  */
 function exactContentAnchorStatement(
   input: EditorialCommitInput,
   fenceParams: readonly unknown[],
   snapshotParams: readonly unknown[],
+  gate: { readonly sql: string; readonly params: readonly unknown[] },
 ): { readonly sql: string; readonly params: readonly unknown[] } {
   const anchor = input.exactContentAnchor;
   return {
@@ -518,7 +534,8 @@ function exactContentAnchorStatement(
            WHERE NOT EXISTS (SELECT 1 FROM story_fingerprints
                               WHERE kind = ? AND value = ? AND story_id = ?)
              AND ${FENCE_PREDICATE}
-             AND ${SNAPSHOT_PREDICATE}`,
+             AND ${SNAPSHOT_PREDICATE}
+             AND ${gate.sql}`,
     params: [
       input.story.id,
       anchor.kind,
@@ -529,6 +546,7 @@ function exactContentAnchorStatement(
       input.story.id,
       ...fenceParams,
       ...snapshotParams,
+      ...gate.params,
     ],
   };
 }
@@ -636,6 +654,7 @@ export async function commitEditorialResult(
         sourceItemProcessed: false,
         fingerprintsInserted: 0,
         entityMentionsInserted: 0,
+        catalogChanged: false,
         contentTaken: true,
         fenceLost: false,
         snapshotChanged: false,
@@ -648,14 +667,15 @@ export async function commitEditorialResult(
 }
 
 /**
- * The R1.16 alias-mapping validity predicate: the normalized alias the
- * decision was made from must STILL map to EXACTLY ONE entity AND that
- * entity must still be THIS one — evaluated INSIDE the atomic batch on
- * the mention's own statement (a JS re-read is never a substitute). A
- * mapping deleted, remapped, or given a second owner between the lookup
- * and the commit zeroes ONLY this insert; the rest of the batch is
- * unaffected (the draft/report stay coherent; the report records the
- * lookup-moment observation with `lookup_moment_visibility`).
+ * The R1.16 alias-mapping validity predicate (per-mention statement): the
+ * normalized alias the decision was made from must STILL map to EXACTLY
+ * ONE entity AND that entity must still be THIS one — evaluated INSIDE the
+ * atomic batch on the mention's own statement (a JS re-read is never a
+ * substitute). R1.16.1 (C1): this per-pair predicate is now
+ * DEFENSE-IN-DEPTH — the WHOLE result is additionally conditioned on the
+ * same validity for EVERY relied mapping (the catalog gate below), so a
+ * mapping invalidated inside the lookup→commit window can no longer leave
+ * a committed draft whose report claims a link that did not persist.
  */
 const ALIAS_UNIQOWN_PREDICATE = `1 = (SELECT COUNT(DISTINCT ea.entity_id)
                                       FROM entity_aliases ea
@@ -663,12 +683,53 @@ const ALIAS_UNIQOWN_PREDICATE = `1 = (SELECT COUNT(DISTINCT ea.entity_id)
    AND EXISTS (SELECT 1 FROM entity_aliases ea
                 WHERE ea.normalized_alias = ? AND ea.entity_id = ?)`;
 
-/** One fenced `story_entities` mention-link statement (R1.16). */
+/**
+ * R1.16.1 (C1): the WHOLE-RESULT catalog-mapping gate — appended to EVERY
+ * statement of the commit batch. The editorial result may persist ONLY if
+ * EVERY (alias, entity) pair the report claims as durable STILL holds at
+ * commit time: the alias still maps to EXACTLY ONE entity AND that entity
+ * is the claimed one. One invalidated mapping (deleted, remapped, or given
+ * a second owner inside the lookup→commit window) zeroes EVERY statement —
+ * ZERO effects, zero orphans, and no draft/report that claims links which
+ * did not persist — classified typed `catalogChanged`.
+ *
+ * The claimed pairs travel as ONE bound JSON parameter read through
+ * `json_each` (injection-safe, ≤ ENTITY_MENTION_MAX_PHRASES pairs, TWO
+ * bound parameters per statement) — never per-pair SQL text interpolation
+ * and never a per-pair parameter blowup against the D1 per-query bound
+ * limit of 100. An EMPTY claimed list is the trivial always-true gate
+ * (`1 = 1`): the no-mention path stays byte-identical to R1.16.
+ */
+function catalogMappingGate(input: EditorialCommitInput): {
+  readonly sql: string;
+  readonly params: readonly unknown[];
+} {
+  if (input.entityMentions.length === 0) {
+    return { sql: '1 = 1', params: [] };
+  }
+  return {
+    sql: `(SELECT COUNT(*) FROM json_each(?) claimed
+            WHERE EXISTS (SELECT 1 FROM entity_aliases ea
+                           WHERE ea.normalized_alias = json_extract(claimed.value, '$[0]')
+                             AND ea.entity_id = json_extract(claimed.value, '$[1]'))
+              AND 1 = (SELECT COUNT(DISTINCT ea2.entity_id) FROM entity_aliases ea2
+                        WHERE ea2.normalized_alias = json_extract(claimed.value, '$[0]')))
+         = ?`,
+    params: [
+      JSON.stringify(input.entityMentions.map((pair) => [pair.normalizedAlias, pair.entityId])),
+      input.entityMentions.length,
+    ],
+  };
+}
+
+/** One fenced `story_entities` mention-link statement (R1.16; R1.16.1 —
+ * carries the whole-result catalog gate as defense-in-depth). */
 function entityMentionStatement(
   input: EditorialCommitInput,
   mention: { readonly normalizedAlias: string; readonly entityId: string },
   fenceParams: readonly unknown[],
   snapshotParams: readonly unknown[],
+  gate: { readonly sql: string; readonly params: readonly unknown[] },
 ): { readonly sql: string; readonly params: readonly unknown[] } {
   return {
     sql: `INSERT INTO story_entities (story_id, entity_id, relation, confidence)
@@ -678,7 +739,8 @@ function entityMentionStatement(
                                 AND relation = '${STORY_ENTITY_RELATION_MENTIONED}')
              AND ${ALIAS_UNIQOWN_PREDICATE}
              AND ${FENCE_PREDICATE}
-             AND ${SNAPSHOT_PREDICATE}`,
+             AND ${SNAPSHOT_PREDICATE}
+             AND ${gate.sql}`,
     params: [
       input.story.id,
       mention.entityId,
@@ -689,6 +751,7 @@ function entityMentionStatement(
       mention.entityId,
       ...fenceParams,
       ...snapshotParams,
+      ...gate.params,
     ],
   };
 }
@@ -696,9 +759,11 @@ function entityMentionStatement(
 /**
  * The atomic statement list: the six base statements + the ≤3 story-scoped
  * fingerprints (R1.13) + the ≤resolved controlled-alias mention links
- * (R1.16) + the exact-content anchor (R1.15, LAST). Any statement failure
- * rolls back the whole transaction; the anchor's PRIMARY KEY collision is
- * the R1.15 group-uniqueness signal.
+ * (R1.16) + the exact-content anchor (R1.15, LAST). Every statement also
+ * carries the R1.16.1 whole-result catalog gate: the batch persists only
+ * if every relied (alias, entity) mapping is still valid inside the
+ * transaction. Any statement failure rolls back the whole transaction;
+ * the anchor's PRIMARY KEY collision is the R1.15 group-uniqueness signal.
  */
 async function buildAndRunCommitBatch(
   executor: DbExecutor,
@@ -706,6 +771,11 @@ async function buildAndRunCommitBatch(
   fenceParams: readonly unknown[],
   snapshotParams: readonly unknown[],
 ): Promise<readonly DbQueryMeta[]> {
+  // R1.16.1 (C1): ONE catalog-mapping gate shared by EVERY statement — the
+  // whole result persists only if every relied (alias, entity) mapping is
+  // still valid inside this transaction (empty pairs → trivial `1 = 1`,
+  // zero extra params, byte-identical legacy behavior).
+  const gate = catalogMappingGate(input);
   return executor.batch([
     {
       sql: `INSERT INTO stories (id, story_key, status, trust_status, content_type,
@@ -714,7 +784,8 @@ async function buildAndRunCommitBatch(
             SELECT ?, ?, 'discovered', 'unknown', 'industry', 50, 0, ?, ?, ?, 1, ?, ?
              WHERE NOT EXISTS (SELECT 1 FROM stories WHERE id = ?)
                AND ${FENCE_PREDICATE}
-               AND ${SNAPSHOT_PREDICATE}`,
+               AND ${SNAPSHOT_PREDICATE}
+               AND ${gate.sql}`,
       params: [
         input.story.id,
         input.story.storyKey,
@@ -726,6 +797,7 @@ async function buildAndRunCommitBatch(
         input.story.id,
         ...fenceParams,
         ...snapshotParams,
+        ...gate.params,
       ],
     },
     {
@@ -734,7 +806,8 @@ async function buildAndRunCommitBatch(
             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              WHERE NOT EXISTS (SELECT 1 FROM claims WHERE id = ?)
                AND ${FENCE_PREDICATE}
-               AND ${SNAPSHOT_PREDICATE}`,
+               AND ${SNAPSHOT_PREDICATE}
+               AND ${gate.sql}`,
       params: [
         input.claim.id,
         input.claim.storyId,
@@ -749,6 +822,7 @@ async function buildAndRunCommitBatch(
         input.claim.id,
         ...fenceParams,
         ...snapshotParams,
+        ...gate.params,
       ],
     },
     {
@@ -756,7 +830,8 @@ async function buildAndRunCommitBatch(
             SELECT ?, ?, ?, ?, ?, ?, ?
              WHERE NOT EXISTS (SELECT 1 FROM evidence WHERE id = ?)
                AND ${FENCE_PREDICATE}
-               AND ${SNAPSHOT_PREDICATE}`,
+               AND ${SNAPSHOT_PREDICATE}
+               AND ${gate.sql}`,
       params: [
         input.evidence.id,
         input.evidence.claimId,
@@ -768,6 +843,7 @@ async function buildAndRunCommitBatch(
         input.evidence.id,
         ...fenceParams,
         ...snapshotParams,
+        ...gate.params,
       ],
     },
     {
@@ -777,7 +853,8 @@ async function buildAndRunCommitBatch(
             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              WHERE NOT EXISTS (SELECT 1 FROM ai_runs WHERE id = ?)
                AND ${FENCE_PREDICATE}
-               AND ${SNAPSHOT_PREDICATE}`,
+               AND ${SNAPSHOT_PREDICATE}
+               AND ${gate.sql}`,
       params: [
         input.aiRun.id,
         input.aiRun.task,
@@ -796,6 +873,7 @@ async function buildAndRunCommitBatch(
         input.aiRun.id,
         ...fenceParams,
         ...snapshotParams,
+        ...gate.params,
       ],
     },
     {
@@ -805,7 +883,8 @@ async function buildAndRunCommitBatch(
             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              WHERE NOT EXISTS (SELECT 1 FROM drafts WHERE id = ?)
                AND ${FENCE_PREDICATE}
-               AND ${SNAPSHOT_PREDICATE}`,
+               AND ${SNAPSHOT_PREDICATE}
+               AND ${gate.sql}`,
       params: [
         input.draft.id,
         input.draft.storyId,
@@ -824,6 +903,7 @@ async function buildAndRunCommitBatch(
         input.draft.id,
         ...fenceParams,
         ...snapshotParams,
+        ...gate.params,
       ],
     },
     {
@@ -835,8 +915,14 @@ async function buildAndRunCommitBatch(
               AND source_id = ?
               AND content_hash = ?
               AND processing_status IN ('new', 'queued')
-              AND ${FENCE_PREDICATE}`,
-      params: [input.snapshot.sourceItemId, ...snapshotParams.slice(1), ...fenceParams],
+              AND ${FENCE_PREDICATE}
+              AND ${gate.sql}`,
+      params: [
+        input.snapshot.sourceItemId,
+        ...snapshotParams.slice(1),
+        ...fenceParams,
+        ...gate.params,
+      ],
     },
     // R1.13: the NEW story's fingerprints — same batch, same fences, same
     // snapshot predicate. A fingerprint row can never outlive the draft it
@@ -847,7 +933,8 @@ async function buildAndRunCommitBatch(
              WHERE NOT EXISTS (SELECT 1 FROM story_fingerprints
                                 WHERE kind = ? AND value = ?)
                AND ${FENCE_PREDICATE}
-               AND ${SNAPSHOT_PREDICATE}`,
+               AND ${SNAPSHOT_PREDICATE}
+               AND ${gate.sql}`,
       params: [
         input.draft.storyId,
         fingerprint.kind,
@@ -857,19 +944,22 @@ async function buildAndRunCommitBatch(
         fingerprint.value,
         ...fenceParams,
         ...snapshotParams,
+        ...gate.params,
       ],
     })),
     // R1.16: the controlled-alias mention links — same batch, same fences,
-    // same snapshot predicate, PLUS the alias-mapping validity predicate.
-    // A mention link can never outlive the draft it belongs to: any
-    // predicate failure no-ops the WHOLE batch.
+    // same snapshot predicate, PLUS the per-pair alias-mapping validity
+    // predicate (R1.16.1 defense-in-depth: the whole result is ALSO gated
+    // on the same validity for every relied mapping). A mention link can
+    // never outlive the draft it belongs to: any predicate failure no-ops
+    // the WHOLE batch.
     ...input.entityMentions.map((mention) =>
-      entityMentionStatement(input, mention, fenceParams, snapshotParams),
+      entityMentionStatement(input, mention, fenceParams, snapshotParams, gate),
     ),
     // R1.15: the exact-content group anchor — LAST, deliberately unguarded
     // across stories: a live cross-story owner trips the PRIMARY KEY and
     // aborts the whole transaction (typed contentTaken for the caller).
-    exactContentAnchorStatement(input, fenceParams, snapshotParams),
+    exactContentAnchorStatement(input, fenceParams, snapshotParams, gate),
   ]);
 }
 
@@ -908,6 +998,7 @@ async function classifyCommitMetas(
       sourceItemProcessed,
       fingerprintsInserted,
       entityMentionsInserted,
+      catalogChanged: false,
       contentTaken: false,
       fenceLost: false,
       snapshotChanged: false,
@@ -917,16 +1008,45 @@ async function classifyCommitMetas(
   // Zero draft effects: ONE classification read decides which predicate
   // failed (write protection already happened entirely inside SQL — this
   // read only picks the typed outcome for the zero-effect batch).
-  const classification = await executor.first<{ fence_holds: number; snapshot_holds: number }>({
+  // R1.16.1 (C1): the SAME read also evaluates the catalog-mapping gate
+  // (mappings_hold) so an invalidated relied mapping gets its own typed
+  // outcome instead of hiding inside the fence/snapshot classes.
+  const classification = await executor.first<{
+    fence_holds: number;
+    snapshot_holds: number;
+    mappings_hold: number;
+  }>({
     sql: `SELECT EXISTS (SELECT 1 FROM jobs
                           WHERE id = ? AND status = 'claimed' AND attempts = ?
                             AND lease_until IS NOT NULL AND lease_until > ?) AS fence_holds,
                  EXISTS (SELECT 1 FROM source_items
-                          WHERE id = ? AND source_id = ? AND content_hash = ?) AS snapshot_holds`,
-    params: [...fenceParams, ...snapshotParams],
+                          WHERE id = ? AND source_id = ? AND content_hash = ?) AS snapshot_holds,
+                 ${input.entityMentions.length === 0 ? '1' : `(${catalogMappingGate(input).sql})`} AS mappings_hold`,
+    params: [...fenceParams, ...snapshotParams, ...catalogMappingGate(input).params],
   });
   const fenceHolds = (classification?.fence_holds ?? 0) === 1;
   const snapshotHolds = (classification?.snapshot_holds ?? 0) === 1;
+  const mappingsHold = (classification?.mappings_hold ?? 0) === 1;
+  if (fenceHolds && snapshotHolds && !mappingsHold) {
+    // The fence and the snapshot are intact but at least ONE relied alias
+    // mapping was deleted, remapped, or given a second owner inside the
+    // lookup→commit window: the catalog gate zeroed EVERY statement —
+    // zero effects, zero orphans, no draft/report claiming links that did
+    // not persist. DISTINCT typed outcome (R1.16.1, C1): the caller
+    // re-resolves against the CURRENT catalog (one fresh SQL lookup, NO
+    // new provider call) and only then retries.
+    return {
+      draftInserted,
+      storyInserted,
+      sourceItemProcessed,
+      fingerprintsInserted: 0,
+      entityMentionsInserted: 0,
+      catalogChanged: true,
+      contentTaken: false,
+      fenceLost: false,
+      snapshotChanged: false,
+    };
+  }
   if (fenceHolds && !snapshotHolds) {
     // The job fence held but the source snapshot is gone: the R1.11.1
     // commit-time change — zero editorial effects, distinct typed outcome.
@@ -936,12 +1056,13 @@ async function classifyCommitMetas(
       sourceItemProcessed,
       fingerprintsInserted: 0,
       entityMentionsInserted: 0,
+      catalogChanged: false,
       contentTaken: false,
       fenceLost: false,
       snapshotChanged: true,
     };
   }
-  // Stale generation (fence lost), or the impossible both-hold case (a
+  // Stale generation (fence lost), or the impossible all-hold case (a
   // pre-existing non-ready draft with this deterministic id — no such
   // path exists; conservatively reported as a lost fence, bounded by the
   // engine's own attempt budget).
@@ -951,6 +1072,7 @@ async function classifyCommitMetas(
     sourceItemProcessed,
     fingerprintsInserted: 0,
     entityMentionsInserted: 0,
+    catalogChanged: false,
     contentTaken: false,
     fenceLost: true,
     snapshotChanged: false,

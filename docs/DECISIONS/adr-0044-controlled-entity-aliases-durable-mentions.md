@@ -1,14 +1,18 @@
 # ADR-0044: Phase 5D — controlled entity aliases → durable story mentions
 
-- **Status:** Implemented on the review branch (R1.16; under independent
-  Posidon review — NOT deployment, activation, or live-inference approval).
+- **Status:** Implemented on the review branch (R1.16 + the R1.16.1 bounded
+  corrections for the independently reproduced C1/U1/R1 probes; under
+  independent Posidon review — NOT deployment, activation, or
+  live-inference approval).
 - **Phase:** 5D (the bounded next slice of Phase 5 story/entity wiring)
 - **Date:** 2026-10-30
 - **App at delivery:** 1.11.0 candidate; **schema stays 3** (migrations
   0001–0004 untouched — ZERO DDL; the round writes ONLY to the existing
   `entities`, `entity_aliases` (read) and `story_entities` (insert) tables)
 - **Instruction:** Posidon R1.16 (`NEXT_GLM_R1.16_Entity-Aliases-and-Durable-Mentions.md`)
-- **Base:** `8f68c5d4facfe9a24854d98754432bf378f2addf` (R1.15.2 delivery HEAD)
+- **Base:** `8f68c5d4facfe9a24854d98754432bf378f2addf` (R1.15.2 delivery HEAD);
+  corrections based on `caa7402f39ecf3a07ac87850a149cb35c3724f22` (R1.16
+  delivery HEAD, app 1.11.0)
 
 ## Context
 
@@ -141,3 +145,68 @@ fenced target predicates) is preserved byte-for-byte.
 - NOT delivered by this round (explicitly future): semantic/fuzzy
   matching, story merging, event detection, AI adjudication, admin UI or
   import tooling for the catalog, and any real catalog seeding.
+
+## R1.16.1 — bounded corrections (app 1.11.1 candidate; Posidon probes C1/U1/R1)
+
+Three independently reproduced defects of §4–§5 are closed on the SAME
+architecture (schema 3, ZERO DDL, no new capability, reuse boundary
+untouched). RED for all three probes was recorded on the R1.16 delivery
+HEAD (`caa7402f39ecf3a07ac87850a149cb35c3724f22`) inside the PERMANENT
+suites before the fix.
+
+1. **C1 — report↔link coherence is now SQL-enforced on the WHOLE result.**
+   §4's original text accepted a deliberately weak no-op-only-link contract:
+   an alias mapping invalidated inside the lookup→commit window no-oped ONLY
+   its `story_entities` insert while the draft/report/processed flip still
+   committed — a persisted report claiming `entitiesLinked=1` over ZERO
+   durable rows (Posidon probe: `expected 1 to be 0`). CORRECTED DESIGN: a
+   whole-result **catalog-mapping gate** is appended to EVERY statement of
+   the fenced atomic batch — the claimed (alias, entity) pairs travel as ONE
+   bound JSON parameter read through `json_each` plus ONE expected-count
+   parameter (two bound parameters per statement; the heaviest statement
+   stays at 23 of the D1 per-query limit of 100; EXPLAIN QUERY PLAN seeks
+   `idx_entity_alias_lookup` per claimed pair, no table scan — LOCAL PROXY
+   only). One invalidated mapping (deleted / remapped / second owner) zeroes
+   EVERY statement → zero effects, zero orphans → the typed **`catalogChanged`**
+   outcome (the zero-effect classification read gains `mappings_hold`;
+   precedence snapshot > mappings > fence). The handler answers with ONE
+   bounded in-handler re-resolve — a FRESH SQL lookup of the CURRENT catalog
+   (never a JS reuse of the stale rows) re-committing the SAME provider
+   draft: ZERO new provider calls, ZERO new charges, no fabricated outcome;
+   only a SECOND `catalogChanged` hands the bounded engine retry (the real
+   provider run stays recorded via the existing fenced `ai_runs` path —
+   charged, never refunded, never faked). A committed report now EQUALS the
+   durable rows (multi-alias mentions of one entity dedup through the
+   statement PK guard); `entityMentionsInserted` equals the DISTINCT entity
+   count and a mismatch is an invariant tripwire, never a tolerated state.
+   Tests/docs that accepted the weak contract are corrected WITH the reason
+   recorded (the alias-REMAPPED case: the commit-time mapping is what BOTH
+   the report and the link say — an honest commit-time resolution, not a
+   stale lookup-moment claim).
+
+2. **U1 — the tokenizer walks code points, not UTF-16 code units.**
+   §1's window builder indexed the string by unit, so a letter outside the
+   BMP read as two lone surrogates and acted as a false word boundary
+   (`'\u{10400}Doom\u{10400}'` produced the standalone phrase `Doom`).
+   CORRECTED: `codePointAt` + `String.fromCodePoint` traversal with correct
+   slice offsets — astral letters/numbers/marks are first-class token
+   characters, unpaired surrogates stay separators, emoji (So) stays a
+   separator; the Persian/ZWNJ/NFC/`Doomlike`/`Doom2`/`Half-Life` behavior
+   is preserved byte-for-byte. The 256-token cap is enforced DURING the
+   traversal (early exit at the first beyond-cap token start) and
+   `tokensTruncated` is the honest probe — no build-all-then-slice.
+
+3. **R1 — the reader enforces the real ambiguity invariants.**
+   §5's reader validated (alias, entity) PAIR ascent, which still accepted
+   ONE alias resolved to TWO distinct owners. CORRECTED: strict ALIAS ascent
+   in `matched` (one alias can never claim two owners), `matched` ∩
+   `ambiguous` = ∅, and BOTH lists share the candidate-phrase bound
+   (`matched + ambiguous ≤ phrasesConsidered`). Counts/observation/caps/
+   limitations checks and the full malformed/null/primitive/array table are
+   unchanged; no invented alias-format or hash constraints.
+
+The `lookup_moment_visibility` limitation label stays: the report still
+describes the lookup-moment scan, and unclaimed phrases can always gain or
+lose catalog matches later — but a RELIED-UPON mapping can no longer change
+between the lookup and a committed result (the gate makes the lookup moment
+and the commit moment agree for everything the report claims as durable).

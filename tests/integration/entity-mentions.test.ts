@@ -677,7 +677,7 @@ describe('R1.16 — controlled aliases link stories to their registered entities
     }
   });
 
-  it('alias DELETED between lookup and commit → no invalid link; the draft still lands', async () => {
+  it('alias DELETED between lookup and commit → the whole result is withheld, the re-resolve lands honestly with no link', async () => {
     const harness = createHarness();
     await seedSource(harness.rawExecutor, SOURCE_X, 'منبع ایکس');
     await seedEntity(harness.rawExecutor, { id: 'ent-doom', slug: 'doom', name: 'Doom' });
@@ -695,9 +695,28 @@ describe('R1.16 — controlled aliases link stories to their registered entities
     expect(await enqueueAndRun(harness, 'item-del')).toEqual(['ack:job_completed']);
     expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(1);
     expect(await storyEntityRows(harness.rawExecutor)).toEqual([]);
+    // R1.16.1 (C1): the first batch was withheld by the catalog gate and
+    // the bounded re-resolve saw the DELETED alias — the landed report is
+    // the honest no_match_observed, never the stale lookup-moment claim.
+    const story = await storyIdForItem(harness.rawExecutor, 'item-del');
+    const report = await draftReport(harness.rawExecutor, story);
+    expect(report.kind).toBe('entity_mentions_v1');
+    if (report.kind === 'entity_mentions_v1') {
+      expect(report.report.observation).toBe('no_match_observed');
+      expect(report.report.matched).toEqual([]);
+      expect(report.report.counts.entitiesLinked).toBe(0);
+    }
+    expect(harness.providerCalls).toBe(1);
   });
 
-  it('alias REMAPPED to another entity between lookup and commit → NO link to either entity', async () => {
+  // R1.16.1 (C1) expectation correction — the OLD text asserted the weak
+  // no-op-only-link contract ("NO link to either entity" while the lookup-
+  // moment report claimed a resolved owner). Under the whole-result catalog
+  // gate the invalidated first batch is withheld (typed catalogChanged) and
+  // the ONE bounded re-resolve re-reads the CURRENT catalog: the alias NOW
+  // (at commit time) maps uniquely to ent-new, so the durable link and the
+  // report BOTH say ent-new — the report and the links can never diverge.
+  it('alias REMAPPED to another entity between lookup and commit → the commit-time mapping is what both the report and the link say', async () => {
     const harness = createHarness();
     await seedSource(harness.rawExecutor, SOURCE_X, 'منبع ایکس');
     await seedEntity(harness.rawExecutor, { id: 'ent-old', slug: 'old', name: 'Old' });
@@ -715,11 +734,22 @@ describe('R1.16 — controlled aliases link stories to their registered entities
     });
     expect(await enqueueAndRun(harness, 'item-remap')).toEqual(['ack:job_completed']);
     expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(1);
-    const links = await storyEntityRows(harness.rawExecutor);
-    expect(links).toEqual([]);
+    const story = await storyIdForItem(harness.rawExecutor, 'item-remap');
+    const links = await storyEntityRows(harness.rawExecutor, story);
+    expect(links).toEqual([
+      { story_id: story, entity_id: 'ent-new', relation: 'mentioned', confidence: 0 },
+    ]);
+    const report = await draftReport(harness.rawExecutor, story);
+    expect(report.kind).toBe('entity_mentions_v1');
+    if (report.kind === 'entity_mentions_v1') {
+      expect(report.report.matched).toEqual([{ normalizedAlias: 'Doom', entityId: 'ent-new' }]);
+      expect(report.report.counts.entitiesLinked).toBe(links.length);
+    }
+    // The bounded re-resolve never re-runs the provider.
+    expect(harness.providerCalls).toBe(1);
   });
 
-  it('a SECOND alias owner added between lookup and commit → unambiguity broken IN SQL → zero links', async () => {
+  it('a SECOND alias owner added between lookup and commit → unambiguity broken IN SQL → the re-resolve reports the honest ambiguity, zero links', async () => {
     const harness = createHarness();
     await seedSource(harness.rawExecutor, SOURCE_X, 'منبع ایکس');
     await seedEntity(harness.rawExecutor, { id: 'ent-one', slug: 'one', name: 'One' });
@@ -739,6 +769,58 @@ describe('R1.16 — controlled aliases link stories to their registered entities
     expect(await enqueueAndRun(harness, 'item-second')).toEqual(['ack:job_completed']);
     expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(1);
     expect(await storyEntityRows(harness.rawExecutor)).toEqual([]);
+    // R1.16.1 (C1): the landed report says the alias is AMBIGUOUS (the
+    // commit-time reality) — entitiesLinked 0 == the zero durable links.
+    const story = await storyIdForItem(harness.rawExecutor, 'item-second');
+    const report = await draftReport(harness.rawExecutor, story);
+    expect(report.kind).toBe('entity_mentions_v1');
+    if (report.kind === 'entity_mentions_v1') {
+      expect(report.report.observation).toBe('ambiguous_only_observed');
+      expect(report.report.ambiguous).toEqual([{ normalizedAlias: 'Doom', ownerCount: 2 }]);
+      expect(report.report.counts.entitiesLinked).toBe(0);
+    }
+    expect(harness.providerCalls).toBe(1);
+  });
+
+  // R1.16.1 (C1): the persisted report can NEVER claim a durable link that
+  // the catalog invalidated inside the lookup→commit window. The WHOLE
+  // editorial result is SQL-conditioned on the validity of EVERY relied
+  // mapping: an invalidated mapping means ZERO effects (typed
+  // catalogChanged), ONE bounded in-handler re-resolve against the CURRENT
+  // catalog (fresh SQL lookup — never a JS reuse of the stale rows, never a
+  // new provider call/charge), and the landed draft's report EQUALS the
+  // durable story_entities rows for its story.
+  it('R1.16.1 C1: a second alias owner inside the window can never persist entitiesLinked without the durable link', async () => {
+    const harness = createHarness();
+    await seedSource(harness.rawExecutor, SOURCE_X, 'Source');
+    await seedEntity(harness.rawExecutor, { id: 'ent-a', slug: 'a', name: 'A' });
+    await seedEntity(harness.rawExecutor, { id: 'ent-b', slug: 'b', name: 'B' });
+    await seedAlias(harness.rawExecutor, { entityId: 'ent-a', alias: 'Doom' });
+    await seedItem(harness.rawExecutor, {
+      id: 'item-c1',
+      sourceId: SOURCE_X,
+      title: 'Doom revealed',
+    });
+    harness.runAfterAliasLookup(async () => {
+      await seedAlias(harness.rawExecutor, { entityId: 'ent-b', alias: 'Doom' });
+    });
+    expect(await enqueueAndRun(harness, 'item-c1')).toEqual(['ack:job_completed']);
+    const story = await storyIdForItem(harness.rawExecutor, 'item-c1');
+    const report = await draftReport(harness.rawExecutor, story);
+    expect(report.kind).toBe('entity_mentions_v1');
+    const links = await storyEntityRows(harness.rawExecutor, story);
+    if (report.kind === 'entity_mentions_v1') {
+      // The report counts EXACTLY the durable links of THIS story.
+      expect(report.report.counts.entitiesLinked).toBe(links.length);
+      // The invalidated lookup-moment resolution became the honest
+      // ambiguity observation — ZERO links claimed, ZERO links written.
+      expect(report.report.observation).toBe('ambiguous_only_observed');
+      expect(report.report.matched).toEqual([]);
+      expect(report.report.ambiguous).toEqual([{ normalizedAlias: 'Doom', ownerCount: 2 }]);
+    }
+    expect(links).toEqual([]);
+    // The bounded in-handler re-resolve NEVER re-runs the provider.
+    expect(harness.providerCalls).toBe(1);
   });
 
   it('real handler replay after success → write-free, charge-free, entity links untouched', async () => {
@@ -955,6 +1037,34 @@ describe('R1.16 — SQL plan and reader round-trip on real artifacts (LOCAL PROX
     expect(plan).toContain('idx_entity_alias_lookup');
     expect(plan).not.toContain('SCAN entity_aliases');
     // LOCAL PROXY metric only — never a Cloudflare cost proxy.
+  });
+
+  // R1.16.1 (C1): the whole-result catalog gate (json_each over the bound
+  // pairs parameter) evaluates each claimed pair through the SAME index —
+  // bounded work per claimed pair (≤ pairs ≤ phrases ≤ 90), no full-table
+  // scan, and +2 bound parameters per statement against the D1 per-query
+  // limit of 100 (≤23 own params on the heaviest statement). LOCAL PROXY
+  // metric only — never a Cloudflare cost proxy.
+  it('EXPLAIN QUERY PLAN: the catalog gate seeks idx_entity_alias_lookup per claimed pair (no table scan)', async () => {
+    await applyMigrations(env.DB);
+    const executor = createDbExecutor(env.DB, { clock: fixedClock(NOW) });
+    const { rows } = await executor.query<{ detail: string }>({
+      sql: `EXPLAIN QUERY PLAN SELECT COUNT(*) FROM json_each(?) claimed
+             WHERE EXISTS (SELECT 1 FROM entity_aliases ea
+                            WHERE ea.normalized_alias = json_extract(claimed.value, '$[0]')
+                              AND ea.entity_id = json_extract(claimed.value, '$[1]'))
+               AND 1 = (SELECT COUNT(DISTINCT ea2.entity_id) FROM entity_aliases ea2
+                         WHERE ea2.normalized_alias = json_extract(claimed.value, '$[0]'))`,
+      params: [
+        JSON.stringify([
+          ['Doom', 'ent-a'],
+          ['دوم', 'ent-a'],
+        ]),
+      ],
+    });
+    const plan = rows.map((row) => row.detail).join('\n');
+    expect(plan).toContain('idx_entity_alias_lookup');
+    expect(plan).not.toContain('SCAN entity_aliases');
   });
 
   it('a historical draft WITHOUT the entityMentions field reads as absent (never reinterpreted)', async () => {
