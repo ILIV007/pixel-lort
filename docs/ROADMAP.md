@@ -756,6 +756,42 @@ decision.
       integration 10 + demo 1), full suite 117 files / 1625 tests green,
       secret scan 428/0; version 1.12.0; schema stays 3, ZERO DDL; NO
       Phase-5-completion / semantic-accuracy / production-ready claim.
+- [x] **R1.17.1 (v1.12.1, ADR-0045 correction): EVENT-RELATION SAFETY &
+      CORRECTNESS — exactly three independent Posidon findings closed, NO
+      new capability, NO Phase-5 scope claim. G1: the effective relation
+      gate is the GLOBAL `AI_ENABLED` kill switch AND the independent
+      `EVENT_RELATION_ENABLED` flag — both fail-closed, enforced in TWO
+      layers (the production wiring passes the global gate into the
+      relation service's config AND into the handler's relation step; the
+      service itself refuses on `aiEnabled=false` even for a wrongly-wired
+      caller) — with the global gate OFF: ZERO relation provider calls,
+      ZERO budget authorizations, ZERO usage writes. A1: ALL post-provider
+      failure exits are audited — the first commit throw is caught and the
+      generation's REAL invocations (drafting AND relation) are recorded
+      best-effort through the fenced standalone ai_runs inserts with
+      deterministic per-(job,generation,pair,attempt) ids and the own-row
+      guard (charges stay, no refund, no collision across generations, no
+      misattribution, no free lunch; a persistent store outage defeats the
+      best-effort record — an honest limitation, never an invented
+      exactly-once guarantee); deferred-pair ledgers carry the REAL
+      self-side identity instead of the old empty-evidence placeholder.
+      D1: the step deadline is ABSOLUTE from the FIRST relation work
+      (retrieval probes included) through basis packaging, budget
+      authorization, the provider call and usage — the handler computes it
+      and the service can only SHORTEN its local 15 s cap (never reset or
+      extend); reads stop STARTING after expiry (no new probe, no new
+      basis read — the unread candidate is TYPED
+      `basis_unavailable/step_deadline_expired`), every pair after expiry
+      is TYPED `skipped_deadline` with zero run rows, pending D1 queries
+      are never claimed cancellable (the bounded race frees the caller
+      only), and the pairs/attempt caps plus the separate drafting
+      deadline stay untouched. All three counterexamples were reproduced
+      RED on the untouched baseline and are GREEN after the corrections;
+      the permanent regressions live in the main suites (unit 41,
+      integration 20 incl. the real engine-env wiring matrix with a
+      native-binding stub and zero network); full suite 118 files / 1640
+      tests green; version 1.12.1; schema stays 3, ZERO DDL; NO
+      Phase-5-completion / semantic-accuracy / production-ready claim.
 - [ ] Story MERGING and semantic/deterministic matching with thresholds
       (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate discovery +
       conservative observation assessment, and Phase 5D provides ONLY

@@ -159,3 +159,50 @@ deploy/PreviewBuild change, no AI/ingestion activation or live inference,
 no Telegram/billing/TARGET_CHANNEL changes, no new media/publisher/admin
 surface, no semantic auto-merge, no truth/source-independence claim, and
 no unauthorized next step.
+
+## Correction R1.17.1 (v1.12.1) — three independent Posidon findings
+
+Bounded to corrections ONLY (no new capability, no Phase-5 scope claim,
+no semantic-model-quality claim). Each counterexample was reproduced RED
+on the untouched baseline e61bb46 before its fix and GREEN after.
+
+1. **G1 — the global AI kill switch gates the relation task.** The R1.17
+   wiring let a task-specific flag bypass the global inference gate. The
+   effective gate is now `AI_ENABLED AND EVENT_RELATION_ENABLED`, both
+   fail-closed, in TWO layers: the production wiring passes the global
+   gate into the relation service config AND into the handler's relation
+   step, and the service itself refuses (`ai_disabled`, zero calls, zero
+   budget writes) even for a wrongly-wired caller. Flag independence is a
+   scope boundary, never a bypass license.
+
+2. **A1 — post-provider failure exits keep the audit.** The first commit
+   throw erased the generation's real invocations from `ai_runs`. Every
+   post-provider exit now records the REAL invocations best-effort
+   through the fenced standalone inserts with deterministic
+   per-(job,generation,pair,attempt) ids and the own-row guard: charges
+   stay (no refund), the next generation runs and records its OWN
+   invocations (no collision, no misattribution, no free lunch), and a
+   used-by-nobody orphan run is never presented as consumed by any draft.
+   A persistent store outage can defeat the best-effort record — an
+   honest limitation; no exactly-once guarantee is invented. Deferred
+   pair ledgers carry the REAL self-side identity (the old
+   empty-`sideA` placeholder failed the typed reader).
+
+3. **D1 — the step deadline is ABSOLUTE from the first relation work.**
+   Retrieval/basis reads consumed time OUTSIDE the 15 s step deadline,
+   after which the service still opened a fresh provider window. The
+   handler now sets the absolute deadline at the FIRST relation work and
+   passes it to the service, which can only SHORTEN its local cap (never
+   reset or extend; non-finite supplied values are treated as absent).
+   Reads stop STARTING after expiry: no new probe (the shortfall folds
+   into the honest `unprobedCount`), no new basis read (TYPED
+   `basis_unavailable/step_deadline_expired`), every pair after expiry
+   TYPED `skipped_deadline` with zero run rows. A pending D1 query is
+   never claimed cancellable — the bounded race frees the caller only.
+   The ≤2/≤3 caps and the separate drafting deadline are untouched.
+
+Permanent regressions: unit (the deadline block + the layered G1 gate)
+and integration (the real engine-env wiring matrix with a native-binding
+stub and zero network; the multi-pair commit-throw audit before/after the
+retry; slow probe/basis/authorization/provider with the injected
+fake-clock and manual scheduler — zero real sleeps).
