@@ -18,7 +18,7 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.11.1",
+    "APP_VERSION": "1.12.0",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
@@ -64,6 +64,12 @@
     // round), so the Gemini fallback stays OFF even if this flag were true.
     "AI_ENABLED": "false",
     "AI_GEMINI_ENABLED": "false",
+    // R1.17 (Phase 5E-1) event-relation task gate (non-secret;
+    // ADR-0045). INDEPENDENT fail-closed flag: with "false" the relation
+    // step performs ZERO retrieval, ZERO adjudication, ZERO writes. It
+    // NEVER implies AI_ENABLED or EDITORIAL_ENABLED; no live model call
+    // is possible while the shipped flags stay "false".
+    "EVENT_RELATION_ENABLED": "false",
   },
 
   // ---------------------------------------------------------------------------
@@ -144,7 +150,7 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.11.1",
+        "APP_VERSION": "1.12.0",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
@@ -176,6 +182,11 @@
         // owner procedure; no model is invoked by this declaration.
         "AI_ENABLED": "false",
         "AI_GEMINI_ENABLED": "false",
+        // R1.17 event-relation task gate ships DISABLED on preview
+        // (ADR-0045): the independent fail-closed flag NEVER implies
+        // AI_ENABLED or EDITORIAL_ENABLED; zero relation work happens
+        // while it stays "false".
+        "EVENT_RELATION_ENABLED": "false",
       },
       "d1_databases": [
         {

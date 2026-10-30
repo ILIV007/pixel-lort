@@ -8,7 +8,7 @@
 # --- Non-secret (local overrides) ----------------------------------------------
 # ENVIRONMENT=development
 # LOG_LEVEL=debug
-# APP_VERSION=1.11.1
+# APP_VERSION=1.12.0
 # Phase 2A Telegram ingress flag (non-secret). Turn on locally ONLY together
 # with the three Phase 2 secrets below (fake local fixtures are fine).
 # TELEGRAM_INGRESS_ENABLED=false
@@ -28,6 +28,10 @@
 # AI_GEMINI_ENABLED also requires verified Free-tier eligibility.
 # AI_ENABLED=false
 # AI_GEMINI_ENABLED=false
+# R1.17 event-relation task gate (non-secret; ADR-0045). INDEPENDENT
+# fail-closed flag: with false the relation step performs zero retrieval,
+# zero adjudication, zero writes; never implies AI/EDITORIAL gates.
+# EVENT_RELATION_ENABLED=false
 
 # --- Secrets (names only; leave empty unless your phase requires them) ----------
 # Phase 2 formats (ADR-0024):

@@ -27,9 +27,12 @@ implemented, UNDER INDEPENDENT REVIEW; Phase 5C-2 conservative candidate
 assessment — R1.14, ADR-0043 addendum — implemented, UNDER INDEPENDENT
 REVIEW; Phase 5C-3 exact-content draft reuse with preserved provenance —
 R1.15, ADR-0043 addendum — implemented, its R1.15.2 offline exact-content
-reuse correction INDEPENDENTLY ACCEPTED, and Phase 5D controlled entity
-aliases → durable story mentions — R1.16, ADR-0044 — implemented, UNDER
-INDEPENDENT REVIEW)**: the FIRST
+reuse correction INDEPENDENTLY ACCEPTED; Phase 5D controlled entity
+aliases → durable story mentions — R1.16, ADR-0044 — implemented and its
+R1.16.1 entity-mentions corrections (Posidon probes C1/U1/R1) INDEPENDENTLY
+ACCEPTED offline; and Phase 5E-1 bounded event-relation evaluation →
+durable, evidence-referenced decisions — R1.17, ADR-0045 — implemented,
+UNDER INDEPENDENT REVIEW)**: the FIRST
 integrated local source→draft vertical path (`editorial.prepare_draft`)
 ships OFF everywhere behind its own fail-closed `EDITORIAL_ENABLED` gate
 with zero live inference, Phase 5B adds the limited Evidence Guard
@@ -47,7 +50,15 @@ id and the connection lands DURABLY in `story_entities` — mention only,
 confidence 0, no fuzzy/semantic matching, the news text never adds to
 the catalog —
 candidate-ASSESSMENT derived only from those discovery signals — NO
-merge, NO truth verification, NEVER an unrelatedness conclusion — see
+merge, NO truth verification, NEVER an unrelatedness conclusion — and
+Phase 5E-1 adds the FIRST bounded event-relation slice: shared-entity +
+fingerprint candidates from bounded index reads, a bidirectional evidence
+bundle, the SEPARATE `event_relation` AI task over the SAME budget/
+allowlist/deadline protections, and MODEL-PROPOSED verdicts (`*_proposed`
+/ `insufficient_evidence`) recorded as a versioned `eventRelation` ledger
+inside the SAME fenced draft INSERT with REAL `event_relation` ai_runs
+rows and the SQL candidate-basis gate — proposals, never truth, never a
+merge — see
 the Phase 5 section. Everything else is
 pending and intentionally not
 started. Provisioned/deployed, implemented, reviewed, and activated are
@@ -391,7 +402,7 @@ decision.
       normalization/security suites. Measured final-tree totals in the
       Phase 4 handoff.
 
-## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery, Phase 5C-2 conservative candidate-assessment and Phase 5C-3 exact-content draft reuse with preserved provenance (R1.15.2 correction independently ACCEPTED offline) implemented; Phase 5D controlled entity aliases → durable story mentions implemented; UNDER INDEPENDENT REVIEW, OFF)
+## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery, Phase 5C-2 conservative candidate-assessment and Phase 5C-3 exact-content draft reuse with preserved provenance (R1.15.2 correction independently ACCEPTED offline) implemented; Phase 5D controlled entity aliases → durable story mentions implemented with its R1.16.1 corrections INDEPENDENTLY ACCEPTED offline; Phase 5E-1 bounded event-relation evaluation → durable evidence-referenced decisions implemented; Phase 5E-1 UNDER INDEPENDENT REVIEW, OFF)
 
 - [x] **Phase 5A (R1.11, ADR-0042): the FIRST integrated local source→draft
       path — ACCEPTED OFFLINE by independent review (R1.12 round ruling; the
@@ -692,7 +703,59 @@ decision.
       invented format constraints. Tests: unit 43/43, integration 20/20
       (REAL workerd D1; incl. the new gate EXPLAIN probe and the corrected
       REMAPPED expectation), demo 1/1, full gate 113 files / 1577 tests
-      green; version 1.11.1; no Phase-5-completion claim.
+      green; version 1.11.1; no Phase-5-completion claim. INDEPENDENTLY
+      ACCEPTED (Posidon round R1.16.1, offline) — the accepted contract is
+      the one R1.17 builds on.
+- [x] **Phase 5E-1 (R1.17, v1.12.0, ADR-0045): BOUNDED EVENT-RELATION
+      EVALUATION → DURABLE, EVIDENCE-REFERENCED DECISIONS — the FIRST
+      event-relation + decision-persistence slice, NO MERGE. On the NEW
+      draft path of `editorial.prepare_draft` (strictly after validation
+      and the early exact-content reuse/replay, strictly before commit,
+      and AFTER the R1.16 mentions resolution whose resolved entities feed
+      it): the deterministic UNION of the fingerprint-discovery candidates
+      (zero new fingerprint probes) with shared-entity candidates from ≤3
+      indexed probes on `idx_story_entities_entity(entity_id, story_id)`
+      (≤9 rows each, `ORDER BY story_id ASC` before LIMIT — row-order
+      independent), ≤8 unique candidates with honest overflow/truncation
+      and `origin` labels (`fingerprint:<signal>` / `entity:<id>`); per
+      candidate the basis is the candidate's OWN ready draft's durable
+      document record + the bridged reference row (missing/legacy/stale
+      bases are TYPED `basis_unavailable` — never silently skipped, never
+      a different-event verdict); ≤2 pairs are bundled (both-side real
+      text ≤16 KiB, canonical input hash over BOTH bases + prompt/policy
+      version) and evaluated by the SEPARATE `event_relation` AI task
+      (own immutable prompt `pixel-event-relation-v1`, own strict output
+      schema with the EXPLICIT `insufficient_evidence` citation contract,
+      foreign refs/self-pairs/wrong pairIds/command fields rejected) over
+      the SAME durable budget authority (scope 'ai', SAME per-provider
+      caps — no separate bucket), the SAME allowlist ladder (Gemini stays
+      unverified/unwired), ≤3 REAL provider attempts for the WHOLE step
+      and ONE 15 s wall deadline; every REAL attempt gets its own
+      deterministic `event_relation` ai_runs row settling ATOMICALLY with
+      the versioned `eventRelation` ledger inside document_json of the
+      SAME fenced draft INSERT (drafts.ai_run_id stays the news_draft
+      run); the evaluated candidate bases are re-verified INSIDE the batch
+      by the SQL candidate-basis gate (exact document bytes + reference
+      identity — one invalidated basis zeroes EVERY statement, typed
+      `eventRelationBasisChanged`, real runs honestly recorded, bounded
+      retry; heaviest statement ≤35/100 bound params, LOCAL PROXY); the
+      independent fail-closed `EVENT_RELATION_ENABLED=false` flag ships
+      everywhere (disabled ⇒ the honest `disabled` ledger, ZERO relation
+      SQL, ZERO calls; AI_ENABLED/EDITORIAL_ENABLED stay OFF; the
+      accepted normal path intact). Verdicts are MODEL PROPOSALS over
+      named evidence — `same_event_proposed`/`different_event_proposed`/
+      `insufficient_evidence` — never truth, never a merge, never
+      source-independence; shared signals never count as confirmation;
+      conflicting numbers/times/negations stay recorded conflicts; no
+      candidate ≠ unrelated. Offline demo `npm run demo:event-relations`
+      (translation→same via SHARED-ENTITY retrieval, different-events→
+      different, thin→insufficient; safe output incl. candidate origins,
+      pair/basis ids, evidence ids, stored readback, REAL attempts and
+      LOCAL PROXY SQL costs, no-merge proof). Gates: clean npm ci, check,
+      test:db 34 files / 427 tests incl. the new suites (unit 37 +
+      integration 10 + demo 1), full suite 117 files / 1625 tests green,
+      secret scan 428/0; version 1.12.0; schema stays 3, ZERO DDL; NO
+      Phase-5-completion / semantic-accuracy / production-ready claim.
 - [ ] Story MERGING and semantic/deterministic matching with thresholds
       (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate discovery +
       conservative observation assessment, and Phase 5D provides ONLY
@@ -700,7 +763,12 @@ decision.
       semantic matching, and event detection remain explicitly future;
       a shared entity mention is NEVER a same-event proof and NEVER
       source independence).
-- [ ] AI adjudication path (compact claim sets) and decision persistence.
+- [ ] AI adjudication path (compact claim sets) and decision persistence
+      BEYOND Phase 5E-1 (the R1.17 slice covers ONLY the bounded NEW-draft
+      event-relation step with ≤2 pairs and fixture-verifiable plumbing;
+      live-model evaluation, calibrated confidence, compact-claim
+      adjudication at scale, and any merge/publication authorization
+      remain explicitly future).
 
 _(The round 1.10.6 / 1.10.6.1 AI ADAPTER foundation does NOT complete any
 part of this phase: the story/claim/evidence engine, the editorial fact
