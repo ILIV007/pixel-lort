@@ -331,6 +331,48 @@ export async function findEntityMentionMatches(
   return { rows, overflow: rows.length >= ENTITY_MENTION_MAX_RESULT_ROWS };
 }
 
+/**
+ * The R1.17 SHARED-ENTITY candidate lookup (Phase 5E-1): ONE parameterized,
+ * indexed query PER probed entity against
+ * `idx_story_entities_entity(entity_id, story_id)` — no full scan, no
+ * wildcard, no SQL interpolation, no unbounded N+1 (the caller bounds the
+ * probe count at 3). Each page is `ORDER BY story_id ASC` BEFORE the LIMIT
+ * so the probed page is the SAME first rows regardless of scan direction
+ * or physical order (the R1.13.1 lesson), and a full page is the honest
+ * overflow probe. A DB error PROPAGATES to the caller — a failed lookup is
+ * NEVER reported as a successful empty one. An empty entity list → ZERO
+ * SQL (the bounded no-op).
+ */
+export interface StoryEntityCandidateOutcome {
+  readonly entityId: string;
+  readonly storyIds: readonly string[];
+  readonly overflow: boolean;
+}
+
+export async function findStoryCandidatesByEntities(
+  executor: DbExecutor,
+  entityIds: readonly string[],
+  excludeStoryId: string,
+  probeLimit: number,
+): Promise<readonly StoryEntityCandidateOutcome[]> {
+  const outcomes: StoryEntityCandidateOutcome[] = [];
+  for (const entityId of entityIds) {
+    const { rows } = await executor.query<{ story_id: string }>({
+      sql: `SELECT story_id FROM story_entities
+             WHERE entity_id = ? AND story_id <> ?
+             ORDER BY story_id ASC
+             LIMIT ?`,
+      params: [entityId, excludeStoryId, probeLimit],
+    });
+    outcomes.push({
+      entityId,
+      storyIds: [...new Set(rows.map((row) => row.story_id))],
+      overflow: rows.length >= probeLimit,
+    });
+  }
+  return outcomes;
+}
+
 /** One statement's insertion target inside the fenced commit batch. */
 export interface EditorialCommitInput {
   /** Ownership fence: the durable job id. */
@@ -453,6 +495,39 @@ export interface EditorialCommitInput {
     readonly normalizedAlias: string;
     readonly entityId: string;
   }[];
+  /**
+   * R1.17 (Phase 5E-1): the REAL event-relation adjudication ai_runs rows
+   * (task 'event_relation', ≤3 per step) — inserted by the SAME fenced
+   * atomic batch as the draft so decision runs settle atomically with the
+   * ledger that references them. Ids are deterministic per
+   * (job, generation, pair, attempt) and never collide with the news_draft
+   * run; `drafts.ai_run_id` stays the news_draft run. An empty list (the
+   * disabled/no-candidate/flag-off paths) writes NOTHING — a provider that
+   * never ran is never fabricated.
+   */
+  readonly eventRelationAiRuns?: readonly EditorialCommitInput['aiRun'][];
+  /**
+   * R1.17 (Phase 5E-1): the mutable candidate bases the event-relation
+   * decision REALLY evaluated (≤2, one per evaluated pair's side B).
+   * EVERY statement of the batch additionally carries the basis gate: each
+   * candidate story must STILL own its ready draft at the pinned version
+   * with the EXACT document bytes the pair was bundled from, AND the
+   * bridged reference row must STILL carry the content hash that was read
+   * — ALL evaluated INSIDE the atomic batch (a JS re-read is never a
+   * substitute). One invalidated basis (mutation/deletion/version change
+   * inside the lookup→commit window) zeroes EVERY statement — zero stale
+   * decision, zero partial editorial effects — classified typed
+   * `eventRelationBasisChanged`. An empty list is the trivial always-true
+   * gate (`1 = 1`): every non-relation path stays unchanged.
+   */
+  readonly eventRelationBases?: readonly {
+    readonly draftId: string;
+    readonly storyId: string;
+    readonly draftVersion: number;
+    readonly documentJson: string;
+    readonly referenceItemId: string;
+    readonly referenceContentHash: string;
+  }[];
 }
 
 /** Per-statement outcome of the fenced atomic commit. */
@@ -472,6 +547,24 @@ export interface EditorialCommitResult {
    * relied mapping was valid inside the batch, so the report counts and
    * the durable rows can never diverge). */
   readonly entityMentionsInserted: number;
+  /**
+   * R1.17: event-relation adjudication ai_runs rows inserted by THIS batch
+   * (0..3; 0 on any predicate failure — never orphaned, never half-written;
+   * a pair never attempted contributes zero fabricated runs).
+   */
+  readonly eventRelationRunsInserted: number;
+  /**
+   * R1.17: the WHOLE editorial result was withheld because at least ONE
+   * candidate basis the relation decision evaluated was mutated, deleted,
+   * or version-changed inside the lookup→commit window — the SQL basis
+   * gate zeroed EVERY statement (zero stale decision, zero partial
+   * editorial effects). DISTINCT from `catalogChanged`/`fenceLost`/
+   * `snapshotChanged`/`contentTaken` on purpose: the caller records its
+   * REAL provider runs honestly (charged, never refunded) and hands the
+   * bounded engine retry — the next generation re-decides against the
+   * CURRENT bases.
+   */
+  readonly eventRelationBasisChanged: boolean;
   /**
    * R1.16.1 (C1): the WHOLE editorial result was withheld — at least one
    * alias mapping the report relied on was deleted, remapped, or given a
@@ -654,6 +747,8 @@ export async function commitEditorialResult(
         sourceItemProcessed: false,
         fingerprintsInserted: 0,
         entityMentionsInserted: 0,
+        eventRelationRunsInserted: 0,
+        eventRelationBasisChanged: false,
         catalogChanged: false,
         contentTaken: true,
         fenceLost: false,
@@ -722,6 +817,121 @@ function catalogMappingGate(input: EditorialCommitInput): {
   };
 }
 
+/**
+ * R1.17 (Phase 5E-1): the candidate-BASIS validity gate — the R1.17 twin of
+ * the catalog gate, appended to EVERY statement of the commit batch. For
+ * EVERY candidate basis the event-relation decision really evaluated (≤2,
+ * one per pair's side B): the candidate story must STILL own its ready
+ * draft at the pinned version with the EXACT document bytes the pair was
+ * bundled from (`rd.document_json = ?`), AND the bridged reference row
+ * must STILL carry the content hash that was really read (`ri.id = ? AND
+ * ri.content_hash = ?`) — ALL evaluated INSIDE the atomic batch (a JS
+ * re-read is never a substitute). One invalidated basis (candidate
+ * mutation/deletion/version change inside the lookup→commit window) zeroes
+ * EVERY statement — zero stale decision, zero partial editorial effects —
+ * classified typed `eventRelationBasisChanged`.
+ *
+ * Six bound parameters per basis (≤2 bases → ≤12 per statement) — injection
+ * -safe, never interpolated, well under the D1 per-query bound limit of
+ * 100. An EMPTY basis list is the trivial always-true gate (`1 = 1`): every
+ * non-relation path stays byte-identical to R1.16.1.
+ */
+function eventRelationBasisGate(input: EditorialCommitInput): {
+  readonly sql: string;
+  readonly params: readonly unknown[];
+} {
+  const bases = input.eventRelationBases ?? [];
+  if (bases.length === 0) {
+    return { sql: '1 = 1', params: [] };
+  }
+  const perBasis = (basis: (typeof bases)[number]): { sql: string; params: unknown[] } => ({
+    sql: `EXISTS (SELECT 1 FROM drafts rd
+                    WHERE rd.id = ? AND rd.story_id = ?
+                      AND rd.status = 'ready' AND rd.version = ?
+                      AND rd.document_json = ?
+                      AND EXISTS (SELECT 1 FROM claims rc
+                                   JOIN evidence re ON re.claim_id = rc.id
+                                   JOIN source_items ri ON ri.id = re.source_item_id
+                                   WHERE rc.story_id = rd.story_id
+                                     AND rc.claim_type = 'source_report'
+                                     AND re.source_item_id = ?
+                                     AND ri.content_hash = ?))`,
+    params: [
+      basis.draftId,
+      basis.storyId,
+      basis.draftVersion,
+      basis.documentJson,
+      basis.referenceItemId,
+      basis.referenceContentHash,
+    ],
+  });
+  const parts = bases.map((basis) => perBasis(basis));
+  return {
+    sql: parts.map((part) => part.sql).join(' AND '),
+    params: parts.flatMap((part) => part.params),
+  };
+}
+
+/**
+ * The WHOLE-result gate every commit statement carries: the R1.16.1
+ * catalog-mapping gate AND the R1.17 candidate-basis gate (each trivially
+ * `1 = 1` when its list is empty — the legacy paths keep their exact
+ * behavior with zero extra bound parameters).
+ */
+function combinedResultGate(input: EditorialCommitInput): {
+  readonly sql: string;
+  readonly params: readonly unknown[];
+} {
+  const catalog = catalogMappingGate(input);
+  const basis = eventRelationBasisGate(input);
+  return {
+    sql: `${catalog.sql} AND ${basis.sql}`,
+    params: [...catalog.params, ...basis.params],
+  };
+}
+
+/** One fenced standalone event-relation ai_runs insert (R1.17): the REAL
+ * adjudication attempt row, fenced on job ownership + the snapshot + the
+ * whole-result gate — used INSIDE the commit batch for the commit path. */
+function eventRelationRunStatement(
+  input: EditorialCommitInput,
+  run: EditorialCommitInput['aiRun'],
+  fenceParams: readonly unknown[],
+  snapshotParams: readonly unknown[],
+  gate: { readonly sql: string; readonly params: readonly unknown[] },
+): { readonly sql: string; readonly params: readonly unknown[] } {
+  return {
+    sql: `INSERT INTO ai_runs (id, task, provider, model, prompt_version, input_hash, status,
+                                 latency_ms, input_tokens, output_tokens, error_code,
+                                 error_message, created_at, completed_at)
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+           WHERE NOT EXISTS (SELECT 1 FROM ai_runs WHERE id = ?)
+             AND ${FENCE_PREDICATE}
+             AND ${SNAPSHOT_PREDICATE}
+             AND ${gate.sql}`,
+    params: [
+      run.id,
+      run.task,
+      run.provider,
+      run.model,
+      run.promptVersion,
+      run.inputHash,
+      run.status,
+      run.latencyMs,
+      run.inputTokens,
+      run.outputTokens,
+      run.errorCode,
+      run.errorMessage,
+      run.createdAt,
+      run.completedAt,
+      run.id,
+      ...fenceParams,
+      ...snapshotParams,
+      ...gate.params,
+    ],
+  };
+}
+
 /** One fenced `story_entities` mention-link statement (R1.16; R1.16.1 —
  * carries the whole-result catalog gate as defense-in-depth). */
 function entityMentionStatement(
@@ -759,11 +969,13 @@ function entityMentionStatement(
 /**
  * The atomic statement list: the six base statements + the ≤3 story-scoped
  * fingerprints (R1.13) + the ≤resolved controlled-alias mention links
- * (R1.16) + the exact-content anchor (R1.15, LAST). Every statement also
- * carries the R1.16.1 whole-result catalog gate: the batch persists only
- * if every relied (alias, entity) mapping is still valid inside the
- * transaction. Any statement failure rolls back the whole transaction;
- * the anchor's PRIMARY KEY collision is the R1.15 group-uniqueness signal.
+ * (R1.16) + the ≤3 event-relation adjudication ai_runs rows (R1.17) + the
+ * exact-content anchor (R1.15, LAST). Every statement also carries the
+ * R1.16.1 whole-result catalog gate AND the R1.17 candidate-basis gate:
+ * the batch persists only if every relied (alias, entity) mapping AND
+ * every evaluated candidate basis is still valid inside the transaction.
+ * Any statement failure rolls back the whole transaction; the anchor's
+ * PRIMARY KEY collision is the R1.15 group-uniqueness signal.
  */
 async function buildAndRunCommitBatch(
   executor: DbExecutor,
@@ -771,11 +983,11 @@ async function buildAndRunCommitBatch(
   fenceParams: readonly unknown[],
   snapshotParams: readonly unknown[],
 ): Promise<readonly DbQueryMeta[]> {
-  // R1.16.1 (C1): ONE catalog-mapping gate shared by EVERY statement — the
-  // whole result persists only if every relied (alias, entity) mapping is
-  // still valid inside this transaction (empty pairs → trivial `1 = 1`,
-  // zero extra params, byte-identical legacy behavior).
-  const gate = catalogMappingGate(input);
+  // R1.16.1 (C1) + R1.17: ONE combined whole-result gate shared by EVERY
+  // statement — the catalog-mapping gate and the candidate-basis gate
+  // (each trivial `1 = 1` with zero extra params when its list is empty:
+  // byte-identical legacy behavior).
+  const gate = combinedResultGate(input);
   return executor.batch([
     {
       sql: `INSERT INTO stories (id, story_key, status, trust_status, content_type,
@@ -956,6 +1168,13 @@ async function buildAndRunCommitBatch(
     ...input.entityMentions.map((mention) =>
       entityMentionStatement(input, mention, fenceParams, snapshotParams, gate),
     ),
+    // R1.17: the event-relation adjudication ai_runs rows — same batch,
+    // same fences, same snapshot predicate, same whole-result gate. The
+    // decision runs settle atomically WITH the ledger that references
+    // them; a predicate failure leaves NO orphan run behind.
+    ...(input.eventRelationAiRuns ?? []).map((run) =>
+      eventRelationRunStatement(input, run, fenceParams, snapshotParams, gate),
+    ),
     // R1.15: the exact-content group anchor — LAST, deliberately unguarded
     // across stories: a live cross-story owner trips the PRIMARY KEY and
     // aborts the whole transaction (typed contentTaken for the caller).
@@ -978,18 +1197,20 @@ async function classifyCommitMetas(
   const storyInserted = (metas[0]?.changes ?? 0) > 0;
   const draftInserted = (metas[4]?.changes ?? 0) > 0;
   const sourceItemProcessed = (metas[5]?.changes ?? 0) > 0;
-  // Indices 6..6+n are the story-scoped fingerprints; the LAST meta is the
-  // exact-content anchor (not part of `fingerprintsInserted`).
+  const relationRuns = input.eventRelationAiRuns ?? [];
+  // Indices 6..6+n are the story-scoped fingerprints; then the R1.16
+  // mention links; then the R1.17 relation ai_runs rows; the LAST meta is
+  // the exact-content anchor (not part of any inserted count).
   const fingerprintsInserted = metas
     .slice(6, 6 + input.fingerprints.length)
     .reduce((total, meta) => total + (meta?.changes ?? 0), 0);
-  // Indices 6+n..6+n+m are the controlled-alias mention links (R1.16); the
-  // LAST meta is STILL the exact-content anchor.
+  const mentionsStart = 6 + input.fingerprints.length;
   const entityMentionsInserted = metas
-    .slice(
-      6 + input.fingerprints.length,
-      6 + input.fingerprints.length + input.entityMentions.length,
-    )
+    .slice(mentionsStart, mentionsStart + input.entityMentions.length)
+    .reduce((total, meta) => total + (meta?.changes ?? 0), 0);
+  const relationRunsStart = mentionsStart + input.entityMentions.length;
+  const eventRelationRunsInserted = metas
+    .slice(relationRunsStart, relationRunsStart + relationRuns.length)
     .reduce((total, meta) => total + (meta?.changes ?? 0), 0);
   if (draftInserted) {
     return {
@@ -998,6 +1219,8 @@ async function classifyCommitMetas(
       sourceItemProcessed,
       fingerprintsInserted,
       entityMentionsInserted,
+      eventRelationRunsInserted,
+      eventRelationBasisChanged: false,
       catalogChanged: false,
       contentTaken: false,
       fenceLost: false,
@@ -1008,25 +1231,31 @@ async function classifyCommitMetas(
   // Zero draft effects: ONE classification read decides which predicate
   // failed (write protection already happened entirely inside SQL — this
   // read only picks the typed outcome for the zero-effect batch).
-  // R1.16.1 (C1): the SAME read also evaluates the catalog-mapping gate
-  // (mappings_hold) so an invalidated relied mapping gets its own typed
-  // outcome instead of hiding inside the fence/snapshot classes.
+  // R1.16.1 (C1): the SAME read evaluates the catalog-mapping gate
+  // (mappings_hold); R1.17 adds the candidate-basis gate (bases_hold) so
+  // an invalidated evaluated basis gets its OWN typed outcome instead of
+  // hiding inside the fence/snapshot/catalog classes.
+  const basisGate = eventRelationBasisGate(input);
+  const catalogGate = catalogMappingGate(input);
   const classification = await executor.first<{
     fence_holds: number;
     snapshot_holds: number;
     mappings_hold: number;
+    bases_hold: number;
   }>({
     sql: `SELECT EXISTS (SELECT 1 FROM jobs
                           WHERE id = ? AND status = 'claimed' AND attempts = ?
                             AND lease_until IS NOT NULL AND lease_until > ?) AS fence_holds,
                  EXISTS (SELECT 1 FROM source_items
                           WHERE id = ? AND source_id = ? AND content_hash = ?) AS snapshot_holds,
-                 ${input.entityMentions.length === 0 ? '1' : `(${catalogMappingGate(input).sql})`} AS mappings_hold`,
-    params: [...fenceParams, ...snapshotParams, ...catalogMappingGate(input).params],
+                 ${input.entityMentions.length === 0 ? '1' : `(${catalogGate.sql})`} AS mappings_hold,
+                 ${(input.eventRelationBases ?? []).length === 0 ? '1' : `(${basisGate.sql})`} AS bases_hold`,
+    params: [...fenceParams, ...snapshotParams, ...catalogGate.params, ...basisGate.params],
   });
   const fenceHolds = (classification?.fence_holds ?? 0) === 1;
   const snapshotHolds = (classification?.snapshot_holds ?? 0) === 1;
   const mappingsHold = (classification?.mappings_hold ?? 0) === 1;
+  const basesHold = (classification?.bases_hold ?? 0) === 1;
   if (fenceHolds && snapshotHolds && !mappingsHold) {
     // The fence and the snapshot are intact but at least ONE relied alias
     // mapping was deleted, remapped, or given a second owner inside the
@@ -1041,7 +1270,32 @@ async function classifyCommitMetas(
       sourceItemProcessed,
       fingerprintsInserted: 0,
       entityMentionsInserted: 0,
+      eventRelationRunsInserted: 0,
+      eventRelationBasisChanged: false,
       catalogChanged: true,
+      contentTaken: false,
+      fenceLost: false,
+      snapshotChanged: false,
+    };
+  }
+  if (fenceHolds && snapshotHolds && mappingsHold && !basesHold) {
+    // The fence, snapshot, and catalog mappings are intact but at least
+    // ONE candidate basis the relation decision evaluated was mutated,
+    // deleted, or version-changed inside the lookup→commit window: the
+    // basis gate zeroed EVERY statement — zero stale decision, zero
+    // partial editorial effects. DISTINCT typed outcome (R1.17): the
+    // caller records its REAL provider runs honestly (charged, never
+    // refunded) and hands the bounded engine retry — the next generation
+    // re-decides against the CURRENT bases.
+    return {
+      draftInserted,
+      storyInserted,
+      sourceItemProcessed,
+      fingerprintsInserted: 0,
+      entityMentionsInserted: 0,
+      eventRelationRunsInserted: 0,
+      eventRelationBasisChanged: true,
+      catalogChanged: false,
       contentTaken: false,
       fenceLost: false,
       snapshotChanged: false,
@@ -1056,6 +1310,8 @@ async function classifyCommitMetas(
       sourceItemProcessed,
       fingerprintsInserted: 0,
       entityMentionsInserted: 0,
+      eventRelationRunsInserted: 0,
+      eventRelationBasisChanged: false,
       catalogChanged: false,
       contentTaken: false,
       fenceLost: false,
@@ -1072,6 +1328,8 @@ async function classifyCommitMetas(
     sourceItemProcessed,
     fingerprintsInserted: 0,
     entityMentionsInserted: 0,
+    eventRelationRunsInserted: 0,
+    eventRelationBasisChanged: false,
     catalogChanged: false,
     contentTaken: false,
     fenceLost: true,

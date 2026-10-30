@@ -46,6 +46,10 @@ import {
   type EntityMentionsReport,
 } from '../../src/domain/editorial/entity-mentions';
 import {
+  disabledEventRelationReport,
+  type EventRelationDecisionReport,
+} from '../../src/domain/editorial/event-relation-decision';
+import {
   classifyAiOutcome,
   observeAiRun,
 } from '../../src/application/editorial/prepare-draft-handler';
@@ -84,6 +88,13 @@ const NO_CANDIDATES_ASSESSMENT: CandidateAssessmentReport = buildCandidateAssess
 
 /** Its deterministic "nothing observed" mentions report (R1.16). */
 const NO_MENTIONS_REPORT: EntityMentionsReport = emptyEntityMentionsReport({
+  sourceItemId: ITEM_ID,
+  contentHash: HASH,
+});
+
+/** R1.17: its honest "disabled" relation ledger (the required additive
+ * field every new draft carries; the flag is OFF in this suite). */
+const DISABLED_EVENT_RELATION_REPORT: EventRelationDecisionReport = disabledEventRelationReport({
   sourceItemId: ITEM_ID,
   contentHash: HASH,
 });
@@ -278,6 +289,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
       candidateDiscovery: NO_CANDIDATES_REPORT,
       candidateAssessment: NO_CANDIDATES_ASSESSMENT,
       entityMentions: NO_MENTIONS_REPORT,
+      eventRelation: DISABLED_EVENT_RELATION_REPORT,
     });
     expect(document.title).toBe('تیتر مدل');
     expect(document.document.schemaVersion).toBe(1);
@@ -313,6 +325,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
       candidateDiscovery: NO_CANDIDATES_REPORT,
       candidateAssessment: NO_CANDIDATES_ASSESSMENT,
       entityMentions: NO_MENTIONS_REPORT,
+      eventRelation: DISABLED_EVENT_RELATION_REPORT,
     });
     // The report rides INSIDE document_json, byte-for-byte the one built
     // for THIS draft; schemaVersion stays 1 (additive contract extension).
@@ -343,6 +356,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
       candidateDiscovery: NO_CANDIDATES_REPORT,
       candidateAssessment: NO_CANDIDATES_ASSESSMENT,
       entityMentions: NO_MENTIONS_REPORT,
+      eventRelation: DISABLED_EVENT_RELATION_REPORT,
     });
     expect(document.document.candidateAssessment).toBe(NO_CANDIDATES_ASSESSMENT);
     expect(document.document.schemaVersion).toBe(1);
@@ -372,6 +386,7 @@ describe('conservative mapping (ADR-0042 §2)', () => {
       candidateDiscovery: NO_CANDIDATES_REPORT,
       candidateAssessment: NO_CANDIDATES_ASSESSMENT,
       entityMentions: NO_MENTIONS_REPORT,
+      eventRelation: DISABLED_EVENT_RELATION_REPORT,
     });
     // Additive contract: schemaVersion stays 1; the report rides inside
     // document_json byte-for-byte with its policy identity and honest

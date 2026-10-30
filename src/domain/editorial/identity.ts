@@ -133,6 +133,28 @@ export async function aiRunIdForAttempt(jobId: string, generation: number): Prom
   return prefixedId(AI_RUN_ID_PREFIX, ['ai_run', jobId, String(generation)]);
 }
 
+/**
+ * R1.17 — deterministic ai_runs row id for ONE event-relation provider
+ * attempt: seeded with the pair id and the pair-local attempt ordinal so a
+ * relation run NEVER collides with the news_draft run of the same job
+ * generation, with another pair's run, or with a second attempt of the
+ * same pair. Each real adjudication attempt stays its own auditable row.
+ */
+export async function aiRunIdForRelationAttempt(
+  jobId: string,
+  generation: number,
+  pairId: string,
+  attemptIndex: number,
+): Promise<string> {
+  return prefixedId(AI_RUN_ID_PREFIX, [
+    'ai_run_event_relation',
+    jobId,
+    String(generation),
+    pairId,
+    String(attemptIndex),
+  ]);
+}
+
 /** Draft version produced by THIS phase (one snapshot → one v1 draft). */
 export const EDITORIAL_DRAFT_VERSION = 1;
 

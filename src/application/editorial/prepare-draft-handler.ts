@@ -148,21 +148,32 @@ import {
   findEditorialSourceAttachment,
   findEditorialSourceItem,
   findEntityMentionMatches,
+  findStoryCandidatesByEntities,
   findStoryCandidatesByFingerprints,
   findStoryIdByExactContentAnchor,
   findStableEditorialResult,
   recordEditorialAiRun,
+  type EditorialCommitInput,
   type EditorialSourceAttachmentRow,
   type EditorialSourceItemRow,
   type EditorialSourceRow,
   type StoryCandidateLookupOutcome,
+  type StoryEntityCandidateOutcome,
 } from '../../adapters/db/editorial-store';
 import type { AiDraftService } from '../ai/draft-service';
+import type { EventRelationService } from '../ai/event-relation-service';
+import type {
+  EventRelationAttemptRecord,
+  EventRelationOutcome,
+  EventRelationPairOutcome,
+} from '../../domain/ai/event-relation-types';
 import type { AiDeferredReason, AiOutcome } from '../../domain/ai/types';
 import { AI_BOUNDS } from '../../domain/ai/policy';
 import { canonicalizeJson } from '../../domain/jobs/payloads';
+import { sha256Hex } from '../../shared/ids/idempotency-key';
 import {
   aiRunIdForAttempt,
+  aiRunIdForRelationAttempt,
   draftIdForStory,
   editorialAiInputHash,
   exactContentReuseClaimId,
@@ -182,6 +193,23 @@ import {
   EDITORIAL_CREATED_BY,
 } from '../../domain/editorial/mapper';
 import { buildEvidenceGuardReport } from '../../domain/editorial/evidence-guard';
+import { disabledEventRelationReport } from '../../domain/editorial/event-relation-decision';
+import {
+  buildEventRelationCandidatesReport,
+  planEntityProbes,
+  EVENT_RELATION_MAX_PAIR_EVALUATIONS,
+  EVENT_RELATION_MAX_ROWS_PER_PROBE,
+} from '../../domain/editorial/event-relation-candidates';
+import {
+  buildEventRelationPairBundle,
+  type EventRelationPairBundle,
+} from '../../domain/editorial/event-relation-evidence';
+import {
+  buildEventRelationDecisionReport,
+  type EventRelationDecisionReport,
+  type EventRelationPairAttempt,
+  type EventRelationPairState,
+} from '../../domain/editorial/event-relation-decision';
 import {
   FINGERPRINT_LOOKUP_ROW_LIMIT,
   buildStoryFingerprints,
@@ -224,6 +252,17 @@ export interface EditorialPrepareDraftHandlerOptions {
   readonly executor: DbExecutor;
   /** The EXISTING AI draft service (ADR-0041) — never a new orchestration. */
   readonly aiService: AiDraftService;
+  /**
+   * R1.17 (Phase 5E-1): the SEPARATE event-relation adjudication service
+   * + its independent fail-closed flag. Absent OR disabled ⇒ the honest
+   * `disabled` ledger with ZERO relation SQL and ZERO provider calls; the
+   * accepted normal path stays intact. The flag NEVER implies AI_ENABLED
+   * or EDITORIAL_ENABLED.
+   */
+  readonly eventRelation?: {
+    readonly enabled: boolean;
+    readonly service: EventRelationService;
+  };
   readonly nowMs: () => number;
   readonly logger?: Logger;
 }
@@ -801,6 +840,433 @@ export function createEditorialPrepareDraftHandler(
       overflow: entityMentions.scan.resultOverflow,
     });
 
+    // ---- 5.8 R1.17 (Phase 5E-1) BOUNDED event-relation step — strictly
+    //          AFTER the mentions resolution (whose resolved entities feed
+    //          the shared-entity probes) and BEFORE any provider work.
+    //          The candidates are the deterministic UNION of THIS lookup
+    //          moment's fingerprint-discovery report (zero new fingerprint
+    //          probes) with shared-entity candidates from ≤3 indexed
+    //          probes on idx_story_entities_entity (≤9 rows each). Each
+    //          candidate's basis is resolved from its OWN ready draft's
+    //          durable document record + the bridged reference row — a
+    //          missing/legacy/stale basis is TYPED `basis_unavailable`,
+    //          never silently skipped, never a different-event verdict.
+    //          ≤2 pairs are bundled (both-side evidence ≤16 KiB, canonical
+    //          input hash over BOTH bases + prompt/policy version) and
+    //          evaluated by the SEPARATE injectable relation task (the
+    //          shared budget/allowlist/deadline protections — ≤3 REAL
+    //          provider attempts for the WHOLE step, one 15 s deadline).
+    //          The verdicts are MODEL PROPOSALS recorded in the versioned
+    //          `eventRelation` ledger that travels INSIDE document_json of
+    //          the SAME fenced commit; every REAL provider attempt gets
+    //          its own event_relation ai_runs row in that SAME batch; the
+    //          evaluated candidate bases are re-verified INSIDE the batch
+    //          by the SQL basis gate (typed `eventRelationBasisChanged`).
+    //          A DB error here is NEVER a fabricated empty result: typed,
+    //          bounded retry with ZERO provider calls so far. With the
+    //          flag OFF: the honest `disabled` ledger, ZERO relation SQL,
+    //          ZERO calls, and the accepted normal path byte-identical.
+    const relationOptions = options.eventRelation;
+    const relationEnabled = relationOptions !== undefined && relationOptions.enabled;
+    let eventRelationReport: EventRelationDecisionReport;
+    /** The REAL event-relation adjudication runs of THIS attempt (settle
+     * atomically with the draft on the commit path; standalone honest
+     * recording on every non-commit path). */
+    const relationRunRows: {
+      readonly pairId: string;
+      readonly run: EditorialCommitInput['aiRun'];
+    }[] = [];
+    /** The evaluated candidate bases the SQL basis gate pins at commit. */
+    let relationBases: NonNullable<EditorialCommitInput['eventRelationBases']> = [];
+
+    if (!relationEnabled || relationOptions === undefined) {
+      eventRelationReport = disabledEventRelationReport({
+        sourceItemId: item.id,
+        contentHash: item.content_hash,
+      });
+      logger?.debug('editorial.prepare_draft.event_relation_disabled');
+    } else {
+      try {
+        // (a) ≤3 shared-entity probes over the resolved entities.
+        const resolvedEntityIds = [
+          ...new Set(entityMentionResolution.resolved.map((pair) => pair.entityId)),
+        ];
+        const probePlan = planEntityProbes(resolvedEntityIds);
+        let entityProbeOutcomes: readonly StoryEntityCandidateOutcome[] = [];
+        if (probePlan.selected.length > 0) {
+          entityProbeOutcomes = await findStoryCandidatesByEntities(
+            executor,
+            probePlan.selected,
+            storyId,
+            EVENT_RELATION_MAX_ROWS_PER_PROBE,
+          );
+        }
+
+        // (b) The deterministic union with THIS moment's fingerprint
+        //     discovery candidates (multi-signal candidates checked once).
+        const relationCandidates = buildEventRelationCandidatesReport({
+          storyId,
+          entityProbes: entityProbeOutcomes.map((probeOutcome) => ({
+            entityId: probeOutcome.entityId,
+            storyIds: probeOutcome.storyIds,
+            overflow: probeOutcome.overflow,
+          })),
+          unprobedEntityCount: probePlan.unprobedCount,
+          fingerprintCandidates: candidateDiscovery.candidates.map((candidate) => ({
+            storyId: candidate.storyId,
+            matchedSignalKinds: candidate.matchedSignals.map((signal) => signal.kind),
+          })),
+        });
+        logger?.debug('editorial.prepare_draft.event_relation_candidates_observed', {
+          candidates: relationCandidates.counts.candidatesReported,
+          truncated: relationCandidates.candidatesTruncated,
+          entityOverflow: relationCandidates.entityLookup.overflow,
+        });
+
+        // (c) Basis resolution per candidate (ascending storyId): the
+        //     candidate's OWN ready draft + its durable document basis +
+        //     the identity bridge to the original reference row.
+        const relationStepStartedAtMs = nowMs();
+        const basisStates = new Map<
+          string,
+          | {
+              readonly ok: true;
+              readonly draftId: string;
+              readonly documentJson: string;
+              readonly basis: NonNullable<ReturnType<typeof readReuseDocumentBasis>>;
+              readonly reference: EditorialSourceItemRow;
+            }
+          | { readonly ok: false; readonly reason: string }
+        >();
+        for (const relationCandidate of relationCandidates.candidates) {
+          const candidateDraft = await findDraftForStory(
+            executor,
+            relationCandidate.storyId,
+            EDITORIAL_DRAFT_VERSION,
+          );
+          if (candidateDraft === null || candidateDraft.status !== 'ready') {
+            basisStates.set(relationCandidate.storyId, {
+              ok: false,
+              reason: 'draft_missing_or_not_ready',
+            });
+            continue;
+          }
+          const candidateBasis = readReuseDocumentBasis(candidateDraft.document_json);
+          if (candidateBasis === null) {
+            basisStates.set(relationCandidate.storyId, { ok: false, reason: 'malformed_basis' });
+            continue;
+          }
+          if (candidateBasis.guardSnapshot === null) {
+            // A legacy document without the guard's recorded snapshot
+            // identity has NO identity bridge to its item: honestly
+            // unavailable — never silently evaluated.
+            basisStates.set(relationCandidate.storyId, { ok: false, reason: 'legacy_basis' });
+            continue;
+          }
+          const candidateReference = await findEditorialSourceItem(
+            executor,
+            candidateBasis.sourceItemId,
+          );
+          if (candidateReference === null) {
+            basisStates.set(relationCandidate.storyId, { ok: false, reason: 'reference_missing' });
+            continue;
+          }
+          if (candidateReference.content_hash !== candidateBasis.guardSnapshot.contentHash) {
+            basisStates.set(relationCandidate.storyId, { ok: false, reason: 'stale_reference' });
+            continue;
+          }
+          basisStates.set(relationCandidate.storyId, {
+            ok: true,
+            draftId: candidateDraft.id,
+            documentJson: candidateDraft.document_json,
+            basis: candidateBasis,
+            reference: candidateReference,
+          });
+        }
+
+        // (d) ≤2 pair bundles over the evaluable candidates (ascending
+        //     storyId; the smallest-ID tie-break is a COST CAP, never a
+        //     "best candidate" claim) + the typed slot records.
+        const pairAttempts: EventRelationPairAttempt[] = [];
+        const bundles: EventRelationPairBundle[] = [];
+        for (const relationCandidate of relationCandidates.candidates) {
+          if (bundles.length >= EVENT_RELATION_MAX_PAIR_EVALUATIONS) {
+            break; // beyond-capacity candidates stay explicit in the report
+          }
+          const basisState = basisStates.get(relationCandidate.storyId);
+          if (basisState === undefined || !basisState.ok) {
+            continue; // non-evaluable here; the candidate entry records it
+          }
+          const bundleResult = await buildEventRelationPairBundle({
+            pairId: bundles.length === 0 ? 'erp-1' : 'erp-2',
+            sideA: {
+              evidenceId: item.id,
+              text: fullEvidenceText,
+              truncated: excerpt.truncated,
+              storyId,
+              sourceItemId: item.id,
+              contentHash: item.content_hash,
+            },
+            sideB: {
+              evidenceId: basisState.basis.sourceItemId,
+              text: basisState.basis.excerptText,
+              truncated: basisState.basis.truncated,
+              storyId: relationCandidate.storyId,
+              sourceItemId: basisState.basis.sourceItemId,
+              contentHash: basisState.reference.content_hash,
+              draftId: basisState.draftId,
+              draftVersion: EDITORIAL_DRAFT_VERSION,
+              documentSha256: await sha256Hex(basisState.documentJson),
+            },
+          });
+          if (!bundleResult.ok) {
+            pairAttempts.push({
+              storyId: relationCandidate.storyId,
+              pairId: null,
+              state: 'bundle_invalid' as EventRelationPairState,
+              basisUnavailableReason: bundleResult.reason,
+              aiRunIds: [],
+            });
+            continue;
+          }
+          bundles.push(bundleResult.bundle);
+        }
+
+        // (e) The SEPARATE relation task over the shared protections.
+        let relationOutcome: EventRelationOutcome = { kind: 'decisions', pairs: [] };
+        if (bundles.length > 0) {
+          relationOutcome = await relationOptions.service.evaluateEventRelations({
+            pairs: bundles.map((bundle) => ({
+              pairId: bundle.pairId,
+              sideA: {
+                evidenceId: bundle.sideA.evidenceId,
+                text: bundle.sideA.text,
+                storyId: bundle.sideA.storyId,
+                sourceItemId: bundle.sideA.sourceItemId,
+                contentHash: bundle.sideA.contentHash,
+              },
+              sideB: {
+                evidenceId: bundle.sideB.evidenceId,
+                text: bundle.sideB.text,
+                storyId: bundle.sideB.storyId,
+                sourceItemId: bundle.sideB.sourceItemId,
+                contentHash: bundle.sideB.contentHash,
+              },
+              canonicalInputHash: bundle.canonicalInputHash,
+            })),
+          });
+        }
+
+        // (f) Map the typed outcomes onto the ledger + the REAL run rows.
+        if (relationOutcome.kind === 'deferred') {
+          // Step-level typed deferral (flag/input): zero runs exist.
+          logger?.warn('editorial.prepare_draft.event_relation_step_deferred', {
+            reason: relationOutcome.reason,
+          });
+          for (const bundle of bundles) {
+            pairAttempts.push({
+              storyId: bundle.sideB.storyId,
+              pairId: bundle.pairId,
+              state: 'provider_deferred' as EventRelationPairState,
+              deferredReason: relationOutcome.reason,
+              canonicalInputHash: bundle.canonicalInputHash,
+              aiRunIds: [],
+            });
+          }
+        } else {
+          for (const bundle of bundles) {
+            const pairOutcome: EventRelationPairOutcome | undefined = relationOutcome.pairs.find(
+              (entry) => entry.pairId === bundle.pairId,
+            );
+            const bundleByPair = bundle;
+            const attemptRunIds: string[] = [];
+            const attempts: readonly EventRelationAttemptRecord[] = pairOutcome?.attempts ?? [];
+            for (let attemptIndex = 0; attemptIndex < attempts.length; attemptIndex += 1) {
+              const attempt = attempts[attemptIndex]!;
+              const runId = await aiRunIdForRelationAttempt(
+                jobId,
+                generation,
+                bundleByPair.pairId,
+                attemptIndex,
+              );
+              attemptRunIds.push(runId);
+              relationRunRows.push({
+                pairId: bundleByPair.pairId,
+                run: {
+                  id: runId,
+                  task: 'event_relation',
+                  provider: attempt.provider,
+                  model: attempt.modelId,
+                  promptVersion: attempt.promptVersion,
+                  inputHash: bundleByPair.canonicalInputHash,
+                  status: attempt.status,
+                  latencyMs: attempt.latencyMs,
+                  inputTokens: attempt.inputTokens,
+                  outputTokens: attempt.outputTokens,
+                  errorCode: attempt.errorCode,
+                  errorMessage: null,
+                  createdAt: relationStepStartedAtMs,
+                  completedAt: nowMs(),
+                },
+              });
+            }
+            const sharedSideB = {
+              storyId: bundle.sideB.storyId,
+              evidenceId: bundle.sideB.evidenceId,
+              sourceItemId: bundle.sideB.sourceItemId,
+              contentHash: bundle.sideB.contentHash,
+              draftId: bundle.sideB.draftId,
+              draftVersion: bundle.sideB.draftVersion,
+            };
+            if (pairOutcome === undefined) {
+              pairAttempts.push({
+                storyId: bundle.sideB.storyId,
+                pairId: bundle.pairId,
+                state: 'provider_deferred' as EventRelationPairState,
+                deferredReason: 'no_pair_outcome',
+                canonicalInputHash: bundle.canonicalInputHash,
+                aiRunIds: attemptRunIds,
+              });
+              continue;
+            }
+            switch (pairOutcome.kind) {
+              case 'evaluated':
+                pairAttempts.push({
+                  storyId: bundle.sideB.storyId,
+                  pairId: bundle.pairId,
+                  state: 'evaluated' as EventRelationPairState,
+                  sideA: {
+                    evidenceId: bundle.sideA.evidenceId,
+                    sourceItemId: bundle.sideA.sourceItemId,
+                    contentHash: bundle.sideA.contentHash,
+                  },
+                  sideB: sharedSideB,
+                  canonicalInputHash: bundle.canonicalInputHash,
+                  verdict: pairOutcome.verdict,
+                  reasons: [...pairOutcome.reasons],
+                  conflicts: [...pairOutcome.conflicts],
+                  references: [...pairOutcome.references],
+                  citationsReported:
+                    pairOutcome.references.length === 0
+                      ? ('none_reported' as const)
+                      : new Set(pairOutcome.references.map((reference) => reference.side)).size ===
+                          2
+                        ? ('both_sides' as const)
+                        : ('partial' as const),
+                  aiRunIds: attemptRunIds,
+                });
+                break;
+              case 'refused':
+                pairAttempts.push({
+                  storyId: bundle.sideB.storyId,
+                  pairId: bundle.pairId,
+                  state: 'provider_refused' as EventRelationPairState,
+                  sideB: sharedSideB,
+                  canonicalInputHash: bundle.canonicalInputHash,
+                  aiRunIds: attemptRunIds,
+                });
+                break;
+              case 'invalid_output':
+                pairAttempts.push({
+                  storyId: bundle.sideB.storyId,
+                  pairId: bundle.pairId,
+                  state: 'provider_invalid_output' as EventRelationPairState,
+                  sideB: sharedSideB,
+                  canonicalInputHash: bundle.canonicalInputHash,
+                  aiRunIds: attemptRunIds,
+                });
+                break;
+              case 'deferred':
+                pairAttempts.push({
+                  storyId: bundle.sideB.storyId,
+                  pairId: bundle.pairId,
+                  state:
+                    pairOutcome.reason === 'budget_denied'
+                      ? ('skipped_budget' as EventRelationPairState)
+                      : pairOutcome.reason === 'step_deadline'
+                        ? ('skipped_deadline' as EventRelationPairState)
+                        : pairOutcome.reason === 'step_attempt_cap'
+                          ? ('skipped_step_capacity' as EventRelationPairState)
+                          : ('provider_deferred' as EventRelationPairState),
+                  sideB: sharedSideB,
+                  deferredReason: pairOutcome.reason,
+                  canonicalInputHash: bundle.canonicalInputHash,
+                  aiRunIds: attemptRunIds,
+                });
+                break;
+            }
+          }
+        }
+
+        // (g) The SQL-gated evaluated bases (≤2): the exact document bytes
+        //     and reference identities the pairs were bundled from.
+        relationBases = bundles.map((bundle) => {
+          const basisState = basisStates.get(bundle.sideB.storyId);
+          if (basisState === undefined || !basisState.ok) {
+            // Unreachable: a bundle exists only for an ok basis.
+            throw new Error('event_relation_bundle_without_basis');
+          }
+          return {
+            draftId: basisState.draftId,
+            storyId: bundle.sideB.storyId,
+            draftVersion: EDITORIAL_DRAFT_VERSION,
+            documentJson: basisState.documentJson,
+            referenceItemId: basisState.basis.sourceItemId,
+            referenceContentHash: basisState.reference.content_hash,
+          };
+        });
+
+        eventRelationReport = buildEventRelationDecisionReport({
+          snapshot: { sourceItemId: item.id, contentHash: item.content_hash },
+          candidates: {
+            entityLookup: {
+              probed: relationCandidates.entityLookup.probed,
+              unprobedCount: relationCandidates.entityLookup.unprobedCount,
+              overflow: relationCandidates.entityLookup.overflow,
+            },
+            counts: {
+              uniqueCandidatesObserved: relationCandidates.counts.uniqueCandidatesObserved,
+              candidatesReported: relationCandidates.counts.candidatesReported,
+            },
+            candidatesTruncated: relationCandidates.candidatesTruncated,
+            candidateEntries: relationCandidates.candidates.map((relationCandidate) => {
+              const basisState = basisStates.get(relationCandidate.storyId);
+              return {
+                storyId: relationCandidate.storyId,
+                origins: relationCandidate.origins.map((origin) =>
+                  origin.kind === 'fingerprint'
+                    ? `fingerprint:${origin.signal}`
+                    : `entity:${origin.entityId}`,
+                ),
+                basisState:
+                  basisState !== undefined && basisState.ok
+                    ? ('ok' as const)
+                    : ('basis_unavailable' as const),
+                ...(basisState !== undefined && !basisState.ok
+                  ? { basisUnavailableReason: basisState.reason }
+                  : {}),
+              };
+            }),
+          },
+          pairAttempts,
+        });
+        logger?.debug('editorial.prepare_draft.event_relation_observed', {
+          observation: eventRelationReport.observation,
+          pairsAttempted: eventRelationReport.counts.pairsAttempted,
+          pairsEvaluated: eventRelationReport.counts.pairsEvaluated,
+          providerAttempts: eventRelationReport.counts.providerAttempts,
+        });
+      } catch (error) {
+        // A DB error in the relation reads is NEVER a fabricated empty
+        // report: typed bounded retry — the relation lookups run strictly
+        // BEFORE the provider (zero relation provider calls so far).
+        logger?.warn('editorial.prepare_draft.event_relation_step_failed', {
+          error: error instanceof Error ? error.message : 'unknown',
+        });
+        return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+      }
+    }
+
     // ---- 6. The EXISTING AI service (real gates: flag, budget authority,
     //         allowlist ladder, wall deadline, output validation).
     const aiStartedAtMs = nowMs();
@@ -813,13 +1279,15 @@ export function createEditorialPrepareDraftHandler(
     const observed = observeAiRun(outcome, aiStartedAtMs, aiFinishedAtMs);
     const step = classifyAiOutcome(outcome);
 
-    // ---- 7a. Deferred/refusal paths: record the REAL run when one happened,
-    //          then map onto the engine's durable outcomes (no fake success,
-    //          no disappearance, no retry storm).
+    // ---- 7a. Deferred/refusal paths: record the REAL runs when they
+    //          happened (drafting AND any relation adjudication), then map
+    //          onto the engine's durable outcomes (no fake success, no
+    //          disappearance, no retry storm).
     if (step.kind === 'retry') {
       if (observed !== null) {
         await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
       }
+      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
       logger?.info('editorial.prepare_draft.ai_deferred', { outcome: outcome.kind });
       return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
     }
@@ -827,6 +1295,7 @@ export function createEditorialPrepareDraftHandler(
       if (observed !== null) {
         await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
       }
+      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
       logger?.warn('editorial.prepare_draft.ai_terminal', { reasonCode: step.reasonCode });
       return { kind: 'permanent', reasonCode: step.reasonCode };
     }
@@ -859,6 +1328,7 @@ export function createEditorialPrepareDraftHandler(
           nowMs(),
         );
       }
+      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
       logger?.warn('editorial.prepare_draft.no_traced_claim', {
         claims: outcome.draft.claims.length,
       });
@@ -918,6 +1388,9 @@ export function createEditorialPrepareDraftHandler(
         candidateDiscovery,
         candidateAssessment,
         entityMentions: resolution.report,
+        // R1.17: the bounded relation step's versioned ledger — rides in
+        // the SAME fenced draft INSERT (the decision ledger of THIS input).
+        eventRelation: eventRelationReport,
       });
       return {
         jobId,
@@ -1003,6 +1476,13 @@ export function createEditorialPrepareDraftHandler(
         // catalogChanged below — the report can never claim a durable link
         // that did not persist).
         entityMentions: resolution.resolved,
+        // R1.17: the REAL event-relation adjudication runs settle ATOMICALLY
+        // with the ledger that references them (zero rows on the disabled/
+        // no-candidate paths — a provider that never ran is never written);
+        // and the evaluated candidate bases are re-verified INSIDE this
+        // batch by the SQL basis gate (typed eventRelationBasisChanged).
+        eventRelationAiRuns: relationRunRows.map((entry) => entry.run),
+        eventRelationBases: relationBases,
       };
     };
 
@@ -1040,11 +1520,12 @@ export function createEditorialPrepareDraftHandler(
         );
       } catch (error) {
         // The re-resolve or its commit failed after the provider ran: the
-        // REAL run stays recorded (charged, never refunded) and the
+        // REAL runs stay recorded (charged, never refunded) and the
         // bounded engine retry owns the next generation.
         if (observed !== null) {
           await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
         }
+        await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
         logger?.warn('editorial.prepare_draft.entity_catalog_revalidate_failed', {
           error: error instanceof Error ? error.message : 'unknown',
         });
@@ -1053,16 +1534,36 @@ export function createEditorialPrepareDraftHandler(
       if (commit.catalogChanged) {
         // STILL invalidated after one honest re-resolve: the catalog is
         // mutating under this attempt. Zero effects landed twice — the
-        // real provider run stays recorded (charged, never refunded) and
+        // real provider runs stay recorded (charged, never refunded) and
         // the bounded engine retry re-runs the NEXT generation against a
         // settled catalog. No third in-handler attempt, no fabricated
         // report, no forced invalid link.
         if (observed !== null) {
           await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
         }
+        await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
         logger?.warn('editorial.prepare_draft.entity_catalog_changed_twice');
         return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
       }
+    }
+
+    if (commit.eventRelationBasisChanged) {
+      // R1.17: at least ONE evaluated candidate basis was mutated, deleted,
+      // or version-changed inside the lookup→commit window — the SQL basis
+      // gate zeroed the WHOLE batch (zero stale decision, zero partial
+      // editorial effects, zero orphan runs). The REAL runs (drafting AND
+      // relation adjudication) stay recorded honestly (charged, never
+      // refunded); the bounded engine retry owns the next generation, which
+      // re-decides against the CURRENT bases. No stale verdict is ever
+      // stored; no C1-style no-op link can ride along.
+      if (observed !== null) {
+        await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
+      }
+      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+      logger?.warn('editorial.prepare_draft.event_relation_basis_changed', {
+        evaluatedBases: relationBases.length,
+      });
+      return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
     }
 
     if (commit.contentTaken) {
@@ -1077,6 +1578,7 @@ export function createEditorialPrepareDraftHandler(
       if (observed !== null) {
         await recordRealAiRun(executor, jobId, generation, observed, inputHash, nowMs());
       }
+      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
       logger?.warn('editorial.prepare_draft.content_result_exists');
       return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
     }
@@ -1087,7 +1589,7 @@ export function createEditorialPrepareDraftHandler(
       // landed — the SQL snapshot predicate no-oped the whole batch. A
       // DISTINCT terminal outcome — never conflated with a lost fence.
       // The provider call happened and stays charged (no refund); the
-      // real run is recorded honestly as failed with the editorial code.
+      // real runs are recorded honestly as failed with the editorial code.
       if (observed !== null) {
         await recordRealAiRun(
           executor,
@@ -1098,6 +1600,7 @@ export function createEditorialPrepareDraftHandler(
           nowMs(),
         );
       }
+      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
       logger?.warn('editorial.prepare_draft.source_snapshot_changed');
       return { kind: 'permanent', reasonCode: 'editorial_snapshot_changed' };
     }
@@ -1106,6 +1609,7 @@ export function createEditorialPrepareDraftHandler(
       // Zero fenced effects landed — a newer generation owns the work.
       // The engine's own fenced terminal write will also fail; report a
       // recoverable retry and never touch the newer generation's state.
+      await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
       logger?.warn('editorial.prepare_draft.ownership_fence_lost');
       return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
     }
@@ -1116,6 +1620,7 @@ export function createEditorialPrepareDraftHandler(
       sourceItemProcessed: commit.sourceItemProcessed,
       fingerprintsInserted: commit.fingerprintsInserted,
       entityMentionsInserted: commit.entityMentionsInserted,
+      eventRelationRunsInserted: commit.eventRelationRunsInserted,
     });
     // R1.16.1 (C1) invariant tripwire: with the whole-result catalog gate a
     // committed result ALWAYS inserts exactly the distinct entities the
@@ -1176,6 +1681,33 @@ async function recordRealAiRun(
     // The ai_runs row for a NON-success path is observability, not the
     // durable outcome: its failure never changes the handler's typed
     // result (the engine's own bookkeeping carries the reason code).
+  }
+}
+
+/**
+ * R1.17 — record the REAL event-relation adjudication runs for every
+ * NON-commit path (fenced standalone inserts): a provider that ran stays
+ * charged and honestly auditable even when no draft/decision lands; a pair
+ * that never reached the provider contributes ZERO fabricated rows.
+ */
+async function recordRealRelationRuns(
+  executor: DbExecutor,
+  jobId: string,
+  generation: number,
+  runs: readonly { readonly pairId: string; readonly run: EditorialCommitInput['aiRun'] }[],
+  fenceNowMs: number,
+): Promise<void> {
+  for (const entry of runs) {
+    try {
+      await recordEditorialAiRun(executor, {
+        jobId,
+        generation,
+        fenceNowMs,
+        aiRun: entry.run,
+      });
+    } catch {
+      // Same observability-only contract as the drafting run's fallback.
+    }
   }
 }
 

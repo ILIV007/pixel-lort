@@ -16,11 +16,19 @@
  *   no paid fallback.
  */
 
-/** Supported AI providers (Workers AI primary; Gemini secondary). */
+/**
+ * Supported AI providers (Workers AI primary; Gemini secondary).
+ */
 export type AiProvider = 'workers-ai' | 'gemini';
 
-/** Versioned task types. Exactly one exists in this round. */
-export type AiTaskType = 'news_draft';
+/**
+ * Versioned task types. `news_draft` is the original Phase-6 draft task
+ * (its request/contract/prompt are untouched); R1.17 (Phase 5E-1) adds the
+ * SEPARATE `event_relation` adjudication task with its OWN immutable prompt
+ * version and strict output schema — the draft contract is never reshaped
+ * into adjudication.
+ */
+export type AiTaskType = 'news_draft' | 'event_relation';
 
 /** Output locale. Persian is the product requirement (blueprint §1). */
 export type AiLocale = 'fa';

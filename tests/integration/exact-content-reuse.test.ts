@@ -38,6 +38,7 @@ import { buildEvidenceGuardReport } from '../../src/domain/editorial/evidence-gu
 import { buildCandidateDiscoveryReport } from '../../src/domain/editorial/candidate-discovery';
 import { buildCandidateAssessmentReport } from '../../src/domain/editorial/candidate-assessment';
 import { emptyEntityMentionsReport } from '../../src/domain/editorial/entity-mentions';
+import { disabledEventRelationReport } from '../../src/domain/editorial/event-relation-decision';
 import { canonicalizeJson } from '../../src/domain/jobs/payloads';
 import {
   exactContentAnchorValue,
@@ -414,6 +415,12 @@ async function seedHistoricalStory(
       // reuse contract NEVER enriches old drafts — this only keeps the
       // seeded document shape identical to what a real commit writes).
       entityMentions: emptyEntityMentionsReport({
+        sourceItemId: input.itemId,
+        contentHash,
+      }),
+      // R1.17: the honest "disabled" relation ledger (required additive
+      // field; the flag is OFF in this suite).
+      eventRelation: disabledEventRelationReport({
         sourceItemId: input.itemId,
         contentHash,
       }),

@@ -212,6 +212,14 @@ export interface WorkerEnv {
    */
   readonly AI_GEMINI_ENABLED?: string;
   /**
+   * NON-SECRET event-relation task gate ('true' | 'false'; default
+   * 'false'; R1.17/Phase 5E-1). INDEPENDENT fail-closed flag for the
+   * bounded event-relation adjudication step — it NEVER implies
+   * AI_ENABLED or EDITORIAL_ENABLED; with the flag OFF the relation step
+   * performs zero retrieval, zero adjudication, and zero writes.
+   */
+  readonly EVENT_RELATION_ENABLED?: string;
+  /**
    * Workers AI binding (blueprint §4 binding name AI). Optional: only
    * present where wrangler.jsonc declares it (preview — configuration-as-
    * code reconciliation of the owner-approved dashboard binding). With

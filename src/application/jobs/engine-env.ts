@@ -76,6 +76,7 @@ import { createMaintenanceHeartbeatHandler } from './handlers/maintenance-heartb
 import { createSourcePollHandler } from '../ingestion/poll-handler';
 import { createEditorialPrepareDraftHandler } from '../editorial/prepare-draft-handler';
 import { createAiDraftService } from '../ai/draft-service';
+import { createEventRelationService } from '../ai/event-relation-service';
 import { createWorkersAiAdapter } from '../../adapters/ai/workers-ai-adapter';
 import { createConnectorRegistry } from '../../connectors/registry';
 
@@ -222,10 +223,28 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
         geminiApiKeyPresent: env.GEMINI_API_KEY !== undefined,
       },
     });
+    // R1.17 (Phase 5E-1): the SEPARATE event-relation service shares the
+    // SAME ports/budget authority while its INDEPENDENT fail-closed flag
+    // stays in full control of whether ANY relation work happens.
+    const eventRelationService = createEventRelationService({
+      executor,
+      ports,
+      clock,
+      logger: logger ?? createFallbackLogger(),
+      config: {
+        eventRelationEnabled: ai.config.EVENT_RELATION_ENABLED,
+        workersAiBindingPresent,
+        geminiApiKeyPresent: env.GEMINI_API_KEY !== undefined,
+      },
+    });
     handlers.push(
       createEditorialPrepareDraftHandler({
         executor,
         aiService,
+        eventRelation: {
+          enabled: ai.config.EVENT_RELATION_ENABLED,
+          service: eventRelationService,
+        },
         nowMs: () => clock.now(),
         logger,
       }) as never,

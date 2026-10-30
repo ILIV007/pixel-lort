@@ -27,6 +27,7 @@ import type { EvidenceGuardReport } from './evidence-guard';
 import type { CandidateDiscoveryReport } from './candidate-discovery';
 import type { CandidateAssessmentReport } from './candidate-assessment';
 import type { EntityMentionsReport } from './entity-mentions';
+import type { EventRelationDecisionReport } from './event-relation-decision';
 
 /** Fixed draft layout id for this phase's renderer contract. */
 export const EDITORIAL_DRAFT_LAYOUT = 'news_v1' as const;
@@ -186,6 +187,16 @@ export const EDITORIAL_DRAFT_WARNINGS = [
  * explicitly mentioned at the lookup moment — `mentioned` ONLY,
  * confidence 0, never a verification, never a merge, and NEVER catalog
  * enrichment of replayed/reused or historical drafts.
+ *
+ * R1.17 (Phase 5E-1): the caller MUST also pass the event-relation
+ * DECISION ledger for THIS draft (possibly an honest `disabled` or
+ * `no_candidates_observed` observation) — embedded as one more ADDITIVE
+ * versioned field (`eventRelationVersion`/`policyVersion` inside;
+ * `schemaVersion` stays 1) of the SAME `document_json` and the SAME
+ * fenced atomic commit. It is the durable, evidence-referenced ledger of
+ * the bounded relation step of THIS input — a MODEL PROPOSAL at most,
+ * never a merge, never truth, and NEVER a backfill of replayed/reused or
+ * historical drafts.
  */
 export function buildDraftDocument(input: {
   readonly sourceItemId: string;
@@ -202,6 +213,10 @@ export function buildDraftDocument(input: {
   /** R1.16: the versioned controlled-alias mentions report (required —
    * every new draft carries one, even an honest "nothing observed"). */
   readonly entityMentions: EntityMentionsReport;
+  /** R1.17: the versioned event-relation DECISION ledger (required —
+   * every new draft carries one, even an honest "disabled" or "nothing
+   * observed"). */
+  readonly eventRelation: EventRelationDecisionReport;
 }): {
   readonly layout: typeof EDITORIAL_DRAFT_LAYOUT;
   readonly title: string;
@@ -226,6 +241,7 @@ export function buildDraftDocument(input: {
     readonly candidateDiscovery: CandidateDiscoveryReport;
     readonly candidateAssessment: CandidateAssessmentReport;
     readonly entityMentions: EntityMentionsReport;
+    readonly eventRelation: EventRelationDecisionReport;
   };
   readonly facts: readonly {
     readonly text: string;
@@ -264,6 +280,7 @@ export function buildDraftDocument(input: {
       candidateDiscovery: input.candidateDiscovery,
       candidateAssessment: input.candidateAssessment,
       entityMentions: input.entityMentions,
+      eventRelation: input.eventRelation,
     },
     facts: modelClaims.map((claim) => ({
       text: claim.text,
