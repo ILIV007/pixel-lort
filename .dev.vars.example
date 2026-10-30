@@ -8,7 +8,7 @@
 # --- Non-secret (local overrides) ----------------------------------------------
 # ENVIRONMENT=development
 # LOG_LEVEL=debug
-# APP_VERSION=1.4.0
+# APP_VERSION=1.12.3
 # Phase 2A Telegram ingress flag (non-secret). Turn on locally ONLY together
 # with the three Phase 2 secrets below (fake local fixtures are fine).
 # TELEGRAM_INGRESS_ENABLED=false
@@ -16,7 +16,22 @@
 # locally only to exercise the engine against local D1 (no real queue is
 # needed for offline tests; dispatch fails closed without the JOBS binding).
 # JOBS_ENABLED=false
-# TARGET_CHANNEL=
+# Phase 5A editorial source→draft gate (non-secret; ADR-0042). Ships OFF:
+# editorial.prepare_draft work is losslessly policy-paused while off; the
+# AI service keeps its own independent gates.
+# EDITORIAL_ENABLED=false
+# Intended owner value since R1.10.5 (owner channel identity: pixel lores;
+# non-secret per ADR-0009): TARGET_CHANNEL=@pixellores
+# TARGET_CHANNEL=@pixellores
+# Phase 6 AI adapter gates (non-secret; ADR-0041). Ships OFF: with
+# AI_ENABLED=false the AI draft service never calls a provider.
+# AI_GEMINI_ENABLED also requires verified Free-tier eligibility.
+# AI_ENABLED=false
+# AI_GEMINI_ENABLED=false
+# R1.17 event-relation task gate (non-secret; ADR-0045). INDEPENDENT
+# fail-closed flag: with false the relation step performs zero retrieval,
+# zero adjudication, zero writes; never implies AI/EDITORIAL gates.
+# EVENT_RELATION_ENABLED=false
 
 # --- Secrets (names only; leave empty unless your phase requires them) ----------
 # Phase 2 formats (ADR-0024):

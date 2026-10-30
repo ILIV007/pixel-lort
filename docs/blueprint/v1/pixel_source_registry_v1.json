@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "brand": {
-    "channelName": "PIXEL LORT",
-    "channelUsername": "@pixellort",
+    "channelName": "pixel lores",
+    "channelUsername": "@pixellores",
     "botPersona": "Pixel",
-    "footerHtml": "<blockquote>👾 <a href=\"https://t.me/pixellort\">@pixellort</a></blockquote>"
+    "footerHtml": "<blockquote>👾 <a href=\"https://t.me/pixellores\">@pixellores</a></blockquote>"
   },
   "globalPolicies": {
     "timezone": "Asia/Tehran",

@@ -18,7 +18,7 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.4.0",
+    "APP_VERSION": "1.12.3",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
@@ -44,6 +44,32 @@
     // activated by this pass; the operator runbook documents the reviewed
     // activation procedure (gate + explicit per-source enablement).
     "SOURCE_INGESTION_ENABLED": "false",
+    // Phase 5A editorial source→draft gate (non-secret; ADR-0042). Gates
+    // the editorial.prepare_draft job type ONLY — never the jobs engine,
+    // never AI activation. Ships "false" everywhere: while off, editorial
+    // work is losslessly policy-paused (pre-claim ack, zero attempt burn,
+    // zero writes) and the AI service keeps its own independent gates.
+    "EDITORIAL_ENABLED": "false",
+    // Target public channel username — NON-SECRET configuration (ADR-0009).
+    // R1.10.5 owner channel identity: pixel lores / @pixellores
+    // (https://t.me/pixellores). Not credential material; never a numeric
+    // chat ID; format-validated by src/shared/config/phase2.ts and currently
+    // UNCONSUMED by any sending path (Phase 8 is FUTURE).
+    "TARGET_CHANNEL": "@pixellores",
+    // Phase 6 AI adapter gates (non-secret; ADR-0041). FAIL-CLOSED: with
+    // AI_ENABLED "false" the AI draft service is the typed deferred
+    // `ai_disabled` outcome — ZERO provider calls, ZERO budget writes,
+    // ZERO binding access. AI_GEMINI_ENABLED additionally requires verified
+    // Free-tier eligibility (the versioned policy keeps it unverified this
+    // round), so the Gemini fallback stays OFF even if this flag were true.
+    "AI_ENABLED": "false",
+    "AI_GEMINI_ENABLED": "false",
+    // R1.17 (Phase 5E-1) event-relation task gate (non-secret;
+    // ADR-0045). INDEPENDENT fail-closed flag: with "false" the relation
+    // step performs ZERO retrieval, ZERO adjudication, ZERO writes. It
+    // NEVER implies AI_ENABLED or EDITORIAL_ENABLED; no live model call
+    // is possible while the shipped flags stay "false".
+    "EVENT_RELATION_ENABLED": "false",
   },
 
   // ---------------------------------------------------------------------------
@@ -108,8 +134,12 @@
   //   { "binding": "MEDIA", "bucket_name": "pixel-media-production" }  // preview: pixel-media-preview
   // ],
   //
-  // Phase 6 (AI adapters) — Workers AI binding:
-  // "ai": { "binding": "AI" }
+  // Phase 6 (AI adapters) — Workers AI binding: DECLARED in the preview
+  // environment below as configuration-as-code reconciliation of the
+  // owner-approved dashboard binding (round 1.10.6; ADR-0041). This
+  // declaration performs NO deploy and creates NO resource; a future
+  // reviewed deploy will preserve the already-added binding. Production
+  // remains future-only.
 
   // ---------------------------------------------------------------------------
   // Phase 1B — provisioned preview environment.
@@ -120,7 +150,7 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.4.0",
+        "APP_VERSION": "1.12.3",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
@@ -137,6 +167,26 @@
         // activation is a post-review operator procedure (runbook Phase 4).
         // The reviewed Phase 3 engine behavior is preserved unchanged.
         "SOURCE_INGESTION_ENABLED": "false",
+        // Phase 5A editorial source→draft gate ships DISABLED on preview
+        // (ADR-0042): activation is a post-review owner procedure. While
+        // off, editorial.prepare_draft work is losslessly policy-paused;
+        // AI_ENABLED stays an independent fail-closed gate.
+        "EDITORIAL_ENABLED": "false",
+        // Target public channel username — NON-SECRET configuration
+        // (ADR-0009). R1.10.5 owner channel identity: @pixellores
+        // (https://t.me/pixellores). Format-validated; unconsumed today.
+        "TARGET_CHANNEL": "@pixellores",
+        // Phase 6 AI adapter gates ship DISABLED on preview (ADR-0041):
+        // the AI draft service is the typed deferred `ai_disabled` outcome
+        // with zero provider calls. Activation is a separate reviewed
+        // owner procedure; no model is invoked by this declaration.
+        "AI_ENABLED": "false",
+        "AI_GEMINI_ENABLED": "false",
+        // R1.17 event-relation task gate ships DISABLED on preview
+        // (ADR-0045): the independent fail-closed flag NEVER implies
+        // AI_ENABLED or EDITORIAL_ENABLED; zero relation work happens
+        // while it stays "false".
+        "EVENT_RELATION_ENABLED": "false",
       },
       "d1_databases": [
         {
@@ -167,6 +217,17 @@
             "max_batch_timeout": 5,
           },
         ],
+      },
+      // Phase 6 — Workers AI binding (blueprint §4 binding name AI).
+      // Configuration-as-code reconciliation (round 1.10.6, ADR-0041): the
+      // binding was added to the LIVE pixel-preview Worker by the owner's
+      // authorized operator (dashboard configuration version 0ef009b9…,
+      // 100% Ready) — this repository pass mirrors that state so a FUTURE
+      // reviewed deploy preserves it. NO deploy, NO resource creation, and
+      // NO model invocation is authorized or performed by this change; the
+      // AI_ENABLED gate ships "false" above.
+      "ai": {
+        "binding": "AI",
       },
     },
   },

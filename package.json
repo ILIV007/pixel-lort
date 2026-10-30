@@ -1,8 +1,8 @@
 {
   "name": "pixel",
-  "version": "1.4.0",
+  "version": "1.12.3",
   "private": true,
-  "description": "Pixel — Persian-language autonomous Telegram gaming editorial agent for the PIXEL LORT channel (@pixellort). Cloudflare Workers foundation.",
+  "description": "Pixel \u2014 Persian-language autonomous Telegram gaming editorial agent for the pixel lores channel (@pixellores). Cloudflare Workers foundation.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -14,7 +14,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:db": "vitest run tests/integration/d1-schema.test.ts tests/integration/db-boundary.test.ts tests/integration/migration-plan.test.ts tests/integration/migration-plan-failures.test.ts tests/integration/migration-0002.test.ts tests/integration/migration-0003.test.ts tests/integration/job-store-lifecycle.test.ts tests/integration/job-engine.test.ts tests/integration/job-entrypoints.test.ts tests/integration/source-registry-seed.test.ts tests/integration/source-poll-pipeline.test.ts tests/integration/ingestion-budget.test.ts tests/integration/ingestion-gate.test.ts tests/integration/round12-r01-r02.test.ts tests/integration/round13-r03-r07-r08.test.ts tests/integration/round131-seed-contract.test.ts tests/integration/round131-real-http-port.test.ts tests/integration/round14-r05-r06.test.ts tests/integration/posidon-round13-review.test.ts tests/integration/round16-d01-policy-pause.test.ts tests/integration/round17-r04-steam-rotation.test.ts tests/integration/round18-r10-budget-authority.test.ts",
+    "test:db": "vitest run tests/integration/d1-schema.test.ts tests/integration/db-boundary.test.ts tests/integration/migration-plan.test.ts tests/integration/migration-plan-failures.test.ts tests/integration/migration-0002.test.ts tests/integration/migration-0003.test.ts tests/integration/job-store-lifecycle.test.ts tests/integration/job-engine.test.ts tests/integration/job-entrypoints.test.ts tests/integration/source-registry-seed.test.ts tests/integration/source-poll-pipeline.test.ts tests/integration/ingestion-budget.test.ts tests/integration/ingestion-gate.test.ts tests/integration/round12-r01-r02.test.ts tests/integration/round13-r03-r07-r08.test.ts tests/integration/round131-seed-contract.test.ts tests/integration/round131-real-http-port.test.ts tests/integration/round14-r05-r06.test.ts tests/integration/posidon-round13-review.test.ts tests/integration/round16-d01-policy-pause.test.ts tests/integration/round17-r04-steam-rotation.test.ts tests/integration/round18-r10-budget-authority.test.ts tests/integration/ai-budget.test.ts tests/integration/editorial-source-to-draft.test.ts tests/integration/editorial-demo.test.ts tests/integration/evidence-guard-persistence.test.ts tests/integration/candidate-assessment-persistence.test.ts tests/integration/story-candidates.test.ts tests/integration/story-candidates-demo.test.ts tests/integration/exact-content-reuse.test.ts tests/integration/entity-mentions.test.ts tests/integration/entity-mentions-demo.test.ts tests/integration/event-relations.test.ts tests/integration/event-relations-demo.test.ts",
     "test:secrets": "node scripts/scan-secrets.selftest.mjs",
     "check:versions": "node scripts/check-versions.mjs",
     "build": "wrangler deploy --dry-run --env=\"\" --outdir dist",
@@ -26,7 +26,11 @@
     "db:migrations:apply:preview": "wrangler d1 migrations apply DB --env preview --remote",
     "deploy:preview": "node scripts/deploy-preview.mjs",
     "build:preview": "wrangler deploy --dry-run --env preview --outdir dist/preview",
-    "test:telegram-setup": "node --test scripts/telegram-webhook-setup.test.mjs"
+    "test:telegram-setup": "node --test scripts/telegram-webhook-setup.test.mjs",
+    "demo:editorial": "vitest run tests/integration/editorial-demo.test.ts",
+    "demo:story-candidates": "vitest run tests/integration/story-candidates-demo.test.ts",
+    "demo:entity-mentions": "vitest run tests/integration/entity-mentions-demo.test.ts",
+    "demo:event-relations": "vitest run tests/integration/event-relations-demo.test.ts"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

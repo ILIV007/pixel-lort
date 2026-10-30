@@ -1,0 +1,1074 @@
+{
+  "schemaVersion": 2,
+  "scheduleId": "PIXEL-PROBE-SCHEDULE-R1.10.4.2",
+  "planDocument": "audit/PREVIEW_RESOURCE_PROBE_PLAN.md",
+  "parentCommit": "fc679f1f051f6d223356515160068980727f768b",
+  "purpose": "Machine-readable pre-registered case schedule for the authorization-gated preview resource probe plan. Every future authorized probe operation, invocation, ATTEMPTED QUERY, statement, bind payload, row read/write and storage bound is derived from THIS file. The LOCAL-only feasibility validator (audit-tools/probe-plan/validate-probe-plan.mjs) proves: bind counts, required schemas, reachable gates, invocation/repetition totals, reconciled payload/read/write/storage bounds, same-link fixture round-trips, and behavioral latch controls. The validator's replay is a STRUCTURAL SIMULATION (SELECT-1/simplified substitutes), NOT a full semantic/resource replay; the full-poll-equivalent harness is UNPROVEN (proofScope). Nothing in this schedule has been executed; publication is HELD (publicationSafety).",
+  "accounting": {
+    "ownedBindsPerStatement": "11*rows+7",
+    "legacyBindsPerStatement": "11*rows",
+    "maxBindsPerStatement": 100,
+    "maxOwnedRowsPerStatement": 8,
+    "maxLegacyRowsPerStatement": 9,
+    "internalCombinedByteBudget": 102400,
+    "numericBindBytes": 8,
+    "sourceItemsIndexesPerInsert": 5,
+    "sourceItemsRowsWrittenPerInsert": 6,
+    "bindByteDefinition": "UTF-8 bytes via TextEncoder for strings; 8 bytes conservative for numeric/NULL binds (the audited internal definition, mirrored from design-lab/candidate-sql.ts bindBytes)",
+    "attemptedQueryDefinition": "D1 CONTRACT (R1141-02, pinned by the permanent workerd control audit-tools/d1-contract/): prepare() is CONSTRUCTION ONLY and never a submitted statement; TERMINAL execution (.all()/.first()/.run()/db.batch) is the attempted query and is counted in apiCalls/statements EVEN WHEN REJECTED. node:sqlite COMPILES at prepare(), so a local compile rejection is LOCAL-ENGINE metadata (proves the column truly does not exist) and is NEVER a Cloudflare billable counter.",
+    "engineMetadataDistinction": "Local validator numbers (statements attempted, local changes, measured SQLite bytes) are LOCAL-ENGINE feasibility proxies. Cloudflare billable counters (rows_read/rows_written per-query meta, owner-side daily analytics, Workers requests) are separate surfaces measured only during authorized execution rounds (P-08)."
+  },
+  "documentedLimits": {
+    "d1Limits": {
+      "source": "https://developers.cloudflare.com/d1/platform/limits/",
+      "pageDate": "2026-04-21",
+      "maxBindsPerQuery": 100,
+      "maxSqlStatementTextBytes": 100000,
+      "maxRowBytes": 2000000,
+      "maxDatabaseSizeBytes": 500000000,
+      "maxDatabasesPerAccountFree": 10,
+      "queriesPerWorkerInvocationFree": 50,
+      "maxSqlQueryDurationSeconds": 30
+    },
+    "d1Pricing": {
+      "source": "https://developers.cloudflare.com/d1/platform/pricing/",
+      "pageDate": "2026-04-21",
+      "rowsReadPerDayFree": 5000000,
+      "rowsWrittenPerDayFree": 100000,
+      "storagePerAccountFree": 5000000000,
+      "emptyDatabaseBytes": 12288,
+      "dailyReset": "00:00 UTC (footnote 8, verbatim)"
+    },
+    "workersLimits": {
+      "source": "https://developers.cloudflare.com/workers/platform/limits/",
+      "pageDate": "2026-10-12",
+      "cpuMsFree": 10,
+      "requestsPerDayFree": 100000,
+      "subrequestsPerInvocationFree": 50,
+      "subrequestsToInternalServices": 1000,
+      "maxRequestBodyBytesFree": 100000000
+    },
+    "workersLogs": {
+      "source": "https://developers.cloudflare.com/workers/observability/logs/workers-logs/",
+      "pageDate": "2026-10-12",
+      "eventsPerDayFree": 200000,
+      "retentionDaysFree": 3,
+      "cpuFieldNamesDocumented": false
+    }
+  },
+  "fixtures": [
+    {
+      "id": "F-NORMAL",
+      "kind": "ascii",
+      "host": "example-normal",
+      "items": 300,
+      "canonicalUrlBytes": 2048,
+      "rawRss": {
+        "note": "R1141-03: raw documents are generated from the SAME deterministic links as the canonical rows (the padded 2,048-byte URL IS the raw link - ASCII never expands); complete serialized UTF-8 documents (open + items + close), byte-verified by the validator",
+        "deliveredSlices": [
+          { "caseId": "P-C3", "offset": 0, "count": 100, "rawRssBytes": 207582 },
+          { "caseId": "P-05", "offset": 100, "count": 100, "rawRssBytes": 207582 }
+        ]
+      },
+      "rowValues": {
+        "idPattern": "it-normal-<index>",
+        "externalIdPattern": "ext-normal-<index>",
+        "title": "test",
+        "contentHash": "hash",
+        "rawJson": "{}",
+        "excerpt": null,
+        "author": null,
+        "publishedAt": null,
+        "fetchedAt": 1
+      }
+    },
+    {
+      "id": "F-HETERO",
+      "kind": "mixed",
+      "host": "hetero-example",
+      "items": 100,
+      "shortItems": 8,
+      "shortCanonicalUrlBytes": 2048,
+      "cjkItems": 92,
+      "cjkChars": 5000,
+      "rawRss": {
+        "deliveredSlices": [{ "caseId": "P-04", "offset": 0, "count": 100, "rawRssBytes": 1401282 }]
+      },
+      "rowValues": {
+        "idPattern": "it-hetero-<index>",
+        "externalIdPattern": "ext-hetero-<index>",
+        "title": "test",
+        "contentHash": "hash",
+        "rawJson": "{}",
+        "excerpt": null,
+        "author": null,
+        "publishedAt": null,
+        "fetchedAt": 1
+      }
+    },
+    {
+      "id": "F-CJK",
+      "kind": "cjk",
+      "host": "example-source",
+      "items": 400,
+      "cjkChars": 5000,
+      "rawRss": {
+        "deliveredSlices": [
+          { "caseId": "P-02", "offset": 0, "count": 100, "rawRssBytes": 1505082 },
+          { "caseId": "P-03", "offset": 100, "count": 100, "rawRssBytes": 1505082 }
+        ]
+      },
+      "rowValues": {
+        "idPattern": "it-cjk-<index>",
+        "externalIdPattern": "ext-cjk-<index>",
+        "title": "test",
+        "contentHash": "hash",
+        "rawJson": "{}",
+        "excerpt": null,
+        "author": null,
+        "publishedAt": null,
+        "fetchedAt": 1
+      }
+    },
+    {
+      "id": "F-CJK-L",
+      "kind": "cjk-ladder",
+      "host": "example-ladder",
+      "items": 538,
+      "cjkCharsBase": 5000,
+      "charsStep": 1,
+      "perStep": 500,
+      "rawRss": {
+        "delivery": "none - commit-scope only (pre-built statement payloads for P-01a/P-01b); no RSS document"
+      },
+      "rowValues": {
+        "idPattern": "it-ladder-<index>",
+        "externalIdPattern": "ext-ladder-<index>",
+        "title": "test",
+        "contentHash": "hash",
+        "rawJson": "{}",
+        "excerpt": null,
+        "author": null,
+        "publishedAt": null,
+        "fetchedAt": 1
+      }
+    },
+    {
+      "id": "F-OVERSIZE",
+      "kind": "ascii",
+      "host": "example-oversize",
+      "items": 1,
+      "canonicalUrlBytes": 102500,
+      "rawRss": {
+        "deliveredSlices": [{ "caseId": "P-06", "offset": 0, "count": 1, "rawRssBytes": 102609 }]
+      },
+      "rowValues": {
+        "idPattern": "it-oversize-0",
+        "externalIdPattern": "ext-oversize-0",
+        "title": "test",
+        "contentHash": "hash",
+        "rawJson": "{}",
+        "excerpt": null,
+        "author": null,
+        "publishedAt": null,
+        "fetchedAt": 1
+      }
+    },
+    {
+      "id": "F-ROWSIZE",
+      "kind": "cjk",
+      "host": "rowsize-source",
+      "items": 1,
+      "cjkChars": 211108,
+      "rawRss": {
+        "delivery": "none - pre-built payload only (P-06b, documented-limits-only commit scope); no RSS document"
+      },
+      "rowValues": {
+        "idPattern": "it-rowsize-0",
+        "externalIdPattern": "ext-rowsize-0",
+        "title": "test",
+        "contentHash": "hash",
+        "rawJson": "{}",
+        "excerpt": null,
+        "author": null,
+        "publishedAt": null,
+        "fetchedAt": 1
+      }
+    }
+  ],
+  "schemas": {
+    "S3": {
+      "tier": "control",
+      "description": "Accepted product schema 3: migrations 0001-0003 applied in order to the disposable probe database. Runs the LEGACY (schema-3 accepted path) control case and the S3 tier-boundary verification. The owned predicate CANNOT compile here (source_state.poll_owner_job_id does not exist) - the tier boundary is verified, not assumed.",
+      "migrations": [
+        "migrations/0001_initial_schema.sql",
+        "migrations/0002_telegram_update_lifecycle.sql",
+        "migrations/0003_job_dlq_delivery.sql"
+      ],
+      "expectedSchemaVersion": 3,
+      "statementCount": 71
+    },
+    "S4": {
+      "tier": "owned",
+      "description": "Schema 3 PLUS the tracked migration candidate 0004 (source poll ownership), applied mid-round (CLI, before X-SETUP-S4) ONLY to the disposable probe database. Product migrations are NEVER edited; 0004 stays a candidate file applied to disposable databases only.",
+      "migrations": [
+        "migrations/0001_initial_schema.sql",
+        "migrations/0002_telegram_update_lifecycle.sql",
+        "migrations/0003_job_dlq_delivery.sql",
+        "migrations/0004_source_poll_ownership.sql"
+      ],
+      "expectedSchemaVersion": 4,
+      "statementCount": 76,
+      "requiredColumns": ["source_state.poll_owner_job_id"],
+      "requiredIndexes": ["idx_jobs_source_outstanding_poll"]
+    },
+    "probeDdl": {
+      "file": "audit-tools/probe-plan/probe-ddl.sql",
+      "statementCount": 1,
+      "description": "PROBE-ONLY latch table (never a product migration). Applied to the disposable probe database at G1."
+    },
+    "latchSeed": {
+      "file": "audit-tools/probe-plan/latch-seed.sql",
+      "statementCount": 1,
+      "description": "PROBE-ONLY latch seeding with the REGISTERED per-case invocation/statement budgets (literal VALUES; regenerated and byte-verified by the validator)."
+    },
+    "sourcesSeed": {
+      "file": "audit-tools/probe-plan/sources-seed.sql",
+      "statementCount": 1,
+      "description": "PROBE-ONLY sources seeding (one sources row per probe case that needs one; literal VALUES; regenerated and byte-verified by the validator). Applied at G1 under S3; sources is unchanged by 0004."
+    }
+  },
+  "cliSetupStatements": {
+    "s3Migrations": 71,
+    "s4Migration": 5,
+    "probeDdl": 1,
+    "latchSeed": 1,
+    "sourcesSeed": 1,
+    "total": 79
+  },
+  "phases": [
+    {
+      "id": "G0",
+      "name": "plan review",
+      "status": "R1.10.4 G0 returned CHANGES REQUIRED; R1.10.4.1 revised the plan; the R1.10.4.1 G0 review returned PARTIALLY ACCEPTED / CHANGES REQUIRED (R1141-01..05); R1.10.4.2 corrects proof scope, fixtures, accounting and adds the publication-safety hold; a NEW G0 review is requested for the revised plan. NO operation of any kind is authorized by this file."
+    },
+    {
+      "id": "G1",
+      "name": "resource creation",
+      "operations": [
+        "Create the disposable probe Worker (routes OFF, workers.dev URL recorded, probe-only token secret bound - never in Git/logs/config)",
+        "Create the disposable probe D1 database (empty)",
+        "Deploy the pinned probe script (provenance header with reviewed commit SHA)",
+        "Apply S3 migrations 0001-0003 (71 statements, CLI)",
+        "Apply probe-only latch DDL (1 statement, CLI)",
+        "Seed latch rows from this schedule (1 statement, CLI)",
+        "Seed probe sources from this schedule (1 statement, CLI)",
+        "Archive the isolation preflight evidence (binding list printout: exactly one D1 binding, no queues, no product bindings)"
+      ],
+      "invocations": 0,
+      "note": "Creation and setup ONLY. No probe cases run. No invocation of the probe Worker yet."
+    },
+    {
+      "id": "G2",
+      "name": "smoke / evidence-availability check",
+      "operations": [
+        "ONE probe invocation (X-SMOKE) through the protected endpoint",
+        "Owner-side Workers Logs export check: is a CPU-labeled field present in the exported invocation log? Record the EXACT field name and type, or mark the CPU surface UNKNOWN for the round",
+        "If no CPU-labeled surface is obtainable, the owner decides: continue with CPU=UNKNOWN (decision rule D3 then keeps NOT_READY) or stop"
+      ],
+      "invocations": 1,
+      "note": "Separately authorized BEFORE substantive probes. The smoke is NOT a prerequisite of its own authorization (the R1.10.4 circularity is removed)."
+    },
+    {
+      "id": "G3",
+      "name": "substantive probes",
+      "operations": [
+        "Run the pre-registered cases in the registered order (see cases below); X-SCHEMA4 (apply migration 0004 to the disposable DB) is a CLI step registered BETWEEN X-SETUP-S3/P-C3 and X-SETUP-S4",
+        "The future G3 grant PRE-AUTHORIZES safe emergency teardown: on ANY abort criterion, immediately stop submitting (latch hard-stop), export available evidence within the 3-day Workers Logs retention, delete the probe Worker and database - WITHOUT waiting for a new checkpoint"
+      ],
+      "invocations": 18,
+      "note": "May be granted per-case or as a whole. Any change to cases/limits/totals requires a reissued plan and a new G3."
+    },
+    {
+      "id": "G4",
+      "name": "final verification and evidence export",
+      "operations": [
+        "X-VERIFY-FINAL invocation (registered below)",
+        "Owner-side analytics/Workers Logs export (account reads are owner-side operations; agents perform none)",
+        "Final usage snapshot AFTER the documented analytics lag window",
+        "Evidence archive + SHA256SUMS BEFORE any deletion"
+      ],
+      "invocations": 1
+    },
+    {
+      "id": "G5",
+      "name": "cleanup",
+      "operations": [
+        "Delete the probe Worker and the disposable D1 database (owner-authorized)",
+        "Verify zero remaining probe resources (owner-side listing)",
+        "Time Travel note: Free retention 7 days; deletion itself is the cleanup; no restore planned"
+      ],
+      "invocations": 0
+    }
+  ],
+  "cases": [
+    {
+      "caseId": "X-SMOKE",
+      "order": 1,
+      "phase": "G2",
+      "tier": "S3",
+      "title": "Evidence-availability smoke (tier-agnostic statements: probe latch + liveness SELECT run while the disposable DB is still at schema version 3 - migration 0004 is applied later, at the registered X-SCHEMA4 boundary)",
+      "invocations": 1,
+      "apiCalls": 2,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "verify-select", "count": 1, "note": "SELECT 1 (liveness)" }
+      ],
+      "expectedClasses": [
+        "success with Workers Logs invocation log exported; CPU-labeled field name+type recorded",
+        "success with NO CPU-labeled field obtainable; CPU surface = UNKNOWN for the round (never wall time)"
+      ]
+    },
+    {
+      "caseId": "X-SETUP-S3",
+      "order": 2,
+      "phase": "G3",
+      "tier": "S3",
+      "title": "S3 control-tier verification (schema version, tier boundary)",
+      "invocations": 1,
+      "apiCalls": 3,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        {
+          "kind": "verify-select",
+          "count": 2,
+          "note": "schema_version read (=3); probe source row count"
+        },
+        {
+          "kind": "terminal-probe",
+          "count": 1,
+          "sql": "SELECT poll_owner_job_id FROM source_state LIMIT 0",
+          "expectation": "terminal-rejection",
+          "note": "R1141-02: prepare() constructs the statement (construction is NEVER a submitted statement); TERMINAL execution REJECTS for the missing column - the rejection IS one attempted query (+1 API call, +1 attempted statement, 0 rows, 0 changes). The permanent positive workerd control audit-tools/d1-contract/ pins this exact contract"
+        }
+      ],
+      "expectedClasses": [
+        "success; S3 tier boundary proven by the REGISTERED TERMINAL REJECTION of the attempted query (prepare succeeds; .all() rejects - workerd control audit-tools/d1-contract/)"
+      ]
+    },
+    {
+      "caseId": "P-C3",
+      "order": 3,
+      "phase": "G3",
+      "tier": "S3",
+      "fixture": "F-NORMAL",
+      "sourceId": "probe-p-c3",
+      "form": "legacy",
+      "title": "Legacy (schema-3 accepted path) control commit - full-path parity vs the accepted cost ledger",
+      "cpuScope": "full-poll",
+      "invocations": 1,
+      "apiCalls": 11,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        {
+          "kind": "seed-job",
+          "count": 1,
+          "note": "queued job for the legacy source (probe prelude; product pre-exists it via scheduling)"
+        },
+        {
+          "kind": "seed-source-state",
+          "count": 1,
+          "note": "baseline state row, no owner (S3 has no owner column)"
+        },
+        { "kind": "engine-claim-read", "count": 1 },
+        { "kind": "engine-claim-cas", "count": 1 },
+        { "kind": "source-select", "count": 1 },
+        { "kind": "capability-read", "count": 1 },
+        { "kind": "authorization", "count": 2 },
+        { "kind": "budget-readback", "count": 1 },
+        { "kind": "classification-lookup", "count": 6 },
+        {
+          "kind": "multi-row-insert",
+          "count": 13,
+          "form": "legacy",
+          "chunking": "12x8;1x4",
+          "rows": 100
+        },
+        {
+          "kind": "state-write",
+          "count": 1,
+          "note": "LEGACY_STATE_WRITE (fenced on source+hold only)"
+        },
+        { "kind": "job-terminal", "count": 1 }
+      ],
+      "expectedClasses": [
+        "completes: 13 legacy INSERTs (8 rows/statement, 88 binds each), all rows land, full-path CPU recorded"
+      ]
+    },
+    {
+      "caseId": "X-SETUP-S4",
+      "order": 4,
+      "phase": "G3",
+      "tier": "S4",
+      "title": "Schema-4 application verification (0004 applied by CLI before this invocation) and ownership-fence negative probe",
+      "invocations": 1,
+      "apiCalls": 5,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "verify-select", "count": 2, "note": "schema_version read (=4); jobs row count" },
+        {
+          "kind": "terminal-probe",
+          "count": 1,
+          "sql": "SELECT poll_owner_job_id FROM source_state LIMIT 0",
+          "expectation": "terminal-success",
+          "note": "R1141-02 positive half of the contract: the SAME statement that terminally rejects on S3 now constructS AND executes with 0 rows on S4 (pinned by audit-tools/d1-contract/) - one attempted query, 0 rows"
+        },
+        {
+          "kind": "seed-job",
+          "count": 1,
+          "note": "one claimed sources.fetch_poll job (the partial-index subject; jobs.aggregate_id carries no FK, no sources row needed)"
+        },
+        {
+          "kind": "negative-probe-insert",
+          "count": 1,
+          "note": "SECOND non-terminal job for the SAME aggregate; expected typed UNIQUE rejection from idx_jobs_source_outstanding_poll; submitted alone so nothing else rolls back"
+        }
+      ],
+      "expectedClasses": [
+        "typed UNIQUE rejection on the negative probe (the ownership fence works); the terminal probe returns 0 rows (positive contract); everything else succeeds"
+      ]
+    },
+    {
+      "caseId": "P-01a",
+      "order": 5,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-CJK-L",
+      "fixtureOffset": 0,
+      "sourceId": "probe-p-01a",
+      "form": "owned",
+      "title": "Per-statement admissibility ladder (LEGAL rungs only: 2/4/8 rows)",
+      "invocations": 1,
+      "apiCalls": 6,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "seed-job", "count": 1 },
+        { "kind": "seed-source-state", "count": 1 },
+        {
+          "kind": "multi-row-insert",
+          "count": 4,
+          "form": "owned",
+          "rungs": [2, 4, 8, 8],
+          "rows": 22,
+          "note": "rungs 2/4/8 + one repeat at rung 8; binds 29/51/95/95 - all legal (11*rows+7 <= 100); each rung submitted as its own db.batch so a rejection is unambiguously per-statement"
+        }
+      ],
+      "expectedClasses": [
+        "each rung accepted with meta.changes = rung row count",
+        "OR a rung returns a typed platform rejection (bind-payload class) - EITHER is a valid measured outcome; the ladder STOPS at the first rejection (the rejection itself is evidence)"
+      ]
+    },
+    {
+      "caseId": "P-01b-r1",
+      "order": 6,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-CJK-L",
+      "fixtureOffset": 22,
+      "sourceId": "probe-p-01b",
+      "form": "owned",
+      "title": "Aggregate db.batch payload ladder - rung 1: the exact F-CJK commit shape (13 statements, 100 rows)",
+      "invocations": 1,
+      "apiCalls": 3,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "seed-job", "count": 1 },
+        { "kind": "seed-source-state", "count": 1 },
+        {
+          "kind": "multi-row-insert",
+          "count": 13,
+          "form": "owned",
+          "chunking": "12x8;1x4",
+          "rows": 100,
+          "note": "ONE db.batch of 13 legal statements (12x8+1x4); per-statement binds 95/51; total bind payload = the required F-CJK batch payload P_req (validator-computed); 16 statements in the invocation stay under the Free 50-row under BOTH interpretations so payload attribution is unconfounded"
+        }
+      ],
+      "expectedClasses": [
+        "batch accepted: 100 rows land; total bind payload P_req measured as accepted",
+        "OR typed rejection (payload/duration class) - valid measured outcome; ladder stops"
+      ]
+    },
+    {
+      "caseId": "P-01b-r2",
+      "order": 7,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-CJK-L",
+      "fixtureOffset": 122,
+      "sourceId": "probe-p-01b",
+      "form": "owned",
+      "title": "Aggregate db.batch payload ladder - rung 2: 26 statements x 8 rows (208 rows, >= 2x P_req)",
+      "invocations": 1,
+      "apiCalls": 2,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        {
+          "kind": "multi-row-insert",
+          "count": 26,
+          "form": "owned",
+          "chunking": "26x8",
+          "rows": 208,
+          "note": "ONE db.batch of 26 legal statements (95 binds each); total bind payload P_208 >= 2 x P_req (validator-proven reachable gate); 27 statements in the invocation stay under 50 under BOTH interpretations"
+        }
+      ],
+      "expectedClasses": [
+        "batch accepted: 208 rows land; aggregate payload margin >= 2x demonstrated",
+        "OR typed rejection (payload/duration class) - valid measured outcome; D1 gate then FAILS honestly"
+      ]
+    },
+    {
+      "caseId": "P-01b-r3",
+      "order": 8,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-CJK-L",
+      "fixtureOffset": 330,
+      "sourceId": "probe-p-01b",
+      "form": "owned",
+      "title": "Aggregate db.batch payload ladder - rung 2 REPEAT (reproducibility of the max rung)",
+      "invocations": 1,
+      "apiCalls": 2,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        {
+          "kind": "multi-row-insert",
+          "count": 26,
+          "form": "owned",
+          "chunking": "26x8",
+          "rows": 208,
+          "note": "identical registered parameters as P-01b-r2 (distinct fixture rows); D1(i) requires zero payload-related rejections across ALL repetitions"
+        }
+      ],
+      "expectedClasses": [
+        "batch accepted (same class as P-01b-r2 - reproducibility)",
+        "OR typed rejection - D1 gate FAILS honestly"
+      ]
+    },
+    {
+      "caseId": "P-02",
+      "order": 9,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-CJK",
+      "sourceId": "probe-p-02",
+      "form": "owned",
+      "title": "End-to-end CJK commit replica under documented-limits-only accounting (GATED on the D1 payload margin from P-01b)",
+      "cpuScope": "full-poll",
+      "invocations": 1,
+      "apiCalls": 12,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "seed-job", "count": 1, "note": "queued (probe prelude)" },
+        { "kind": "seed-source-state", "count": 1, "note": "baseline state row, no owner" },
+        { "kind": "engine-claim-read", "count": 1 },
+        { "kind": "engine-claim-cas", "count": 1 },
+        { "kind": "source-select", "count": 1 },
+        { "kind": "capability-read", "count": 1 },
+        {
+          "kind": "ownership-acquire",
+          "count": 1,
+          "note": "the guarded state write that sets owner+hold (the owned-path seed)"
+        },
+        { "kind": "authorization", "count": 2 },
+        { "kind": "budget-readback", "count": 1 },
+        { "kind": "classification-lookup", "count": 6 },
+        {
+          "kind": "multi-row-insert",
+          "count": 13,
+          "form": "owned",
+          "chunking": "12x8;1x4",
+          "rows": 100
+        },
+        {
+          "kind": "state-write",
+          "count": 1,
+          "note": "C_OWNED_STATE_WRITE (fenced terminal write)"
+        },
+        { "kind": "job-terminal", "count": 1 }
+      ],
+      "gate": "RUN ONLY IF P-01b demonstrated the >= 2x aggregate payload margin with zero payload-related rejections (decision rule D1 precondition); otherwise NOT RUN and recorded as such",
+      "expectedClasses": [
+        "completes end-to-end: 13 INSERTs + fenced state write; all rows durable; full-poll CPU recorded",
+        "OR typed rejection anywhere - valid measured outcome; documented-limits accounting then NOT adoptable"
+      ]
+    },
+    {
+      "caseId": "P-03",
+      "order": 10,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-CJK",
+      "fixtureOffset": 100,
+      "sourceId": "probe-p-03",
+      "form": "owned",
+      "title": "CJK control under the CURRENT conservative policy (parity vs ledger C-15: 15 xAPI / 66 STMT; probe registers 12 xAPI / 69 STMT incl. latch + 3 probe-prelude seeds)",
+      "cpuScope": "full-poll",
+      "invocations": 1,
+      "apiCalls": 12,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "seed-job", "count": 1 },
+        { "kind": "seed-source-state", "count": 1 },
+        { "kind": "engine-claim-read", "count": 1 },
+        { "kind": "engine-claim-cas", "count": 1 },
+        { "kind": "source-select", "count": 1 },
+        { "kind": "capability-read", "count": 1 },
+        { "kind": "ownership-acquire", "count": 1 },
+        { "kind": "authorization", "count": 2 },
+        { "kind": "budget-readback", "count": 1 },
+        { "kind": "classification-lookup", "count": 6 },
+        {
+          "kind": "multi-row-insert",
+          "count": 50,
+          "form": "owned",
+          "chunking": "50x2",
+          "rows": 100,
+          "note": "2 rows/statement under the 102,400-byte combined policy; 29 binds each"
+        },
+        { "kind": "state-write", "count": 1 },
+        { "kind": "job-terminal", "count": 1 }
+      ],
+      "expectedClasses": [
+        "completes: 50 INSERTs, every audit <= 102,400 bytes, all rows land (LOCAL parity on-platform); full-poll CPU recorded",
+        "OR typed per-invocation query/subrequest limit rejection (69 statements > the Free 50-row under the statement interpretation) - a VALID measured outcome, NOT an abort: it is itself NOT_READY evidence for the CJK shape",
+        "OR other typed rejection - recorded"
+      ]
+    },
+    {
+      "caseId": "P-04",
+      "order": 11,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-HETERO",
+      "sourceId": "probe-p-04",
+      "form": "owned",
+      "title": "Heterogeneous-size control under the CURRENT conservative policy (L-12 parity)",
+      "cpuScope": "full-poll",
+      "invocations": 1,
+      "apiCalls": 12,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "seed-job", "count": 1 },
+        { "kind": "seed-source-state", "count": 1 },
+        { "kind": "engine-claim-read", "count": 1 },
+        { "kind": "engine-claim-cas", "count": 1 },
+        { "kind": "source-select", "count": 1 },
+        { "kind": "capability-read", "count": 1 },
+        { "kind": "ownership-acquire", "count": 1 },
+        { "kind": "authorization", "count": 2 },
+        { "kind": "budget-readback", "count": 1 },
+        { "kind": "classification-lookup", "count": 6 },
+        {
+          "kind": "multi-row-insert",
+          "count": 47,
+          "form": "owned",
+          "chunking": "1x8;46x2",
+          "rows": 100,
+          "note": "8 short rows in one bind-limited statement + 92 CJK rows in 46 byte-limited statements"
+        },
+        { "kind": "state-write", "count": 1 },
+        { "kind": "job-terminal", "count": 1 }
+      ],
+      "expectedClasses": [
+        "completes: 47 INSERTs, all chunks <= budget, all rows land; full-poll CPU recorded",
+        "OR typed per-invocation query/subrequest limit rejection (66 statements > 50 under the statement interpretation) - valid measured outcome, NOT an abort",
+        "OR other typed rejection - recorded"
+      ]
+    },
+    {
+      "caseId": "P-05",
+      "order": 12,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-NORMAL",
+      "fixtureOffset": 100,
+      "sourceId": "probe-p-05",
+      "form": "owned",
+      "title": "Normal baseline control under the CURRENT conservative policy (ledger C-02/C-06 parity: 15 xAPI / 29 STMT; probe registers 12 xAPI / 32 STMT incl. latch + 3 probe-prelude seeds)",
+      "cpuScope": "full-poll",
+      "invocations": 1,
+      "apiCalls": 12,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "seed-job", "count": 1 },
+        { "kind": "seed-source-state", "count": 1 },
+        { "kind": "engine-claim-read", "count": 1 },
+        { "kind": "engine-claim-cas", "count": 1 },
+        { "kind": "source-select", "count": 1 },
+        { "kind": "capability-read", "count": 1 },
+        { "kind": "ownership-acquire", "count": 1 },
+        { "kind": "authorization", "count": 2 },
+        { "kind": "budget-readback", "count": 1 },
+        { "kind": "classification-lookup", "count": 6 },
+        {
+          "kind": "multi-row-insert",
+          "count": 13,
+          "form": "owned",
+          "chunking": "12x8;1x4",
+          "rows": 100
+        },
+        { "kind": "state-write", "count": 1 },
+        { "kind": "job-terminal", "count": 1 }
+      ],
+      "expectedClasses": [
+        "completes: 13 INSERTs (32 statements total, under the Free 50-row under BOTH interpretations); full-poll CPU recorded",
+        "OR typed rejection - recorded"
+      ]
+    },
+    {
+      "caseId": "P-06",
+      "order": 13,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-OVERSIZE",
+      "sourceId": "probe-p-06",
+      "form": "owned",
+      "title": "Oversized-row PLAN-TIME rejection under the CURRENT conservative policy (zero durable effects)",
+      "invocations": 1,
+      "apiCalls": 2,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        {
+          "kind": "verify-select",
+          "count": 1,
+          "note": "post-rejection row count (must equal the pre-case count)"
+        }
+      ],
+      "expectedClasses": [
+        "OversizedRowPlanError raised at PLAN time (single-row audit > 102,400 bytes: validator-proven locally); ZERO statements submitted for the item; ZERO durable rows; the invocation still burns CPU - recorded"
+      ]
+    },
+    {
+      "caseId": "P-06b",
+      "order": 14,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-ROWSIZE",
+      "sourceId": "probe-p-06b",
+      "form": "owned",
+      "title": "Large-single-URL row-size boundary probe under documented-limits-only accounting (1 row, 18 binds, ~1.9 MB bind value)",
+      "invocations": 1,
+      "apiCalls": 4,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "seed-job", "count": 1 },
+        { "kind": "seed-source-state", "count": 1 },
+        {
+          "kind": "multi-row-insert",
+          "count": 1,
+          "form": "owned",
+          "chunking": "1x1",
+          "rows": 1,
+          "note": "canonical URL 1,899,995 bytes < the documented 2,000,000-byte row limit, far above the internal 102,400 budget; binds 18; SQL text small; submitted alone for clean attribution"
+        },
+        { "kind": "verify-select", "count": 1 }
+      ],
+      "expectedClasses": [
+        "accepted: the ~1.9 MB bind value lands (the documented-row-limit region is REAL for this shape)",
+        "OR typed rejection (undocumented bind-value size enforcement / row-size enforcement) - EITHER is a valid measured outcome",
+        "under the CURRENT policy this shape is plan-time REJECTED (OversizedRowPlanError) - the probe measures the documented-limits-only behavior only; CPU of this invocation recorded separately"
+      ]
+    },
+    {
+      "caseId": "P-QU-A",
+      "order": 15,
+      "phase": "G3",
+      "tier": "S4",
+      "title": "Quota-unit discriminator A: ONE db.batch of 51 one-row SELECTs (1 execution-API call, 51 statements, non-mutating)",
+      "invocations": 1,
+      "apiCalls": 2,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        {
+          "kind": "quota-unit-select",
+          "count": 51,
+          "note": "51 primary-key lookups on probe_run_state in ONE batch: exactly 1 over the documented Free 50-row"
+        }
+      ],
+      "expectedClasses": [
+        "success with 51 results: no per-statement boundary at 51 inside ONE execution-API call (call-unit not exceeded at this count)",
+        "OR typed per-invocation rejection: a statement/subrequest-style boundary counts statements inside batches - the D1 50-query row (statement reading) or general-subrequest counting; the EXACT row that fired stays ambiguous (both are 50) and is recorded as such",
+        "non-mutating: zero rows written; primary-key reads only"
+      ]
+    },
+    {
+      "caseId": "P-QU-B",
+      "order": 16,
+      "phase": "G3",
+      "tier": "S4",
+      "title": "Quota-unit discriminator B: 51 SEPARATE one-row SELECT executions (52 execution-API calls incl. latch, non-mutating)",
+      "invocations": 1,
+      "apiCalls": 52,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        {
+          "kind": "quota-unit-select",
+          "count": 51,
+          "note": "51 individual terminal executions: 2 over the documented Free 50 subrequest row under the call reading"
+        }
+      ],
+      "expectedClasses": [
+        "success: no <= 50 boundary on execution-API calls for D1 terminal calls in one invocation (consistent with the 1,000 internal-service subrequest row)",
+        "OR typed rejection near the 50-52nd call: a per-invocation boundary counts API calls (general-subrequest row or the D1 row under the call reading)",
+        "non-mutating: zero rows written; primary-key reads only"
+      ]
+    },
+    {
+      "caseId": "P-07a-1",
+      "order": 17,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-CJK",
+      "fixtureOffset": 200,
+      "sourceId": "probe-p-07a-1",
+      "form": "owned",
+      "title": "COMMIT-ONLY CPU scope, F-CJK under documented-limits-only accounting (pre-built payload)",
+      "cpuScope": "commit-only",
+      "invocations": 1,
+      "apiCalls": 3,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "seed-job", "count": 1 },
+        { "kind": "seed-source-state", "count": 1 },
+        {
+          "kind": "multi-row-insert",
+          "count": 13,
+          "form": "owned",
+          "chunking": "12x8;1x4",
+          "rows": 100
+        },
+        { "kind": "state-write", "count": 1 }
+      ],
+      "delivery": "request body = pre-built statement payload (JSON envelope with the EXACT binds; NO XML parsing, NO normalization, NO URL expansion, NO hashing, NO planner/classification). Scope INCLUDES request-body JSON parsing of the pre-built payload (registered inclusion), bind assembly, prepare/bind/batch, response and log serialization, instrumentation.",
+      "expectedClasses": ["completes; commit-only CPU recorded separately from full-poll CPU"]
+    },
+    {
+      "caseId": "P-07a-2",
+      "order": 18,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-CJK",
+      "fixtureOffset": 300,
+      "sourceId": "probe-p-07a-2",
+      "form": "owned",
+      "title": "COMMIT-ONLY CPU scope, F-CJK under the CURRENT conservative policy (pre-built payload)",
+      "cpuScope": "commit-only",
+      "invocations": 1,
+      "apiCalls": 3,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "seed-job", "count": 1 },
+        { "kind": "seed-source-state", "count": 1 },
+        {
+          "kind": "multi-row-insert",
+          "count": 50,
+          "form": "owned",
+          "chunking": "50x2",
+          "rows": 100
+        },
+        { "kind": "state-write", "count": 1 }
+      ],
+      "delivery": "same pre-built-payload scope as P-07a-1",
+      "expectedClasses": [
+        "completes; commit-only CPU recorded separately",
+        "OR typed per-invocation query/subrequest limit rejection (54 statements > 50 under the statement interpretation) - valid measured outcome, NOT an abort"
+      ]
+    },
+    {
+      "caseId": "P-07a-3",
+      "order": 19,
+      "phase": "G3",
+      "tier": "S4",
+      "fixture": "F-NORMAL",
+      "fixtureOffset": 200,
+      "sourceId": "probe-p-07a-3",
+      "form": "owned",
+      "title": "COMMIT-ONLY CPU scope, F-NORMAL under the CURRENT conservative policy (pre-built payload)",
+      "cpuScope": "commit-only",
+      "invocations": 1,
+      "apiCalls": 3,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        { "kind": "seed-job", "count": 1 },
+        { "kind": "seed-source-state", "count": 1 },
+        {
+          "kind": "multi-row-insert",
+          "count": 13,
+          "form": "owned",
+          "chunking": "12x8;1x4",
+          "rows": 100
+        },
+        { "kind": "state-write", "count": 1 }
+      ],
+      "delivery": "same pre-built-payload scope as P-07a-1",
+      "expectedClasses": ["completes; commit-only CPU recorded separately"]
+    },
+    {
+      "caseId": "X-VERIFY-FINAL",
+      "order": 20,
+      "phase": "G4",
+      "tier": "S4",
+      "title": "Final verification (row counts per probe source, schema version, latch closure)",
+      "invocations": 1,
+      "apiCalls": 2,
+      "statements": [
+        { "kind": "latch-increment", "count": 1 },
+        {
+          "kind": "verify-select",
+          "count": 4,
+          "note": "per-source COUNT checks against expected landed rows; schema_version; latch totals"
+        }
+      ],
+      "expectedClasses": [
+        "all counts match the schedule's expected landed rows; any mismatch is a numbered correction, never an in-place edit"
+      ]
+    }
+  ],
+  "caps": {
+    "invocationsRegistered": 20,
+    "transportRetryAllowance": 3,
+    "invocationsHardCap": 23,
+    "transportRetryRule": "retries ONLY for invocations with NO D1 statement submitted (pre-flight/transport failures), re-executing the SAME case under the SAME registered parameters, each logged; the latch consumes a slot on every authenticated request that reaches the database; a retry after a consumed-but-unanswered latch slot is NOT permitted (conservative before-work admission - the slot stays consumed)",
+    "statementsRoundTotalCap": 650,
+    "statementsPerInvocationCap": 70,
+    "apiCallsPerInvocationCap": 55,
+    "apiCallsRoundTotalCap": 170,
+    "rowsWrittenRoundTotalCap": 9000,
+    "rowsReadRoundTotalCap": 25000,
+    "bindPayloadRoundTotalCapBytes": 55000000,
+    "maxRequestBodyBytesCap": 12000000,
+    "durableStorageGrowthCapBytes": 120000000,
+    "workersLogsEventsCap": 3000,
+    "queueOperations": 0,
+    "providerFetches": 0,
+    "productResourceTouches": 0,
+    "reservedRefusalAndEmergencyOverhead": {
+      "d1Attempts": 8,
+      "apiCalls": 8,
+      "rowsWritten": 16,
+      "rowsRead": 64,
+      "note": "R1141-04: RESERVED bounded allowance (may be unused) for authorized-but-rejected latch observations (duplicate deliveries, kill-switch observation/activation, closed/exhausted cases) and the emergency hard-stop batch (set __global__ aborted + close the case). Detecting any refusal costs exactly ONE submitted UPDATE with zero durable changes; these attempts are counted D1 attempts. Beyond this reserve, ANY additional refused attempt is an abort-criterion event (registered outcome set exceeded)."
+    },
+    "accessControlClasses": {
+      "durablyEnforced": [
+        "per-case invocation budget (probe_run_state.invocations_registered - behavioral proof V-18)",
+        "per-case statement budget at invocation granularity (statements_registered + the latch statements_used guard - behavioral proof V-18)",
+        "per-case status gating (open/closed/aborted) and the __global__ kill switch"
+      ],
+      "operatorSubmissionLimits": [
+        "the aggregate 23-invocation ceiling (sum of durably enforced per-case budgets + retry allowance) - an ACCOUNTING IDENTITY with NO separate durable aggregate counter",
+        "single registered execution per case; no goal-directed re-runs (D5)",
+        "the 3-retry transport allowance and its no-D1-statement precondition"
+      ],
+      "notEnforced": [
+        "UNAUTHENTICATED PUBLIC TRAFFIC VOLUME: rejected pre-D1 by the token check (zero probe statements, zero durable changes) but NOT bounded in count by this schedule - there is no global request ceiling mechanism in this plan; Workers-level request flooding is outside the plan's scope and is the owner's platform concern"
+      ]
+    }
+  },
+  "decisionRuleInputs": {
+    "p01bRequiredPayloadMultiple": 2,
+    "p01bMaxRungRows": 208,
+    "p01bMaxRungStatements": 26,
+    "p01bRequiredReference": "the EXACT total bind payload of one full 100-row F-CJK owned commit under documented-limits-only accounting (12x8+1x4 statements, all 11 row-value binds + 7 shared guard binds per statement) - validator-computed from fixture bytes",
+    "cpuFreeLimitMs": 10
+  },
+  "coverageBoundary": {
+    "staticCounterexample": {
+      "description": "A VALID sub-2-MiB RSS document can contain a URL that expands beyond the documented D1 row-size limit: feed-bound compliance does NOT imply row-size compliance (registered static boundary; no fixture claims coverage above it)",
+      "rawRssBytes": 1800116,
+      "feedBoundBytes": 2097152,
+      "cjkPathChars": 600000,
+      "canonicalUrlBytes": 5400023,
+      "documentedRowBoundBytes": 2000000
+    },
+    "claimedCoverage": "The fixtures cover EXACTLY: uniform ~2 KiB canonical URLs (100-item slices of a 300-item fixture); mixed 8 short + 92 x 45,023 B; uniform 45,023 B x100 (slices of a 400-item fixture); single 102,500 B row (internal-budget rejection); single 1,899,995 B row (documented row-limit boundary); ladder 516 distinct ~45 KB rows (slices of a 538-item fixture). Unmeasured input sizes and shapes stay NOT_READY; no global envelope READY inference from these fixtures."
+  },
+  "quotaUnitDiscriminator": {
+    "design": "minimal non-mutating differential controls with distinct typed outcomes (P-QU-A batch-51, P-QU-B terminal-51)",
+    "interpretationMatrix": {
+      "A-success_B-success": "no <= 50 boundary counted per-statement-in-batch at 51, none per-API-call at 52: neither reading enforces at these counts; the unit ambiguity is RETAINED (partially narrowed, honestly recorded)",
+      "A-rejection_B-success": "a per-statement/per-subrequest boundary counts statements inside ONE batch: the D1 50-query row (statement reading) or general-subrequest counting; which row fired stays ambiguous (both are 50)",
+      "A-success_B-rejection": "the boundary counts execution-API calls, not statements inside a batch (call reading)",
+      "A-rejection_B-rejection": "both boundaries exist at these counts (statement AND call counting)"
+    },
+    "honestyRule": "a success NEVER proves absence of enforcement above the tested count; the ambiguity is retained wherever the matrix leaves it unresolved; daily allowances are NEVER deliberately exhausted"
+  },
+  "proofScope": {
+    "structuralSimulation": {
+      "what": "The LOCAL validator executes every registered statement shape against the real S3-then-S4 schemas in node:sqlite (S3-tier cases BEFORE 0004, S4 cases after): exact statement counts, guarded inserts, the ownership fence, the negative probe, actual bind payloads, and the measured storage of THIS EXACT simulation.",
+      "substitutedKinds": [
+        "source-select",
+        "capability-read",
+        "authorization",
+        "budget-readback",
+        "classification-lookup"
+      ],
+      "substituteForm": "SELECT 1 (or simplified SQL) - NOT the accepted operations",
+      "proves": [
+        "the schedule's statement/invocation/API-call accounting is internally exact",
+        "the registered INSERT templates, guard fences and chunk sizes are legal and executable against the real schema",
+        "the S3/S4 tier boundary (column absent/present) and the partial-unique-index rejection",
+        "the storage growth of THIS EXACT simulation in local SQLite (incl. UNIQUE-index amplification)"
+      ],
+      "doesNotProve": [
+        "the accepted call-chain semantics (authorizeIngestionUnit's guarded UPDATE + INSERT..SELECT budget mutation pair, the real source/capability/classification reads)",
+        "execution-API grouping / batch boundaries as the runtime would issue them",
+        "durable budget effects of the accepted authorization path",
+        "CPU of any scope",
+        "any Cloudflare billable counter",
+        "full-path storage (the accepted authorization/budget writes are NOT in the simulation)"
+      ],
+      "evidenceLabel": "independently measured (local engine metadata; NOT Cloudflare billable counters)"
+    },
+    "fullPollHarness": {
+      "status": "UNPROVEN — NOT IMPLEMENTED (LOCAL round)",
+      "definition": "An executable review-side harness that runs the ACCEPTED source/capability/claim/authorization/ownership/terminal operations plus the design-only commit candidate over actual source-bound grouped probes, observing actual execution-API calls, statement attempts/batch boundaries, durable budget effects and bind payloads.",
+      "requiredOperations": [
+        "accepted claimJob (row read + CAS claim)",
+        "accepted SOURCE_SELECT_SQL source read",
+        "accepted resolveSchemaCapability capability read",
+        "accepted authorizeIngestionUnit (guarded UPDATE + INSERT..SELECT budget mutation, one atomic batch)",
+        "accepted readIngestionBudget readback",
+        "accepted ownership acquire/fenced state writes",
+        "accepted completeJob terminal write",
+        "design-only commit candidate (design-lab/candidate-sql.ts)",
+        "actual source-bound grouped probes"
+      ],
+      "cloudExecutionBlocked": true,
+      "blockRule": "No full-poll-equivalent claim may be made until the harness exists and a G0-approved authorized round executes it. Structural calibration must NEVER be promoted into full-poll readiness. Until then every full-poll figure (API grouping, attempted-statement ledger, authorization mutations, error-path overhead) stays UNPROVEN.",
+      "evidenceLabel": "future measurement"
+    }
+  },
+  "publicationSafety": {
+    "status": "HELD — no push, no PR update, no remote write of any kind in this LOCAL round",
+    "knownFacts": [
+      "Public GitHub check-runs show 'Workers Builds: pixel-preview' (app cloudflare-workers-and-pages), conclusion FAILURE, with DISTINCT Cloudflare Build IDs on the three recent review heads 761f176, 06caee0 and fc679f1 — i.e., account-side BUILD ATTEMPTS were associated with pushes to this review branch",
+      "The 'Phase 0 quality gate' GitHub Actions run completed SUCCESS on fc679f1 (run 39984358358)"
+    ],
+    "unknowns": [
+      "deployment outcome, failure stage and cause of the Workers Builds failures",
+      "whether any deployment/migration/activation side effect occurred",
+      "any incremental account charge",
+      "whether the review branch can trigger FUTURE builds or deployments"
+    ],
+    "rule": "Pre-existing does NOT imply harmless; a red build is NOT a safety mechanism. No further push until a SEPARATE publication-safety authorization resolves the integration/branch behavior (owner-side investigation only; no Cloudflare account access is granted to or performed by this round). Ordinary LOCAL commits stay unpushed.",
+    "evidence": [
+      "posidon-review/R1.10.4.1/761f176-checks.json",
+      "posidon-review/R1.10.4.1/06caee0-checks.json",
+      "posidon-review/R1.10.4.1/fc679f1-checks.json",
+      "posidon-review/R1.10.4.1/761f176-statuses.json",
+      "posidon-review/R1.10.4.1/06caee0-statuses.json",
+      "posidon-review/R1.10.4.1/fc679f1-statuses.json"
+    ]
+  }
+}

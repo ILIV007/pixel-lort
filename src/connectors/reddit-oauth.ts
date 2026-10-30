@@ -128,7 +128,7 @@ export function createRedditOauthConnector(): SourceConnector {
             'content-type': 'application/x-www-form-urlencoded',
             // Basic auth composed here at call time — never stored/logged.
             authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
-            'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellort)',
+            'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellores)',
           },
           byteCap: 65_536,
           timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
@@ -210,7 +210,7 @@ export function createRedditOauthConnector(): SourceConnector {
             headers: {
               accept: 'application/json',
               authorization: `Bearer ${accessToken}`,
-              'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellort)',
+              'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellores)',
             },
             byteCap: 1_048_576,
             timeoutMs: INGESTION_LIMITS.httpTimeoutMs,
