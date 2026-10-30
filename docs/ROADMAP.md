@@ -562,6 +562,40 @@ decision.
       `'{}'` foreign shapes are honestly NOT reusable. Suite now 20 REAL-D1
       tests + 19 unit tests; full gate re-run green (110 files / 1489
       tests); version 1.10.1; no Phase-5-completion claim.
+- [x] **Phase 5C-3 CORRECTION (R1.15.2, v1.10.2): the remaining
+      snapshot-identity boundary of the reuse relation + defensive reader
+      null guards — TWO bounded CHANGES_REQUIRED items fixed INSIDE the
+      existing contract (no new capability, no phase expansion, schema 3
+      untouched, RED on the 1.10.1 baseline recorded, green after)** —
+      **(Q1)** the reuse relation now carries a VERSIONED deterministic
+      claim identity derived from (target story, item id, CURRENT snapshot
+      hash) — `exactContentReuseClaimId` — and the replay fast-path
+      additionally requires the stored relation's claim id to EQUAL the
+      current snapshot's versioned identity before answering success:
+      composed-text equality of the old draft's immutable basis is
+      necessary but NEVER sufficient (an edge-space title change under the
+      pre-existing trim contract yields a NEW snapshot with byte-equal
+      composed text whose relation does NOT exist yet — the old relation
+      must never acknowledge it as processed); the new snapshot's own
+      relation + processed flip land through the SAME fenced atomic reuse
+      commit with ZERO new provider calls; the old relation stays intact;
+      same-snapshot replays stay write-free and charge-free; old-format
+      relations take the explicit conservative compatibility path (never
+      proof of the current snapshot; a verified new identity is added ONE
+      time through the fenced path — no backfill, no historical rewrite);
+      normal-story identity helpers untouched; **(Q2)**
+      `readReuseDocumentBasis` guards every level (document, sourceReport,
+      evidenceGuard, snapshot) BEFORE member access: malformed PRESENT
+      null/primitive/array data reads as the documented unusable-basis
+      `null` instead of throwing, and is never silently reinterpreted as
+      the legitimate absent-legacy shape (pre-R1.12 absence preserved; all
+      real builder round-trips preserved). Tests: the two Posidon probe
+      blocks appended to the EXISTING suites + permanent table-driven
+      null/primitive/array mutation cases + four new integration contract
+      tests (durable versioned distinction, changed-text independent path,
+      write-free same-snapshot replay, verification→commit mutation
+      window); integration 20→25, unit 19→37, full gate 110 files / 1512
+      tests; version 1.10.2; no Phase-5-completion claim.
 - [ ] Story MERGING, entity aliases, semantic/deterministic matching with
       thresholds (Phase 5C-1/5C-2 provide ONLY fingerprints + candidate
       discovery + conservative observation assessment — merging remains
