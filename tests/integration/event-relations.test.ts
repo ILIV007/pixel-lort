@@ -94,6 +94,11 @@ interface Harness {
   pendingDeadlineCount: () => number;
   hangBudgetAuthorization: () => void;
   hangProviderCalls: () => void;
+  hangBasisReads: () => void;
+  hangEntityProbes: () => void;
+  disarmHungReads: () => void;
+  releaseHungReads: (error?: unknown) => void;
+  throwOnRelationAttempt: () => void;
   rejectPendingProviderCalls: (error: unknown) => void;
   readonly executor: DbExecutor;
   readonly rawExecutor: DbExecutor;
@@ -123,13 +128,34 @@ function createHarness(input?: {
   // never from a raised cap and never from another test's leftovers.
   const harnessDayOffsetMs = (harnessJobIdCounter += 1) * 86_400_000;
   const clock = fixedClock(NOW + harnessDayOffsetMs);
-  const logger = createLogger({ level: 'error', clock });
+  // R1.17.2 (A2) harness extension: the logger wrapper can inject an
+  // infrastructure failure in the relation task's OWN result path (the
+  // attempt-record observability call) — the same fault class as
+  // failBatchesMatching, ONE-SHOT, armed by the A2 regression only.
+  const baseLogger = createLogger({ level: 'error', clock });
+  let throwOnRelationAttemptArmed = false;
+  const logger = {
+    debug: (message: string, fields?: Record<string, unknown>) => baseLogger.debug(message, fields),
+    info: (message: string, fields?: Record<string, unknown>) => {
+      if (throwOnRelationAttemptArmed && message === 'ai.event_relation.attempt') {
+        throwOnRelationAttemptArmed = false;
+        throw new Error('injected_relation_attempt_log_failure');
+      }
+      baseLogger.info(message, fields);
+    },
+    warn: (message: string, fields?: Record<string, unknown>) => baseLogger.warn(message, fields),
+    error: (message: string, fields?: Record<string, unknown>) => baseLogger.error(message, fields),
+    child: (fields: Record<string, unknown>) => baseLogger.child(fields),
+  };
   const rawExecutor = createDbExecutor(env.DB, { clock });
 
   let basisReadDelay = 0;
   let entityProbeDelay = 0;
   let hangBudgetAuth = false;
   let hangProvider = false;
+  let hangBasisReadsArmed = false;
+  let hangEntityProbesArmed = false;
+  const pendingHungReadRejects: ((error: unknown) => void)[] = [];
   const pendingProviderRejects: ((error: unknown) => void)[] = [];
   const providerCalls = { draft: 0, relation: 0 };
   const failBatchesHook: {
@@ -142,6 +168,14 @@ function createHarness(input?: {
 
   const executor: DbExecutor = {
     query: async <T>(statement: Parameters<DbExecutor['query']>[0]) => {
+      // R1.17.2 (D2): a PENDING entity-probe read — the query never
+      // settles on its own; only the caller-side bounded race can free
+      // the step. Late release is available to prove absorption.
+      if (hangEntityProbesArmed && statement.sql.includes('FROM story_entities')) {
+        return new Promise<never>((_resolve, reject) => {
+          pendingHungReadRejects.push(reject);
+        });
+      }
       const result = await rawExecutor.query<T>(statement);
       if (
         statement.sql.includes('FROM entity_aliases') &&
@@ -161,6 +195,14 @@ function createHarness(input?: {
       return result;
     },
     first: async <T>(statement: Parameters<DbExecutor['first']>[0]) => {
+      // R1.17.2 (D2): a PENDING basis read — the read never settles; the
+      // step deadline must free the CALLER (the bounded race), and a late
+      // rejection must be absorbed — never an unhandled rejection.
+      if (hangBasisReadsArmed && statement.sql.includes('FROM drafts WHERE story_id')) {
+        return new Promise<never>((_resolve, reject) => {
+          pendingHungReadRejects.push(reject);
+        });
+      }
       const result = await rawExecutor.first<T>(statement);
       // R1.17.1 (D1): a slow BASIS read — the clock advances when the
       // first real candidate-draft read returns (no DB change, no output
@@ -295,6 +337,7 @@ function createHarness(input?: {
         createEditorialPrepareDraftHandler({
           executor,
           aiService,
+          ...(useManualScheduler ? { deadlineScheduler: manualDeadlineScheduler } : {}),
           eventRelation: {
             // R1.17.1 (G1): the effective gate — global AND feature flag.
             enabled: relationEnabled && aiEnabled,
@@ -342,6 +385,24 @@ function createHarness(input?: {
     },
     hangProviderCalls: () => {
       hangProvider = true;
+    },
+    hangBasisReads: () => {
+      hangBasisReadsArmed = true;
+    },
+    hangEntityProbes: () => {
+      hangEntityProbesArmed = true;
+    },
+    disarmHungReads: () => {
+      hangBasisReadsArmed = false;
+      hangEntityProbesArmed = false;
+    },
+    releaseHungReads: (error?: unknown) => {
+      const rejects = [...pendingHungReadRejects];
+      pendingHungReadRejects.length = 0;
+      for (const reject of rejects) reject(error ?? new Error('late_read_settlement'));
+    },
+    throwOnRelationAttempt: () => {
+      throwOnRelationAttemptArmed = true;
     },
     rejectPendingProviderCalls: (error) => {
       const rejects = [...pendingProviderRejects];
@@ -1436,16 +1497,22 @@ describe('R1.17.1 D1 — the step deadline covers retrieval, basis, budget and p
     const storySecond = await storyIdForSnapshot('item-d1b-second', hashSecond);
     const document = await readDraftDocument(harness.executor, storySecond);
     const report = eventRelationOf(document!);
-    // The basis read COMPLETED (the bundle was built) but the service saw
-    // the expired absolute deadline: the pair is TYPED skipped_deadline
-    // with zero run rows — the late read can never open a fresh window.
-    expect(report.observation).toBe('evaluation_incomplete');
-    expect(report.pairs[0]).toMatchObject({
-      state: 'skipped_deadline',
-      deferredReason: 'step_deadline',
-      aiRunIds: [],
+    // R1.17.2 (D2) signature adaptation (assertion meaning unchanged): the
+    // slow basis read consumed the WHOLE step budget, so the candidate's
+    // REFERENCE read — new work after expiry — now correctly refuses to
+    // start (the bounded race returns already-expired). The candidate is
+    // the TYPED technical state and NO bundle is built from an unverified
+    // reference identity; the late read can never open a fresh window.
+    // (Pre-R1.17.2 this surfaced as pair-level skipped_deadline because
+    // the reference read ran unbounded and the bundle was still built.)
+    expect(report.observation).toBe('no_evaluable_basis');
+    expect(report.candidates[0]).toMatchObject({
+      basisState: 'basis_unavailable',
+      basisUnavailableReason: 'step_deadline_expired',
     });
+    expect(report.pairs).toEqual([]);
     expect(report.counts.providerAttempts).toBe(0);
+    expect(report.counts.pairsAttempted).toBe(0);
   });
 
   it('a PENDING budget authorization is freed by the deadline — zero provider calls, zero fabricated charge, typed ledger', async () => {
@@ -1725,3 +1792,216 @@ async function budgetAiRequests(executor: DbExecutor): Promise<number | null> {
   });
   return row?.n ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// R1.17.2 (A2/D2) — second-generation corrections on the R1.17.1 delivery.
+// A2: the durable relation audit no longer depends on the relation step's
+//     post-return outcome mapping — every REAL invocation is observed at
+//     RECORD TIME and survives a step that fails after the provider
+//     answered (providerCalls=1 ⇒ durable delta=1, the exact A1 signature
+//     must never reappear on a NEW exit).
+// D2: the pending retrieval/basis/reference reads are BOUNDED by the same
+//     absolute step deadline through the accepted race primitive — expiry
+//     frees the CALLER (a pending D1 query is never claimed cancellable),
+//     a late settlement is absorbed, and no new work starts after expiry.
+// ---------------------------------------------------------------------------
+describe('R1.17.2 A2/D2 — record-time audit + bounded pending reads', () => {
+  beforeEach(async () => {
+    await createDbExecutor(env.DB).run({
+      sql: "DELETE FROM jobs WHERE status IN ('pending', 'queued', 'retry_wait')",
+      params: [],
+    });
+  });
+
+  async function seedBase(
+    harness: Harness,
+    srcId: string,
+    entId: string,
+    entName: string,
+  ): Promise<void> {
+    await seedSource(harness.executor, srcId, `${entName} Source`);
+    await seedEntity(harness.executor, { id: entId, slug: entId, name: entName });
+    await seedAlias(harness.executor, { entityId: entId, alias: entName });
+    await seedItem(harness.executor, {
+      id: `p2-base-${entId}`,
+      sourceId: srcId,
+      title: `${entName} release announcement`,
+      body: 'The first dated event.',
+    });
+    expect(await enqueueAndRun(harness, `p2-base-${entId}`)).toEqual(['ack:job_completed']);
+  }
+
+  it('A2: a relation-task failure AFTER the provider ran keeps the invocation audited BEFORE the retry; the retry generation owns its own rows (no collision, no misattribution)', async () => {
+    const harness = createHarness();
+    await seedBase(harness, 'p2-src-a', 'p2-ent-a', 'Aurora');
+    const hashSecond = await seedItem(harness.executor, {
+      id: 'p2-a-second',
+      sourceId: 'p2-src-a',
+      title: 'Aurora translated coverage',
+      body: 'خبر دوم با متن متفاوت دربارهٔ Aurora.',
+    });
+    const rowsBefore = await relationRunCount(harness.executor);
+    const budgetsBefore = await budgetAiRequests(harness.executor);
+    const callsBefore = harness.providerCalls.relation;
+    // The relation task's OWN result path fails (the attempt-record
+    // observability write throws) AFTER the provider answered — the same
+    // infrastructure-fault class as the injected mid-commit failure.
+    harness.throwOnRelationAttempt();
+    expect(await enqueueAndRun(harness, 'p2-a-second')).toEqual(['ack:retry_scheduled']);
+    expect(await processedStatus(harness.executor, 'p2-a-second')).toBe('new');
+
+    // BEFORE the retry: provider attempts == charged attempts == durable
+    // rows (the audit is independent of the step's outcome mapping).
+    const providerAttemptsGen1 = harness.providerCalls.relation - callsBefore;
+    expect(providerAttemptsGen1).toBe(1);
+    const runRowsGen1 = (await relationRunCount(harness.executor)) - rowsBefore;
+    expect(runRowsGen1).toBe(1);
+    expect((await budgetAiRequests(harness.executor))! - budgetsBefore!).toBe(1); // charged, never refunded
+    const gen1RunIds = (
+      await harness.executor.query<{ id: string }>({
+        sql: `SELECT id FROM ai_runs WHERE task = 'event_relation' ORDER BY id ASC`,
+        params: [],
+      })
+    ).rows.map((row) => row.id);
+    expect(gen1RunIds.length).toBe(rowsBefore + runRowsGen1);
+    const gen1NewIds = gen1RunIds.slice(rowsBefore);
+    for (const runId of gen1NewIds) {
+      const run = await harness.executor.first<{ status: string; task: string }>({
+        sql: `SELECT status, task FROM ai_runs WHERE id = ?`,
+        params: [runId],
+      });
+      // The provider DID answer — the row honestly records 'succeeded' and
+      // is referenced by NO draft (never presented as consumed).
+      expect(run?.status).toBe('succeeded');
+      expect(run?.task).toBe('event_relation');
+    }
+
+    // The bounded engine retry owns the NEXT generation: its own REAL
+    // invocation happens again and gets its OWN row (no collision with
+    // generation 1's deterministic ids, no misattribution, no free lunch).
+    harness.clock.advance(10_000);
+    await runPipeline(harness);
+    expect(await processedStatus(harness.executor, 'p2-a-second')).toBe('processed');
+    expect(harness.providerCalls.relation).toBe(callsBefore + providerAttemptsGen1 + 1);
+    expect(await relationRunCount(harness.executor)).toBe(rowsBefore + runRowsGen1 + 1);
+
+    // The winning generation's ledger references ONLY its own durable run.
+    const storySecond = await storyIdForSnapshot('p2-a-second', hashSecond);
+    const document = await readDraftDocument(harness.executor, storySecond);
+    const report = eventRelationOf(document!);
+    const winningRunIds: string[] = [];
+    for (const pair of report.pairs) {
+      for (const runId of pair.aiRunIds) {
+        winningRunIds.push(runId);
+        expect(gen1NewIds).not.toContain(runId);
+        const run = await harness.executor.first<{ id: string }>({
+          sql: `SELECT id FROM ai_runs WHERE id = ?`,
+          params: [runId],
+        });
+        expect(run?.id).toBe(runId);
+      }
+    }
+    expect(winningRunIds.length).toBe(1);
+    // Generation 1's audited row still exists — never replaced, never deleted.
+    for (const runId of gen1NewIds) {
+      const run = await harness.executor.first<{ id: string }>({
+        sql: `SELECT id FROM ai_runs WHERE id = ?`,
+        params: [runId],
+      });
+      expect(run?.id).toBe(runId);
+    }
+  });
+
+  it('D2: a PENDING basis read is freed by the step deadline — typed ledger, zero provider calls, late rejection absorbed', async () => {
+    const harness = createHarness({ manualDeadlineScheduler: true });
+    await seedBase(harness, 'p2-src-b', 'p2-ent-b', 'Borealis');
+    const hashSecond = await seedItem(harness.executor, {
+      id: 'p2-b-second',
+      sourceId: 'p2-src-b',
+      title: 'Borealis translated coverage',
+      body: 'خبر دوم با متن متفاوت دربارهٔ Borealis.',
+    });
+    const callsBefore = harness.providerCalls.relation;
+    const rowsBefore = await relationRunCount(harness.executor);
+    const budgetsBefore = await budgetAiRequests(harness.executor);
+    harness.hangBasisReads();
+    const pipeline = (async () => {
+      expect(
+        await enqueueEditorialPrepareDraft({
+          engine: harness.engine,
+          executor: harness.rawExecutor,
+          sourceItemId: 'p2-b-second',
+        }),
+      ).toMatchObject({ kind: 'created' });
+      return runPipeline(harness);
+    })();
+    // The bounded race must be scheduled BY THE READ ITSELF — expiry frees
+    // the caller while the D1 read is still pending (never claimed cancelled).
+    for (let i = 0; i < 500 && harness.pendingDeadlineCount() === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(harness.pendingDeadlineCount()).toBeGreaterThan(0);
+    harness.firePendingDeadlines();
+    harness.disarmHungReads();
+    const outcomes = await pipeline;
+    // A LATE rejection of the pending read is absorbed by the primitive —
+    // never an unhandled rejection, never a resurrected step.
+    harness.releaseHungReads(new Error('late_basis_read_failure'));
+    expect(outcomes).toEqual(['ack:job_completed']);
+    expect(harness.providerCalls.relation).toBe(callsBefore);
+    expect((await relationRunCount(harness.executor)) - rowsBefore).toBe(0);
+    // The ONLY charge is the draft's own — the relation step started no
+    // provider work and fabricated no authorization.
+    expect((await budgetAiRequests(harness.executor))! - budgetsBefore!).toBe(1);
+    const storySecond = await storyIdForSnapshot('p2-b-second', hashSecond);
+    const document = await readDraftDocument(harness.executor, storySecond);
+    const report = eventRelationOf(document!);
+    // The unread candidate is the TYPED technical state — never a semantic verdict.
+    expect(report.candidates[0]).toMatchObject({
+      basisState: 'basis_unavailable',
+      basisUnavailableReason: 'step_deadline_expired',
+    });
+    expect(report.counts.providerAttempts).toBe(0);
+  });
+
+  it('D2: a PENDING entity probe is freed by the step deadline — honest unprobed accounting, zero provider calls', async () => {
+    const harness = createHarness({ manualDeadlineScheduler: true });
+    await seedBase(harness, 'p2-src-c', 'p2-ent-c', 'Cascade');
+    const hashSecond = await seedItem(harness.executor, {
+      id: 'p2-c-second',
+      sourceId: 'p2-src-c',
+      title: 'Cascade translated coverage',
+      body: 'خبر دوم با متن متفاوت دربارهٔ Cascade.',
+    });
+    const callsBefore = harness.providerCalls.relation;
+    harness.hangEntityProbes();
+    const pipeline = (async () => {
+      expect(
+        await enqueueEditorialPrepareDraft({
+          engine: harness.engine,
+          executor: harness.rawExecutor,
+          sourceItemId: 'p2-c-second',
+        }),
+      ).toMatchObject({ kind: 'created' });
+      return runPipeline(harness);
+    })();
+    for (let i = 0; i < 500 && harness.pendingDeadlineCount() === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(harness.pendingDeadlineCount()).toBeGreaterThan(0);
+    harness.firePendingDeadlines();
+    harness.disarmHungReads();
+    const outcomes = await pipeline;
+    harness.releaseHungReads(new Error('late_probe_failure'));
+    expect(outcomes).toEqual(['ack:job_completed']);
+    expect(harness.providerCalls.relation).toBe(callsBefore);
+    const storySecond = await storyIdForSnapshot('p2-c-second', hashSecond);
+    const document = await readDraftDocument(harness.executor, storySecond);
+    const report = eventRelationOf(document!);
+    // The deadline-stopped probe is the HONEST unprobed truth — recorded,
+    // never hidden, never folded into a fake "no candidates exist" claim.
+    expect(report.lookup).toMatchObject({ probedEntities: [], unprobedEntityCount: 1 });
+    expect(report.observation).toBe('no_candidates_observed');
+    expect(report.counts.providerAttempts).toBe(0);
+  });
+});

@@ -81,6 +81,24 @@ export interface EventRelationAttemptRecord {
   readonly errorCode: string | null;
 }
 
+/**
+ * R1.17.2 (A2): the OBSERVATION of one REAL provider attempt, surfaced by
+ * the service at the moment the attempt is recorded — BEFORE any later
+ * result-mapping (and before any observability sink that may itself fail).
+ * The caller's audit collector therefore does not depend on the step
+ * RETURNING: an invocation that happened is observable even when the step
+ * never completes its outcome mapping. Trusted internal context — the
+ * observer is the caller's own collector, never a model-settable field.
+ */
+export interface EventRelationAttemptObservation {
+  readonly pairId: string;
+  /** The attempt's index WITHIN its pair (the deterministic run-id input). */
+  readonly attemptIndex: number;
+  /** The pair's canonical input hash (the run row's input_hash). */
+  readonly canonicalInputHash: string;
+  readonly attempt: EventRelationAttemptRecord;
+}
+
 /** Typed outcome of ONE pair inside the step. */
 export type EventRelationPairOutcome =
   | {

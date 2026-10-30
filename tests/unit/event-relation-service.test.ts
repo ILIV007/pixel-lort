@@ -510,4 +510,105 @@ describe('createEventRelationService — the step deadline (R1.17.1 D1)', () => 
     }
     expect(port.calls).toBe(1);
   });
+
+  it('R1.17.2 (A2): EVERY real attempt is observed at record time — the observation survives a later mapping failure and carries the deterministic identity', async () => {
+    // The provider answers ok; the OBSERVABILITY SINK then fails (the
+    // injected fault class of the A2 counterexample). The record-time
+    // observations must already carry the invocation — the caller's audit
+    // never depends on the step completing its outcome mapping.
+    const failingLogger = createLogger({
+      level: 'error',
+      sink: () => undefined,
+    });
+    const loggerThrows = {
+      ...failingLogger,
+      info: (message: string, fields?: Record<string, unknown>) => {
+        if (message === 'ai.event_relation.attempt') {
+          throw new Error('injected_relation_attempt_log_failure');
+        }
+        failingLogger.info(message, fields);
+      },
+    };
+    const port = createFakePort('workers-ai', [validOkOutput('erp-1', 'item-self', 'item-other')]);
+    const service = createEventRelationService({
+      executor: createFakeExecutor(),
+      ports: { 'workers-ai': port },
+      clock: fixedClock,
+      logger: loggerThrows,
+      config: enabledConfig,
+    });
+    const observations: {
+      pairId: string;
+      attemptIndex: number;
+      canonicalInputHash: string;
+      status: string;
+    }[] = [];
+    let outcome: Awaited<ReturnType<typeof service.evaluateEventRelations>> | null = null;
+    let thrown: unknown = null;
+    try {
+      outcome = await service.evaluateEventRelations(
+        { pairs: [pairRequest('erp-1', 'edst_other')] },
+        {
+          onAttempt: (observation) => {
+            observations.push({
+              pairId: observation.pairId,
+              attemptIndex: observation.attemptIndex,
+              canonicalInputHash: observation.canonicalInputHash,
+              status: observation.attempt.status,
+            });
+          },
+        },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    // The record-time observation happened BEFORE the failing sink.
+    expect(observations).toEqual([
+      {
+        pairId: 'erp-1',
+        attemptIndex: 0,
+        canonicalInputHash: 'c'.repeat(64),
+        status: 'succeeded',
+      },
+    ]);
+    // The injected fault propagates (the step never completes its outcome
+    // mapping) — the CALLER's typed failure handling owns the retry; the
+    // observation surface stays intact for the durable audit.
+    expect(outcome).toBeNull();
+    expect(thrown).toBeInstanceOf(Error);
+    expect(port.calls).toBe(1); // the provider DID run — exactly one invocation
+  });
+
+  it('R1.17.2 (A2): the observer is absent-safe and fires per attempt on a timed-out provider call too', async () => {
+    const port = createFakePort('workers-ai', []);
+    const service = createEventRelationService({
+      executor: createFakeExecutor(),
+      ports: { 'workers-ai': port },
+      clock: fixedClock,
+      logger: silentLogger,
+      config: enabledConfig,
+    });
+    const observations: { pairId: string; attemptIndex: number; status: string }[] = [];
+    const outcome = await service.evaluateEventRelations(
+      { pairs: [pairRequest('erp-1', 'edst_other')] },
+      {
+        // ALREADY-EXPIRED deadline: the attempt never starts (zero calls),
+        // and the absent observer contract stays a no-op.
+        deadlineAtMs: fixedClock.now() - 1,
+        onAttempt: (observation) => {
+          observations.push({
+            pairId: observation.pairId,
+            attemptIndex: observation.attemptIndex,
+            status: observation.attempt.status,
+          });
+        },
+      },
+    );
+    expect(outcome).toMatchObject({
+      kind: 'decisions',
+      pairs: [{ kind: 'deferred', reason: 'step_deadline' }],
+    });
+    expect(port.calls).toBe(0);
+    expect(observations).toEqual([]); // zero fabricated observations for a step that never reached the provider
+  });
 });

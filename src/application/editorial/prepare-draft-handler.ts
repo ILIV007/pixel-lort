@@ -201,6 +201,8 @@ import {
   EVENT_RELATION_MAX_ROWS_PER_PROBE,
 } from '../../domain/editorial/event-relation-candidates';
 import { EVENT_RELATION_BOUNDS } from '../../domain/ai/event-relation-policy';
+import { awaitWithDeadline, type DeadlineTimeoutScheduler } from '../../shared/time/deadline-wait';
+import type { EventRelationAttemptObservation } from '../../domain/ai/event-relation-types';
 import {
   buildEventRelationPairBundle,
   type EventRelationPairBundle,
@@ -265,6 +267,11 @@ export interface EditorialPrepareDraftHandlerOptions {
     readonly service: EventRelationService;
   };
   readonly nowMs: () => number;
+  /** R1.17.2 (D2): the scheduler for the relation step's bounded read
+   * races (trusted internal context — the same primitive the services
+   * use). Absent ⇒ the production real-time scheduler. Injectable so the
+   * deterministic tests can fire expiries without real sleeps. */
+  readonly deadlineScheduler?: DeadlineTimeoutScheduler;
   readonly logger?: Logger;
 }
 
@@ -363,6 +370,7 @@ export function createEditorialPrepareDraftHandler(
   options: EditorialPrepareDraftHandlerOptions,
 ): JobHandler<EditorialPrepareDraftPayload> {
   const { executor, aiService, nowMs, logger } = options;
+  const relationReadScheduler = options.deadlineScheduler;
 
   async function execute(
     context: JobExecutionContext<EditorialPrepareDraftPayload>,
@@ -877,6 +885,14 @@ export function createEditorialPrepareDraftHandler(
       readonly pairId: string;
       readonly run: EditorialCommitInput['aiRun'];
     }[] = [];
+    /** R1.17.2 (A2): EVERY REAL provider attempt observed AT RECORD TIME
+     * by the relation service — the audit no longer depends on the step
+     * RETURNING. On any post-provider failure exit the observations are
+     * unioned with the outcome-mapped rows (deterministic ids — the
+     * own-row guard dedups) so an invocation that happened can never
+     * vanish from the audit. Zero fabricated rows: the service only
+     * observes attempts that actually reached the provider. */
+    const relationAttemptObservations: EventRelationAttemptObservation[] = [];
     /** The evaluated candidate bases the SQL basis gate pins at commit. */
     let relationBases: NonNullable<EditorialCommitInput['eventRelationBases']> = [];
 
@@ -887,16 +903,19 @@ export function createEditorialPrepareDraftHandler(
       });
       logger?.debug('editorial.prepare_draft.event_relation_disabled');
     } else {
-      try {
-        // R1.17.1 (D1): the step's ABSOLUTE deadline is set at the START of
-        // the FIRST relation work — the retrieval probes INCLUDED — and
-        // holds from retrieval/basis packaging through budget/provider/
-        // output/usage. The service receives it as caller context it can
-        // only SHORTEN (never reset or extend); reads stop STARTING after
-        // expiry (a pending D1 query is not cancellable — expiry frees
-        // the caller, it never claims real cancellation).
-        const relationStepDeadlineAtMs = nowMs() + EVENT_RELATION_BOUNDS.stepWallDeadlineMs;
+      // R1.17.1 (D1): the step's ABSOLUTE deadline is set at the START of
+      // the FIRST relation work — the retrieval probes INCLUDED — and
+      // holds from retrieval/basis packaging through budget/provider/
+      // output/usage. The service receives it as caller context it can
+      // only SHORTEN (never reset or extend); reads stop STARTING after
+      // expiry (a pending D1 query is not cancellable — expiry frees
+      // the caller, it never claims real cancellation).
+      const relationStepDeadlineAtMs = nowMs() + EVENT_RELATION_BOUNDS.stepWallDeadlineMs;
+      // The relation runs' record-time anchor (the audit rows' createdAt).
+      const relationStepStartedAtMs = nowMs();
+      let stepDeadlineObserved = false;
 
+      try {
         // (a) ≤3 shared-entity probes over the resolved entities — none
         //     STARTS after the step deadline (the shortfall is honest).
         const resolvedEntityIds = [
@@ -910,7 +929,13 @@ export function createEditorialPrepareDraftHandler(
             probePlan.selected,
             storyId,
             EVENT_RELATION_MAX_ROWS_PER_PROBE,
-            { deadlineAtMs: relationStepDeadlineAtMs, nowMs },
+            {
+              deadlineAtMs: relationStepDeadlineAtMs,
+              nowMs,
+              // R1.17.2 (D2): the pending PROBE ITSELF is bounded by the
+              // same absolute deadline — expiry frees the caller.
+              deadlineScheduler: relationReadScheduler,
+            },
           );
         }
         // Deadline-stopped probes are the HONEST unprobed truth (the
@@ -941,7 +966,6 @@ export function createEditorialPrepareDraftHandler(
         // (c) Basis resolution per candidate (ascending storyId): the
         //     candidate's OWN ready draft + its durable document basis +
         //     the identity bridge to the original reference row.
-        const relationStepStartedAtMs = nowMs();
         const basisStates = new Map<
           string,
           | {
@@ -957,18 +981,35 @@ export function createEditorialPrepareDraftHandler(
           // R1.17.1 (D1): a NEW basis read never STARTS after the step
           // deadline — the unread candidate is a TYPED technical state
           // (never a semantic verdict, never a fabricated basis claim).
-          if (nowMs() >= relationStepDeadlineAtMs) {
+          // R1.17.2 (D2): an expiry OBSERVED by a bounded race stops all
+          // further relation reads too — no new work starts after expiry.
+          if (stepDeadlineObserved || nowMs() >= relationStepDeadlineAtMs) {
             basisStates.set(relationCandidate.storyId, {
               ok: false,
               reason: 'step_deadline_expired',
             });
             continue;
           }
-          const candidateDraft = await findDraftForStory(
-            executor,
-            relationCandidate.storyId,
-            EDITORIAL_DRAFT_VERSION,
+          // R1.17.2 (D2): the pending basis read is BOUNDED by the step's
+          // absolute deadline through the accepted race primitive — a read
+          // that never settles can no longer suspend the whole step past
+          // expiry; the late settlement is observed and absorbed (never a
+          // fabricated basis, never a resurrected read).
+          const draftReadWait = await awaitWithDeadline(
+            findDraftForStory(executor, relationCandidate.storyId, EDITORIAL_DRAFT_VERSION),
+            relationStepDeadlineAtMs,
+            nowMs(),
+            { scheduleTimeout: relationReadScheduler },
           );
+          if (draftReadWait.kind === 'timed_out') {
+            stepDeadlineObserved = true;
+            basisStates.set(relationCandidate.storyId, {
+              ok: false,
+              reason: 'step_deadline_expired',
+            });
+            continue;
+          }
+          const candidateDraft = draftReadWait.value;
           if (candidateDraft === null || candidateDraft.status !== 'ready') {
             basisStates.set(relationCandidate.storyId, {
               ok: false,
@@ -988,10 +1029,23 @@ export function createEditorialPrepareDraftHandler(
             basisStates.set(relationCandidate.storyId, { ok: false, reason: 'legacy_basis' });
             continue;
           }
-          const candidateReference = await findEditorialSourceItem(
-            executor,
-            candidateBasis.sourceItemId,
+          // R1.17.2 (D2): the pending reference read is bounded by the SAME
+          // step deadline (the same race/absorption contract as above).
+          const referenceReadWait = await awaitWithDeadline(
+            findEditorialSourceItem(executor, candidateBasis.sourceItemId),
+            relationStepDeadlineAtMs,
+            nowMs(),
+            { scheduleTimeout: relationReadScheduler },
           );
+          if (referenceReadWait.kind === 'timed_out') {
+            stepDeadlineObserved = true;
+            basisStates.set(relationCandidate.storyId, {
+              ok: false,
+              reason: 'step_deadline_expired',
+            });
+            continue;
+          }
+          const candidateReference = referenceReadWait.value;
           if (candidateReference === null) {
             basisStates.set(relationCandidate.storyId, { ok: false, reason: 'reference_missing' });
             continue;
@@ -1083,7 +1137,14 @@ export function createEditorialPrepareDraftHandler(
             },
             // R1.17.1 (D1): the ABSOLUTE step deadline — the service can
             // only shorten it; retrieval time already counts against it.
-            { deadlineAtMs: relationStepDeadlineAtMs },
+            // R1.17.2 (A2): the attempt collector — every REAL invocation
+            // is observed at record time, independent of the step's return.
+            {
+              deadlineAtMs: relationStepDeadlineAtMs,
+              onAttempt: (observation) => {
+                relationAttemptObservations.push(observation);
+              },
+            },
           );
         }
 
@@ -1308,10 +1369,28 @@ export function createEditorialPrepareDraftHandler(
         // ids); a step that never reached the provider contributes ZERO
         // fabricated rows. Either way the step is a typed bounded retry —
         // NEVER a fabricated empty report and never a semantic verdict.
+        // R1.17.2 (A2): the record-time observations are UNIONED with the
+        // outcome-mapped rows (deterministic per-(job,generation,pair,
+        // attempt) ids; the own-row guard dedups) — a failure in the
+        // service's own result path after the provider answered can no
+        // longer erase the invocation from the audit.
         logger?.warn('editorial.prepare_draft.event_relation_step_failed', {
           error: error instanceof Error ? error.message : 'unknown',
         });
-        await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
+        await recordRealRelationRuns(
+          executor,
+          jobId,
+          generation,
+          await unionRealRelationRunRows(
+            relationRunRows,
+            relationAttemptObservations,
+            jobId,
+            generation,
+            relationStepStartedAtMs,
+            nowMs(),
+          ),
+          nowMs(),
+        );
         return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
       }
     }
@@ -1787,6 +1866,65 @@ async function recordRealRelationRuns(
       // Same observability-only contract as the drafting run's fallback.
     }
   }
+}
+
+/**
+ * R1.17.2 (A2): union the outcome-mapped relation run rows with the
+ * service's RECORD-TIME attempt observations. The deterministic
+ * per-(job,generation,pair,attempt) ids make the union exact: an attempt
+ * the outcome mapping already collected keeps its row; an attempt whose
+ * outcome mapping never completed (a step that failed after the provider
+ * answered) is built from its observation — same id it would have had,
+ * honest status, zero fabricated rows (the service observes only attempts
+ * that actually reached the provider). The own-row guard dedups at the
+ * durable boundary even if both surfaces carried the same id.
+ */
+async function unionRealRelationRunRows(
+  mappedRows: readonly { readonly pairId: string; readonly run: EditorialCommitInput['aiRun'] }[],
+  observations: readonly EventRelationAttemptObservation[],
+  jobId: string,
+  generation: number,
+  stepStartedAtMs: number,
+  completedAtMs: number,
+): Promise<readonly { readonly pairId: string; readonly run: EditorialCommitInput['aiRun'] }[]> {
+  const union = new Map<
+    string,
+    { readonly pairId: string; readonly run: EditorialCommitInput['aiRun'] }
+  >();
+  for (const entry of mappedRows) {
+    union.set(entry.run.id, entry);
+  }
+  for (const observation of observations) {
+    const runId = await aiRunIdForRelationAttempt(
+      jobId,
+      generation,
+      observation.pairId,
+      observation.attemptIndex,
+    );
+    if (union.has(runId)) {
+      continue; // the outcome mapping already collected this invocation
+    }
+    union.set(runId, {
+      pairId: observation.pairId,
+      run: {
+        id: runId,
+        task: 'event_relation',
+        provider: observation.attempt.provider,
+        model: observation.attempt.modelId,
+        promptVersion: observation.attempt.promptVersion,
+        inputHash: observation.canonicalInputHash,
+        status: observation.attempt.status,
+        latencyMs: observation.attempt.latencyMs,
+        inputTokens: observation.attempt.inputTokens,
+        outputTokens: observation.attempt.outputTokens,
+        errorCode: observation.attempt.errorCode,
+        errorMessage: null,
+        createdAt: stepStartedAtMs,
+        completedAt: completedAtMs,
+      },
+    });
+  }
+  return [...union.values()];
 }
 
 /**

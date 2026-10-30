@@ -55,6 +55,7 @@ import {
   STORY_ENTITY_RELATION_MENTIONED,
 } from '../../domain/editorial/entity-mentions';
 import { isAppError } from '../../shared/errors/app-error';
+import { awaitWithDeadline, type DeadlineTimeoutScheduler } from '../../shared/time/deadline-wait';
 
 /** Editorial-owned read shape of a source_items row (traceable fields only). */
 export interface EditorialSourceItemRow {
@@ -361,26 +362,48 @@ export async function findStoryCandidatesByEntities(
      * STARTS after expiry (already-completed probes stay; the caller
      * detects the shortfall by the outcome count). A pending D1 query is
      * NOT cancellable — expiry frees the CALLER only, never a claimed
-     * real cancellation. */
+     * real cancellation.
+     * R1.17.2 (D2): the pending probe itself is BOUNDED by the same
+     * absolute deadline through the accepted race primitive — a probe
+     * that never settles can no longer suspend the step past expiry; the
+     * late settlement is observed and absorbed (never a fabricated
+     * outcome, never a resurrected probe). */
     readonly deadlineAtMs?: number;
     readonly nowMs?: () => number;
+    readonly deadlineScheduler?: DeadlineTimeoutScheduler;
   },
 ): Promise<readonly StoryEntityCandidateOutcome[]> {
   const outcomes: StoryEntityCandidateOutcome[] = [];
+  const nowMsFn = options?.nowMs ?? Date.now;
   for (const entityId of entityIds) {
-    if (
-      options?.deadlineAtMs !== undefined &&
-      (options.nowMs ?? Date.now)() >= options.deadlineAtMs
-    ) {
+    if (options?.deadlineAtMs !== undefined && nowMsFn() >= options.deadlineAtMs) {
       break; // the step's time budget is spent — no new probe starts
     }
-    const { rows } = await executor.query<{ story_id: string }>({
+    const probeStatement = {
       sql: `SELECT story_id FROM story_entities
              WHERE entity_id = ? AND story_id <> ?
              ORDER BY story_id ASC
              LIMIT ?`,
       params: [entityId, excludeStoryId, probeLimit],
-    });
+    } as const;
+    let rows: readonly { story_id: string }[];
+    if (options?.deadlineAtMs === undefined) {
+      rows = (await executor.query<{ story_id: string }>(probeStatement)).rows;
+    } else {
+      // R1.17.2 (D2): the bounded race — expiry frees the caller; the
+      // still-pending probe's late settlement is absorbed by the
+      // primitive (handlers stay attached for its whole lifetime).
+      const probeWait = await awaitWithDeadline(
+        executor.query<{ story_id: string }>(probeStatement),
+        options.deadlineAtMs,
+        nowMsFn(),
+        { scheduleTimeout: options.deadlineScheduler },
+      );
+      if (probeWait.kind === 'timed_out') {
+        break; // the honest shortfall — the caller detects it by the count
+      }
+      rows = probeWait.value.rows;
+    }
     outcomes.push({
       entityId,
       storyIds: [...new Set(rows.map((row) => row.story_id))],

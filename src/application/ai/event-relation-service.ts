@@ -57,6 +57,7 @@ import {
 } from '../../domain/ai/event-relation-prompt';
 import { parseEventRelationDecisionJson } from '../../domain/ai/event-relation-schema';
 import type {
+  EventRelationAttemptObservation,
   EventRelationAttemptRecord,
   EventRelationOutcome,
   EventRelationPairDeferredReason,
@@ -112,9 +113,18 @@ export interface EventRelationServiceConfig {
  * ms), set at the START of the first relation work (retrieval/basis
  * packaging included). Trusted internal context — never a model-settable
  * field. It can only SHORTEN the service's own local 15 s cap; the
- * service never resets or extends it. */
+ * service never resets or extends it.
+ *
+ * R1.17.2 (A2): `onAttempt` observes EVERY REAL provider attempt at
+ * record time — BEFORE the step's own result mapping and BEFORE any
+ * observability sink that may itself fail — so the caller's durable audit
+ * no longer depends on the step RETURNING. An invocation that happened is
+ * observable even when the step never completes its outcome mapping. The
+ * observer is the caller's own trusted collector (never a model-settable
+ * field); it must not throw. */
 export interface EventRelationEvaluationOptions {
   readonly deadlineAtMs?: number;
+  readonly onAttempt?: (observation: EventRelationAttemptObservation) => void;
 }
 
 export interface EventRelationServiceDeps {
@@ -215,6 +225,8 @@ export function createEventRelationService(deps: EventRelationServiceDeps): Even
     const skippedProviders = new Set<AiProvider>();
     let providerAttemptsUsed = 0;
     const pairOutcomes: EventRelationPairOutcome[] = [];
+    // R1.17.2 (A2): the caller's trusted attempt collector (may be absent).
+    const onAttempt = options?.onAttempt;
 
     for (const pair of pairs) {
       // The step deadline stops ALL further pairs — no new work starts
@@ -245,6 +257,7 @@ export function createEventRelationService(deps: EventRelationServiceDeps): Even
         startedAt,
         attemptsRemaining: EVENT_RELATION_BOUNDS.maxProviderAttemptsPerStep - providerAttemptsUsed,
         skippedProviders,
+        onAttempt,
       });
       providerAttemptsUsed += outcome.attempts.length;
       pairOutcomes.push(outcome);
@@ -264,6 +277,8 @@ export function createEventRelationService(deps: EventRelationServiceDeps): Even
       /** Providers whose shared bucket already failed/denied — the SAME
        * skip state drafting uses, shared ACROSS the step's pairs. */
       readonly skippedProviders: Set<AiProvider>;
+      /** R1.17.2 (A2): the caller's trusted attempt collector (optional). */
+      readonly onAttempt?: (observation: EventRelationAttemptObservation) => void;
     },
   ): Promise<EventRelationPairOutcome> {
     const attempts: EventRelationAttemptRecord[] = [];
@@ -274,6 +289,7 @@ export function createEventRelationService(deps: EventRelationServiceDeps): Even
       durationMs: number,
       usage?: { inputTokens?: number; outputTokens?: number },
     ): void => {
+      const attemptIndex = attempts.length;
       attempts.push({
         provider: candidate.provider,
         modelId: candidate.modelId,
@@ -284,6 +300,19 @@ export function createEventRelationService(deps: EventRelationServiceDeps): Even
         outputTokens: usage?.outputTokens ?? null,
         errorCode,
       });
+      // R1.17.2 (A2): the REAL invocation is observed at record time —
+      // BEFORE any observability sink that may itself fail — so the
+      // caller's durable audit survives a step that never completes its
+      // outcome mapping. Zero fabricated observations: only attempts that
+      // actually reached the provider pass through here.
+      if (context.onAttempt !== undefined) {
+        context.onAttempt({
+          pairId: pair.pairId,
+          attemptIndex,
+          canonicalInputHash: pair.canonicalInputHash,
+          attempt: attempts[attemptIndex]!,
+        });
+      }
       deps.logger.info('ai.event_relation.attempt', {
         provider: candidate.provider,
         modelId: candidate.modelId,
