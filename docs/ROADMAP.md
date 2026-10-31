@@ -951,6 +951,22 @@ independent decisions; executing them is NOT part of this round.
       inbox/capture route, NO approval action, NO outbox, NO live sending or
       channel operation; raw Markdown/HTML input parsing deferred as a
       separate future mode; existing admin-safe HTML path unchanged.
+- [x] R1.19.1 (ADR-0047 correction addendum; app 1.14.1 candidate, schema
+      still 3): three ORIGINAL Posidon valid-input failures in the 1.14.0
+      foundation closed with the smallest coherent changes — M1: the real
+      incoming parser now projects the documented minimal text_mention User
+      fields wire→canonical (real-User extras dropped by the documented
+      ignore policy; wrong-typed/oversized fields still fail typed at the
+      envelope); N1: the containment matrix adds the official be-part-of
+      direction (the five formatting styles may be part of any entity except
+      pre/code; crossing, code/pre isolation, quote non-nesting, duplicates
+      and non-container leaves unchanged); P1: a plain caption with OMITTED
+      optional `caption_entities` is preserved as the canonical plain-caption
+      extraction (metadata absence is not content absence; explicit
+      null/primitive metadata stays a typed malformed outcome). The ORIGINAL
+      proof is kept permanently byte-identical (RED 3/1 on untouched
+      d175b53 → GREEN 4/4); F1 was already green and is retained. NO new
+      capability, endpoint, engine, media workflow or DDL; no live sending.
 - [ ] Tehran-window scheduling, anti-robot rules, priority classes.
 - [ ] Edit/correction workflows; failed-publication idempotency.
 - [ ] GATE (ADR-0032): publishing-side duplicate mitigation and

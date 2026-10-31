@@ -137,3 +137,68 @@ raw values cannot exploit it.
 - Six offline demos incl. the NEW `npm run demo:telegram-rich-text` — real parser → envelope → serializer →
   defensive reader → real client factory with fake fetch; captured payloads compared field-by-field;
   counts of synthetic requests, rejections before fetch, zero real network/AI/charge/DB writes.
+
+## Addendum — R1.19.1 native rich-text correctness (ORIGINAL M1 / N1 / P1)
+
+Date: 2025-10-31
+Round: R1.19.1
+Baseline: `d175b539541f9414b666d447d39d92f39852c5ea` (tree `b660c71508b8d74220100f34c4c25a5101fa4ac2`, app 1.14.0 candidate / schema 3)
+Application version: **1.14.1 candidate**, schema **3 unchanged**
+Status: Correction addendum (three ORIGINAL Posidon counterexamples closed; offline, under independent review — Draft PR #11)
+
+The R1.19 matrix paragraph above contains one INCORRECT rule as written and two real-input
+boundaries it never exercised. Independent Posidon review of the published 1.14.0 produced three
+ORIGINAL valid-input failures (proof run RED 3 failed / 1 passed on the untouched baseline; the
+fourth probe F1 — date_time trailing-LF full-match rejection before fetch — was already green and
+is a retained non-regression, NOT a fourth defect):
+
+1. **M1 — real wire text_mention User.** The parser mapped the outer snake_case entity fields but
+   forwarded the nested raw wire User unchanged; the envelope requires the canonical camelCase
+   minimal User and rejected it (`user_invalid`, entityIndex 0). Correction: the REAL incoming
+   parser path now applies the same bounded shallow wire→canonical projection of the documented
+   minimal User fields (`id`/`is_bot`/`first_name` plus allowed optional
+   `last_name`/`username`/`language_code`) the storage reader and wire writer already use.
+   Documented policy: fields OUTSIDE this minimal set — including unrelated optional Telegram
+   flags a real User payload commonly carries — are DROPPED (consistent ignore policy) and never
+   reject an ordinary real User payload; a non-object `user` is forwarded unchanged and the
+   envelope fails it typed; wrong-typed/oversized required fields still fail EXPLICITLY at the
+   envelope boundary; identity is never changed and no arbitrary nested raw User data is retained.
+   No profile collection expansion; no personal data logging.
+
+2. **N1 — style nested inside a link.** The matrix paragraph above said only styles and quotes may
+   contain and everything else is an atomic leaf, which rejected the SECOND documented direction.
+   The official Bot API formatting-options rules state bold/italic/underline/strikethrough/spoiler
+   "can contain and can be part of any other entities, except pre and code". Correction: `canContain`
+   now also permits a style as the INNER entity of any non-isolated outer (the containing direction
+   was already legal and is unchanged). All other rules are unchanged and stay enforced: crossing
+   overlaps invalid; code/pre isolated in BOTH directions; quote types never nest (a quote is never
+   an inner of any pair, and quote-in-quote is rejected); identical-range same-type duplicates
+   rejected; equal ranges of different types legal when one direction is legal; all NON-style entity
+   types remain atomic leaves among themselves. The test suite probe that encoded the incorrect
+   claim (a bold inside a mention) was corrected coherently — it is now asserted legal with the
+   non-style pair rejections preserved.
+
+3. **P1 — plain caption with omitted optional caption_entities.** `extractRichTextMetadata` returns
+   "absent" when the entity list is omitted, and plain captions have NO legacy text field — so a
+   completely valid plain caption was unrecoverable from ParsedUpdate. Correction: a non-empty
+   in-cap caption whose `caption_entities` is OMITTED is preserved as the canonical plain-caption
+   extraction `richCaption: {ok: true, kind: 'caption', text: <exact>, entities: []}` — metadata
+   absence is not content absence. Explicit `null`/primitive metadata is NOT treated as absence or
+   emptied (stays `entities_malformed`, never repaired); an explicit `[]` and an omitted list are
+   equivalent (empty entity list, exact text); an empty-string caption remains no-caption (no
+   content to preserve — nothing is erased); oversized captions still report `caption_too_large`;
+   captions never become commands; whitespace and Markdown-literal captions are preserved
+   byte-exactly (no trim, no interpretation).
+
+Honesty record: the EXACT attached original proof was copied byte-identically to
+`tests/unit/posidon-r119-original-proof.test.ts`, ran RED 3 failed / 1 passed (exit 1) on the
+untouched d175b53 baseline with the same typed signatures Posidon observed
+(`user_invalid` / `nesting_violation` / richCaption+legacyText both null / F1 green zero-fetch),
+and the SAME unchanged file passes 4/4 (exit 0) after the corrections. Companion acceptance
+coverage was ADDED (parser user projection incl. dropped real-User extras and the caption path;
+typed malformed-user outcomes; plain-caption omitted/[]/null/primitive/whitespace/Markdown/
+empty/edited_message variants; corrected-matrix nesting companions incl. a Persian/emoji UTF-16
+link case; end-to-end raw update → parser → envelope → serialize → read → real client factory
+with captured fake fetch proving the exact wire User shape and the exact caption with EMPTY
+`caption_entities`, both with NO `parse_mode`). No new capability, endpoint, engine, flag, media
+workflow or DDL; no live Telegram/AI/DB writes; all activation flags unchanged.
