@@ -22,6 +22,9 @@
  *   only the stable fields this module returns (never the raw payload).
  */
 
+import type { RichTextKind } from '../../domain/telegram/rich-text-envelope';
+import { RICH_TEXT_LIMITS } from '../../domain/telegram/rich-text-envelope';
+
 export const TELEGRAM_UPDATE_LIMITS = {
   /** Telegram message text hard limit (4096 characters). */
   maxTextLength: 4096,
@@ -89,6 +92,21 @@ export interface ParsedMessageFields {
    * logged.
    */
   readonly chatType?: string;
+  /**
+   * R1.19: bounded typed native rich-text metadata extracted from
+   * `text` + `entities` (message and edited_message). PASSIVE metadata:
+   * command extraction, routing and every legacy gate are untouched by it.
+   * `undefined` = no rich metadata on the update (plain text). An explicit
+   * `ok: false` outcome means the metadata was present but malformed —
+   * never silently dropped, and it never erases the command text.
+   */
+  readonly richText?: ParsedRichTextExtraction;
+  /**
+   * R1.19: the same extraction for `caption` + `caption_entities`. A caption
+   * is NEVER a bot command; captions beyond the 1024-unit application cap
+   * are reported explicitly (`caption_too_large`), never silently dropped.
+   */
+  readonly richCaption?: ParsedRichTextExtraction;
 }
 
 export interface ParsedCallbackFields {
@@ -183,6 +201,117 @@ function boundedText(value: unknown): string | undefined {
   return value;
 }
 
+// -------------------------------------------------------------------------
+// R1.19 — bounded typed native rich-text extraction (PASSIVE metadata).
+//
+// The parser performs a SHALLOW, bounded extraction only: each entity must
+// be an object with a bounded non-empty string `type`; the documented
+// metadata fields are projected as-is and everything else is DROPPED (the
+// documented consistent ignore policy — arbitrary raw payload fields are
+// never retained). FULL range/nesting/metadata/cap validation belongs to the
+// versioned envelope (src/domain/telegram/rich-text-envelope.ts); the parser
+// never judges ranges. Outcomes are EXPLICIT: malformed metadata is
+// `ok: false` — never silently absent, never silently empty — and it can
+// never erase the command text or alter routing.
+// -------------------------------------------------------------------------
+
+/** Shallow projection of one raw MessageEntity (documented fields only). */
+export interface ParsedMessageEntityMetadata {
+  readonly type: string;
+  /** Raw values — judged by the versioned envelope, never here. */
+  readonly offset: unknown;
+  readonly length: unknown;
+  readonly url?: unknown;
+  readonly language?: unknown;
+  readonly customEmojiId?: unknown;
+  readonly user?: unknown;
+  readonly unixTime?: unknown;
+  readonly dateTimeFormat?: unknown;
+}
+
+export type RichTextExtractionReason =
+  'entities_malformed' | 'entities_too_many' | 'caption_too_large';
+
+export type ParsedRichTextExtraction =
+  | {
+      readonly ok: true;
+      readonly kind: RichTextKind;
+      readonly text: string;
+      readonly entities: readonly ParsedMessageEntityMetadata[];
+    }
+  | {
+      readonly ok: false;
+      readonly kind: RichTextKind;
+      readonly reason: RichTextExtractionReason;
+    };
+
+/** Wire -> projection key mapping for the documented metadata fields. */
+const ENTITY_WIRE_FIELD_MAP = [
+  ['url', 'url'],
+  ['language', 'language'],
+  ['custom_emoji_id', 'customEmojiId'],
+  ['user', 'user'],
+  ['unix_time', 'unixTime'],
+  ['date_time_format', 'dateTimeFormat'],
+] as const;
+
+/**
+ * Shallow-project one raw entity. Undefined for anything that is not an
+ * object with a bounded non-empty string type (the WHOLE metadata becomes
+ * explicitly malformed — never a silently partial list). Telegram's wire
+ * snake_case metadata keys are mapped to the camelCase projection shape the
+ * envelope validates; everything undocumented is DROPPED.
+ */
+function projectEntityMetadata(entry: unknown): ParsedMessageEntityMetadata | undefined {
+  if (!isRecord(entry)) {
+    return undefined;
+  }
+  const type = entry['type'];
+  if (
+    typeof type !== 'string' ||
+    type.length === 0 ||
+    type.length > RICH_TEXT_LIMITS.maxEntityTypeUnits
+  ) {
+    return undefined;
+  }
+  const projected: Record<string, unknown> = {
+    type,
+    offset: entry['offset'],
+    length: entry['length'],
+  };
+  for (const [wireKey, camelKey] of ENTITY_WIRE_FIELD_MAP) {
+    if (entry[wireKey] !== undefined) {
+      projected[camelKey] = entry[wireKey];
+    }
+  }
+  return projected as unknown as ParsedMessageEntityMetadata;
+}
+
+function extractRichTextMetadata(
+  kind: RichTextKind,
+  text: string,
+  rawEntities: unknown,
+): ParsedRichTextExtraction | undefined {
+  if (rawEntities === undefined) {
+    return undefined; // no rich metadata on this content (plain text)
+  }
+  if (!Array.isArray(rawEntities)) {
+    return { ok: false, kind, reason: 'entities_malformed' };
+  }
+  if (rawEntities.length > RICH_TEXT_LIMITS.maxEntities) {
+    return { ok: false, kind, reason: 'entities_too_many' };
+  }
+  const entities: ParsedMessageEntityMetadata[] = [];
+  for (const entry of rawEntities) {
+    const projected = projectEntityMetadata(entry);
+    if (projected === undefined) {
+      return { ok: false, kind, reason: 'entities_malformed' };
+    }
+    entities.push(projected);
+  }
+  return { ok: true, kind, text, entities };
+}
+
 function boundedCallbackData(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.length === 0) {
     return undefined;
@@ -222,6 +351,23 @@ function parseMessageLike(
   const from = payload['from'];
   const text = boundedText(payload['text']);
   const parsedCommand = text === undefined ? undefined : extractBotCommand(text);
+
+  // R1.19: rich-text metadata is extracted from BOTH content kinds
+  // independently — a malformed payload carrying both keeps BOTH (neither is
+  // silently selected over the other). Extraction never touches the command
+  // fields below.
+  const richText =
+    text === undefined ? undefined : extractRichTextMetadata('text', text, payload['entities']);
+  let richCaption: ParsedRichTextExtraction | undefined;
+  const rawCaption = payload['caption'];
+  if (typeof rawCaption === 'string' && rawCaption.length > 0) {
+    if (rawCaption.length > RICH_TEXT_LIMITS.maxCaptionUnits) {
+      richCaption = { ok: false, kind: 'caption', reason: 'caption_too_large' };
+    } else {
+      richCaption = extractRichTextMetadata('caption', rawCaption, payload['caption_entities']);
+    }
+  }
+
   return {
     kind,
     updateId,
@@ -236,6 +382,8 @@ function parseMessageLike(
     text,
     command: parsedCommand?.command,
     commandTarget: parsedCommand?.targetUsername,
+    ...(richText !== undefined ? { richText } : {}),
+    ...(richCaption !== undefined ? { richCaption } : {}),
   };
 }
 
