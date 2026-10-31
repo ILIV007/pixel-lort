@@ -122,6 +122,7 @@ import type { TelegramBotApiClient } from '../adapters/telegram/bot-api-client';
 import { AppError, toAppError, type AppErrorCode } from '../shared/errors/app-error';
 import type { Clock } from '../shared/time/clock';
 import type { Logger } from '../observability/logger';
+import type { EditorialReviewService } from './editorial/draft-review-view';
 
 export type TelegramUpdateOutcome = 'processed' | 'duplicate' | 'failed';
 
@@ -179,6 +180,14 @@ export interface TelegramIngressDeps {
   /** Optional: absent (no BOT_TOKEN) means offline mode — noop actions
    *  complete; outbound actions fail as retryable service_unavailable. */
   readonly botApi?: TelegramBotApiClient;
+  /**
+   * R1.18 (ADR-0046): the injected read-only editorial review service that
+   * executes the typed `drafts_list` / `drafts_detail` actions the router
+   * emits while the `ADMIN_REVIEW_ENABLED` gate is ON. The router itself
+   * NEVER queries D1; when this service is absent, such an action fails
+   * retryably (honest service_unavailable — never silently skipped).
+   */
+  readonly editorialReview?: EditorialReviewService;
   readonly clock: Clock;
   readonly logger: Logger;
 }
@@ -197,7 +206,7 @@ export interface TelegramIngress {
 }
 
 export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngress {
-  const { executor, authorization, commandRouter, botApi, clock, logger } = deps;
+  const { executor, authorization, commandRouter, botApi, editorialReview, clock, logger } = deps;
 
   /**
    * Per-admin admin-UI-language store over the EXISTING settings table,
@@ -249,6 +258,27 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
           callbackQueryId: action.callbackQueryId,
         });
         return;
+      case 'drafts_list': {
+        // R1.18 read-only review: the query happens in the injected service;
+        // a missing service is a retryable wiring failure, never a silent
+        // skip-and-ack and never a fabricated empty reply.
+        if (editorialReview === undefined) {
+          logger.warn('telegram.action.review_unavailable', { action: action.type });
+          throw new AppError('service_unavailable');
+        }
+        const view = await editorialReview.draftsList(action.uiLanguage);
+        await sendSafely(action.chatId, view, 'drafts_list');
+        return;
+      }
+      case 'drafts_detail': {
+        if (editorialReview === undefined) {
+          logger.warn('telegram.action.review_unavailable', { action: action.type });
+          throw new AppError('service_unavailable');
+        }
+        const view = await editorialReview.draftsDetail(action.draftId, action.uiLanguage);
+        await sendSafely(action.chatId, view, 'drafts_detail');
+        return;
+      }
       case 'set_admin_ui_language': {
         // PERSIST FIRST, confirm second: a storage failure below throws
         // before any confirmation can exist, so the admin is never told a

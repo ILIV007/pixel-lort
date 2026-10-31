@@ -942,6 +942,15 @@ independent decisions; executing them is NOT part of this round.
 
 ## Phase 9 — admin Telegram screens ⬜
 
+- [x] R1.18 (ADR-0046): the FIRST read-only admin review slice — `/drafts`
+      bounded ready first page + `/drafts <draftId>` stored detail via the
+      EXISTING ingress/router/RBAC/HTML stack, gated by the fail-closed
+      `ADMIN_REVIEW_ENABLED` flag (ships 'false' everywhere); exactly two
+      read-only SELECTs (real-EXPLAIN-verified index plan, 128 KiB SQL byte
+      guard), the existing strict typed readers, budget-first ≤3500 safe
+      HTML, ZERO editorial writes/provider calls; offline demo
+      `npm run demo:editorial-review`. Explicit early Phase 9A dependency
+      pull-forward — NOT a Phase 5/6/9 completion; NO approval/publishing.
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ⬜

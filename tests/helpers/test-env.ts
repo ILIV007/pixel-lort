@@ -13,6 +13,10 @@ export function createTestEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
     APP_VERSION: '1.12.3-test',
     ENVIRONMENT: 'development',
     LOG_LEVEL: 'debug',
+    // R1.18 (ADR-0046): the read-only review gate ships OFF in the test-env
+    // default too — suites that exercise the review surface enable it
+    // explicitly.
+    ADMIN_REVIEW_ENABLED: 'false',
     ...overrides,
   };
 }

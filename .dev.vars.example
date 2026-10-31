@@ -32,6 +32,9 @@
 # fail-closed flag: with false the relation step performs zero retrieval,
 # zero adjudication, zero writes; never implies AI/EDITORIAL gates.
 # EVENT_RELATION_ENABLED=false
+# R1.18 read-only admin review gate (non-secret; ADR-0046). INDEPENDENT
+# fail-closed flag for the /drafts read-only Telegram surface; ships OFF.
+# ADMIN_REVIEW_ENABLED=false
 
 # --- Secrets (names only; leave empty unless your phase requires them) ----------
 # Phase 2 formats (ADR-0024):

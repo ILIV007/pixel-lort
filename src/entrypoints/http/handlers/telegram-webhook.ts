@@ -46,6 +46,7 @@
 import { AppError, type AppErrorCode } from '../../../shared/errors/app-error';
 import { parseWorkerConfig } from '../../../shared/config/phase0';
 import { parseTelegramPhase2Config } from '../../../shared/config/phase2';
+import { parseAdminReviewConfig } from '../../../shared/config/phase9';
 import { timingSafeEqualStrings } from '../../../shared/security/timing-safe';
 import {
   BoundedReadError,
@@ -55,6 +56,7 @@ import {
 } from '../../../shared/http/bounded-reader';
 import type { WorkerEnv } from '../../../shared/types/env';
 import { createTelegramIngress } from '../../../application/telegram-ingress';
+import { createEditorialReviewService } from '../../../application/editorial/draft-review-view';
 import { createAuthorizationService } from '../../../admin/authorization';
 import { createCommandRouter } from '../../../admin/command-router';
 import { createDbExecutor } from '../../../adapters/db/db-executor';
@@ -218,6 +220,21 @@ export async function handleTelegramWebhook(
   }
   const executor = createDbExecutor(env.DB);
 
+  // R1.18 (ADR-0046): the read-only review gate is parsed fail-closed —
+  // absent/false AND any invalid-present value both DISABLE the surface
+  // (the invalid value is logged as a stable field/reason pair, never as a
+  // value). Enabling it gates ONLY the new /drafts read commands.
+  const review = parseAdminReviewConfig(env as Readonly<Record<string, unknown>>);
+  if (!review.result.ok) {
+    for (const issue of review.result.issues) {
+      ctx.logger.warn('telegram.webhook.review_config_invalid', {
+        field: issue.field,
+        reason: issue.reason,
+      });
+    }
+  }
+  const reviewEnabled = review.config.reviewEnabled;
+
   const ingress = createTelegramIngress({
     executor,
     authorization: createAuthorizationService({
@@ -230,7 +247,11 @@ export async function handleTelegramWebhook(
       // expectedBotUsername is NOT wired in Phase 2A: no live getMe and no
       // username source exists yet, so every explicitly-targeted command is
       // ignored (fail closed). Wiring arrives with Phase 2B.
+      reviewEnabled,
     }),
+    // R1.18: the read-only review service is wired ONLY while the gate is
+    // ON — the SAME production factory the offline demo shares.
+    editorialReview: reviewEnabled ? createEditorialReviewService({ executor }) : undefined,
     // Offline mode without BOT_TOKEN: noop actions complete; outbound
     // actions fail retryably (never silently skipped-and-acked).
     botApi:

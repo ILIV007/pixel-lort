@@ -58,6 +58,9 @@ import {
   telegramBold,
   type TelegramSafeHtml,
 } from './telegram-html';
+import { roleHasPermission } from './roles';
+import { parseDraftsArgument } from './review-command';
+import { ADMIN_REVIEW_STRINGS, REVIEW_COMMAND } from './review-strings';
 import type { ParsedUpdate } from '../adapters/telegram/update-parser';
 import {
   ADMIN_UI_DENIAL_TEXT,
@@ -86,9 +89,17 @@ export type NoopReason =
   | 'unroutable_message'
   | 'language_not_private_chat'
   | 'language_edited_message'
-  | 'language_missing_ordering_metadata';
+  | 'language_missing_ordering_metadata'
+  | 'review_not_private_chat'
+  | 'review_edited_message';
 
-export type DenialReason = 'unauthorized';
+/**
+ * Denial reasons. `unauthorized` keeps the FIXED minimal English text (the
+ * sender has no admin preference to consult). `insufficient_permission`
+ * (R1.18) addresses an AUTHORIZED actor whose role lacks the command's
+ * permission — the honest localized denial for a known admin identity.
+ */
+export type DenialReason = 'unauthorized' | 'insufficient_permission';
 
 export type TelegramAction =
   | { readonly type: 'send_message'; readonly chatId: number; readonly text: TelegramSafeHtml }
@@ -99,6 +110,27 @@ export type TelegramAction =
       readonly chatId: number;
       readonly reason: DenialReason;
       readonly text: TelegramSafeHtml;
+    }
+  | {
+      /**
+       * R1.18 read-only review: show the bounded FIRST PAGE of stored
+       * `ready` drafts. Executed by the ingress through the injected
+       * editorial-review service — the router NEVER queries D1.
+       */
+      readonly type: 'drafts_list';
+      readonly chatId: number;
+      readonly uiLanguage: AdminUiLanguage;
+    }
+  | {
+      /**
+       * R1.18 read-only review: show ONE stored draft by its EXACT id.
+       * The id is already validated as a whole opaque token; the review
+       * service binds it as a single parameter (never SQL structure).
+       */
+      readonly type: 'drafts_detail';
+      readonly chatId: number;
+      readonly draftId: string;
+      readonly uiLanguage: AdminUiLanguage;
     }
   | {
       readonly type: 'set_admin_ui_language';
@@ -132,6 +164,14 @@ export interface CommandRouteContext {
    * explicitly-targeted command is ignored — fail closed.
    */
   readonly expectedBotUsername?: string;
+  /**
+   * R1.18 (ADR-0046): whether the READ-ONLY admin review surface is enabled
+   * (the `ADMIN_REVIEW_ENABLED` fail-closed flag, parsed by the caller).
+   * Default/absent = DISABLED: `/drafts` keeps the exact unknown-command
+   * noop semantics and /help never advertises it. Enabling this flag gates
+   * ONLY the new read commands — it never widens any other behavior.
+   */
+  readonly reviewEnabled?: boolean;
 }
 
 export interface CommandRouter {
@@ -175,7 +215,7 @@ function startResponse(ui: AdminUiLanguage): TelegramSafeHtml {
   ]);
 }
 
-function helpResponse(ui: AdminUiLanguage): TelegramSafeHtml {
+function helpResponse(ui: AdminUiLanguage, draftsLine: string | null): TelegramSafeHtml {
   const s = ADMIN_UI_STRINGS[ui];
   return composeTelegramHtml([
     telegramBold(s.helpTitle),
@@ -184,6 +224,9 @@ function helpResponse(ui: AdminUiLanguage): TelegramSafeHtml {
     escapeTelegramHtml(s.helpStatus),
     escapeTelegramHtml(s.helpVersion),
     escapeTelegramHtml(s.helpLanguage),
+    // R1.18: advertised ONLY when the review gate is ON and the actor's
+    // role holds `draft.view` (the caller passes null otherwise).
+    ...(draftsLine !== null ? [escapeTelegramHtml(draftsLine)] : []),
   ]);
 }
 
@@ -216,13 +259,19 @@ function languageStatusResponse(ui: AdminUiLanguage): TelegramSafeHtml {
 export function createCommandRouter(context: CommandRouteContext): CommandRouter {
   const { applicationVersion, expectedBotUsername } = context;
   const normalizedExpectedBot = expectedBotUsername?.toLowerCase();
+  // R1.18: the review gate is fail-closed — absent/false both DISABLE.
+  const reviewEnabled = context.reviewEnabled === true;
 
-  function respond(command: InitialAdminCommand, ui: AdminUiLanguage): TelegramSafeHtml {
+  function respond(
+    command: InitialAdminCommand,
+    ui: AdminUiLanguage,
+    draftsHelpLine: string | null = null,
+  ): TelegramSafeHtml {
     switch (command) {
       case 'start':
         return startResponse(ui);
       case 'help':
-        return helpResponse(ui);
+        return helpResponse(ui, draftsHelpLine);
       case 'status':
         return statusResponse(ui, applicationVersion);
       case 'version':
@@ -269,6 +318,64 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         return { type: 'noop', reason: 'command_for_other_bot' };
       }
     }
+    // ---- R1.18 read-only review (`/drafts`) -------------------------------
+    // Handled when (and ONLY when) the fail-closed gate is ON. While OFF the
+    // command falls through to the SAME unknown-command noop as before —
+    // zero feedback for every sender and ZERO editorial queries. The router
+    // stays PURE and SYNCHRONOUS: it validates the argument and emits typed
+    // actions; the query itself happens in the injected review service.
+    if (command === REVIEW_COMMAND) {
+      if (!reviewEnabled) {
+        return { type: 'noop', reason: 'command_not_allowlisted' };
+      }
+      if (actor.kind === 'unauthorized') {
+        if (chatId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        return { type: 'denied', chatId, reason: 'unauthorized', text: denialText() };
+      }
+      const reviewUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
+      if (!roleHasPermission(actor.role, 'draft.view')) {
+        if (chatId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        return {
+          type: 'denied',
+          chatId,
+          reason: 'insufficient_permission',
+          text: escapeTelegramHtml(ADMIN_REVIEW_STRINGS[reviewUi].permissionDenied),
+        };
+      }
+      if (update.chatType !== 'private') {
+        return { type: 'noop', reason: 'review_not_private_chat' };
+      }
+      if (update.kind !== 'message') {
+        return { type: 'noop', reason: 'review_edited_message' };
+      }
+      if (chatId === undefined) {
+        return { type: 'noop', reason: 'unroutable_message' };
+      }
+      const parsedArgument = parseDraftsArgument(commandArgumentRemainder(update.text));
+      if (parsedArgument.kind === 'list') {
+        return { type: 'drafts_list', chatId, uiLanguage: reviewUi };
+      }
+      if (parsedArgument.kind === 'detail') {
+        return {
+          type: 'drafts_detail',
+          chatId,
+          draftId: parsedArgument.draftId,
+          uiLanguage: reviewUi,
+        };
+      }
+      // Honest localized usage/invalid-argument response — BEFORE any
+      // editorial query could ever exist.
+      return {
+        type: 'send_message',
+        chatId,
+        text: escapeTelegramHtml(ADMIN_REVIEW_STRINGS[reviewUi].invalidUsage),
+      };
+    }
+
     if (!isInitialAdminCommand(command)) {
       // Ignored for every sender — no feedback for command probing.
       return { type: 'noop', reason: 'command_not_allowlisted' };
@@ -288,7 +395,13 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
     const ui = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
 
     if (command !== 'language') {
-      return { type: 'send_message', chatId, text: respond(command, ui) };
+      // /help advertises the review surface ONLY when the gate is ON AND the
+      // actor's role holds `draft.view` (blueprint permission — unchanged).
+      const draftsHelpLine =
+        reviewEnabled && roleHasPermission(actor.role, 'draft.view')
+          ? ADMIN_REVIEW_STRINGS[ui].helpDraftsLine
+          : null;
+      return { type: 'send_message', chatId, text: respond(command, ui, draftsHelpLine) };
     }
 
     // /language — the whole command (status AND change) is a per-admin

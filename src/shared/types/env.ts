@@ -220,6 +220,14 @@ export interface WorkerEnv {
    */
   readonly EVENT_RELATION_ENABLED?: string;
   /**
+   * NON-SECRET read-only admin review gate ('true' | 'false'; default
+   * 'false'; R1.18/Phase 9A slice — ADR-0046). INDEPENDENT fail-closed
+   * flag for the `/drafts` read-only Telegram surface and its help
+   * advertisement — it NEVER implies AI, editorial generation, ingestion,
+   * the relation step, the Telegram ingress itself, or any write path.
+   */
+  readonly ADMIN_REVIEW_ENABLED?: string;
+  /**
    * Workers AI binding (blueprint §4 binding name AI). Optional: only
    * present where wrangler.jsonc declares it (preview — configuration-as-
    * code reconciliation of the owner-approved dashboard binding). With

@@ -70,6 +70,13 @@
     // NEVER implies AI_ENABLED or EDITORIAL_ENABLED; no live model call
     // is possible while the shipped flags stay "false".
     "EVENT_RELATION_ENABLED": "false",
+    // R1.18 (Phase 9A slice) read-only admin review gate (non-secret;
+    // ADR-0046). INDEPENDENT fail-closed flag for the /drafts read-only
+    // Telegram surface and its help advertisement — with "false" the
+    // commands keep their unknown-command noop semantics with ZERO
+    // editorial queries. It NEVER implies AI/EDITORIAL/ingestion/relation
+    // gates, the Telegram ingress itself, or any write path.
+    "ADMIN_REVIEW_ENABLED": "false",
   },
 
   // ---------------------------------------------------------------------------
