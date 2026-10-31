@@ -930,6 +930,27 @@ independent decisions; executing them is NOT part of this round.
 
 ## Phase 8 — publication scheduler, edit and correction ⬜
 
+- [x] R1.19 (ADR-0047; app 1.14.0 candidate, schema still 3): the Telegram
+      rich-text FOUNDATION — dependency-pulled for future editorial input and
+      Phase 8/9 publishing, NOT a completion of either phase. Bounded typed
+      native rich-text extraction in the real `parseTelegramUpdate`
+      (text/entities + caption/caption_entities, passive metadata, commands
+      and captions untouched), the pure versioned schemaVersion-1 envelope
+      (all 20 current Bot API entity types incl. `date_time` explicitly
+      classified; fail-closed UTF-16 range, nesting, metadata, cap and URL
+      scheme validation; text identity absolute — no trim/NFC/escape/Markdown
+      interpretation; 128 KiB serialized-byte cap, never truncation),
+      canonical serialization + defensive re-reader proving FUTURE
+      persistence compatibility only, and separate typed direct-entity
+      transport on the EXISTING Bot API client factory (`sendMessageRich` /
+      `editMessageTextRich` / `editMessageCaptionRich` with exact
+      text+entities / caption+caption_entities and NO `parse_mode`; runtime
+      re-validation with zero fetch on rejection; custom_emoji output behind
+      an explicit eligibility capability). Offline demo
+      `npm run demo:telegram-rich-text`. Limits: NO durable persistence, NO
+      inbox/capture route, NO approval action, NO outbox, NO live sending or
+      channel operation; raw Markdown/HTML input parsing deferred as a
+      separate future mode; existing admin-safe HTML path unchanged.
 - [ ] Tehran-window scheduling, anti-robot rules, priority classes.
 - [ ] Edit/correction workflows; failed-publication idempotency.
 - [ ] GATE (ADR-0032): publishing-side duplicate mitigation and
