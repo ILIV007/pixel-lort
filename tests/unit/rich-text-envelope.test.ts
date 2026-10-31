@@ -593,12 +593,26 @@ describe('rich-text envelope — nesting, crossing, duplicates, canonical order'
     });
   });
 
-  it('forbids non-container types from containing others', () => {
-    expect(textEnvelope('mention span', [entity('mention', 0, 7), entity('bold', 2, 3)])).toEqual({
+  it('forbids non-container types from containing non-style others; styles stay part-of-legal', () => {
+    // R1.19.1 (N1): a style may BE PART OF any entity except pre/code — a
+    // bold inside a mention/link is legal per the official formatting rules.
+    expect(textEnvelope('mention span', [entity('mention', 0, 7), entity('bold', 2, 3)]).ok).toBe(
+      true,
+    );
+    // Two NON-STYLE entity types still cannot contain each other, either way.
+    expect(textEnvelope('two leaf types', [entity('hashtag', 0, 4), entity('url', 0, 4)])).toEqual({
       ok: false,
       reason: 'nesting_violation',
     });
-    expect(textEnvelope('two leaf types', [entity('hashtag', 0, 4), entity('url', 0, 4)])).toEqual({
+    expect(
+      textEnvelope('mention span', [entity('mention', 0, 7), entity('hashtag', 2, 3)]),
+    ).toEqual({
+      ok: false,
+      reason: 'nesting_violation',
+    });
+    expect(
+      textEnvelope('mention span', [entity('hashtag', 0, 4), entity('mention', 1, 2)]),
+    ).toEqual({
       ok: false,
       reason: 'nesting_violation',
     });
@@ -757,3 +771,136 @@ function deepFreeze<T>(value: T): T {
   }
   return value;
 }
+
+// ---------------------------------------------------------------------------
+// R1.19.1 (N1) — the official be-part-of direction: the five formatting
+// styles (bold/italic/underline/strikethrough/spoiler) can contain AND be
+// part of any other entities, EXCEPT pre and code. Companion acceptance
+// coverage for the corrected containment matrix (the ORIGINAL proof lives in
+// tests/unit/posidon-r119-original-proof.test.ts).
+// ---------------------------------------------------------------------------
+describe('rich-text envelope — R1.19.1 corrected style containment matrix (N1)', () => {
+  const STYLES = ['bold', 'italic', 'underline', 'strikethrough', 'spoiler'] as const;
+
+  it('accepts each of the five styles strictly INSIDE a longer text_link', () => {
+    for (const style of STYLES) {
+      const outcome = textEnvelope('abcdefghij', [
+        entity('text_link', 0, 10, { url: 'https://example.com/story' }),
+        entity(style, 2, 3),
+      ]);
+      expect(outcome.ok).toBe(true);
+    }
+  });
+
+  it('keeps a style OUTSIDE (disjoint from) a link legal', () => {
+    expect(
+      textEnvelope('abcdefghij', [
+        entity('text_link', 0, 4, { url: 'https://example.com/story' }),
+        entity('bold', 6, 3),
+      ]).ok,
+    ).toBe(true);
+  });
+
+  it('keeps equal-range legal style/link combinations legal (one direction suffices)', () => {
+    expect(
+      textEnvelope('abcdefghij', [
+        entity('text_link', 0, 10, { url: 'https://example.com/story' }),
+        entity('bold', 0, 10),
+      ]).ok,
+    ).toBe(true);
+    expect(
+      textEnvelope('abcdefghij', [
+        entity('text_link', 0, 10, { url: 'https://example.com/story' }),
+        entity('spoiler', 0, 10),
+      ]).ok,
+    ).toBe(true);
+  });
+
+  it('accepts legal multi-level combinations per the Bot API rules (not a guessed matrix)', () => {
+    // link ⊃ italic ⊃ bold: a style can be part of a link, and a style can
+    // contain another style.
+    expect(
+      textEnvelope('abcdefghij', [
+        entity('text_link', 0, 10, { url: 'https://example.com/story' }),
+        entity('italic', 1, 8),
+        entity('bold', 2, 5),
+      ]).ok,
+    ).toBe(true);
+    // mention ⊃ italic ⊃ bold: a style can be part of a mention, and a style
+    // can contain another style. (Non-style pairs like link⊃mention stay
+    // illegal — rule 4 — so multi-level chains here only nest STYLES inside
+    // the non-style outermost entity.)
+    expect(
+      textEnvelope('abcdefghij', [
+        entity('text_mention', 0, 7, {
+          user: { id: 7, isBot: false, firstName: 'دوست' },
+        }),
+        entity('italic', 1, 6),
+        entity('bold', 2, 5),
+      ]).ok,
+    ).toBe(true);
+    // quote ⊃ link ⊃ bold (unchanged legal shape: quotes may hold non-quote
+    // children, and styles may be part of both).
+    expect(
+      textEnvelope('abcdefghij', [
+        entity('blockquote', 0, 10),
+        entity('text_link', 1, 8, { url: 'https://example.com/story' }),
+        entity('bold', 2, 5),
+      ]).ok,
+    ).toBe(true);
+  });
+
+  it('keeps the style-in-link rule exact on UTF-16 offsets for a Persian/emoji link', () => {
+    // 'سلام 😀 داستان' — '😀' is ONE astral character = TWO UTF-16 units.
+    const text = 'سلام 😀 داستان';
+    const outcome = textEnvelope(text, [
+      entity('text_link', 5, 9, { url: 'https://example.com/داستان' }),
+      entity('bold', 7, 7), // starts INSIDE the link, after the 2-unit emoji
+    ]);
+    if (!outcome.ok) throw new Error(`expected legal, got ${outcome.reason}`);
+    expect(outcome.envelope.text).toBe(text);
+    const [link, bold] = outcome.envelope.entities;
+    expect(link).toMatchObject({ type: 'text_link', offset: 5, length: 9 });
+    expect(bold).toMatchObject({ type: 'bold', offset: 7, length: 7 });
+    // The direct-entity transport payload carries the SAME nested shape.
+    const wire = richTextEntitiesWire(outcome.envelope.entities);
+    expect(wire[0]).toMatchObject({ type: 'text_link', url: 'https://example.com/داستان' });
+    expect(wire[1]).toMatchObject({ type: 'bold', offset: 7, length: 7 });
+  });
+
+  it('still rejects: non-style inner in a link, code/pre in ANY overlap with a style, quotes', () => {
+    // link ⊃ hashtag: a NON-style inner stays a nesting violation.
+    expect(
+      textEnvelope('abcdefghij', [
+        entity('text_link', 0, 10, { url: 'https://example.com/story' }),
+        entity('hashtag', 2, 3),
+      ]),
+    ).toEqual({ ok: false, reason: 'nesting_violation' });
+    // code/pre stay isolated in BOTH directions with a style.
+    expect(textEnvelope('abcdefghij', [entity('bold', 0, 10), entity('code', 2, 3)])).toEqual({
+      ok: false,
+      reason: 'nesting_violation',
+    });
+    expect(
+      textEnvelope('abcdefghij', [
+        entity('pre', 0, 10, { language: 'ts' }),
+        entity('italic', 2, 3),
+      ]),
+    ).toEqual({ ok: false, reason: 'nesting_violation' });
+    // Crossing stays invalid; quote-in-quote stays invalid.
+    expect(
+      textEnvelope('abcdefghij', [
+        entity('text_link', 1, 6, { url: 'https://example.com/story' }),
+        entity('bold', 4, 6),
+      ]),
+    ).toEqual({ ok: false, reason: 'crossing_overlap' });
+    expect(
+      textEnvelope('abcdefghij', [entity('blockquote', 0, 10), entity('blockquote', 2, 5)]),
+    ).toEqual({ ok: false, reason: 'nesting_violation' });
+    // Duplicates stay rejected.
+    expect(textEnvelope('abcdefghij', [entity('bold', 0, 3), entity('bold', 0, 3)])).toEqual({
+      ok: false,
+      reason: 'duplicate_entity',
+    });
+  });
+});

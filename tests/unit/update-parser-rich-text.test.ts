@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseTelegramUpdate, type ParsedUpdate } from '../../src/adapters/telegram/update-parser';
+import { createRichTextEnvelope } from '../../src/domain/telegram/rich-text-envelope';
 
 /**
  * R1.19 — bounded typed native rich-text extraction in the REAL
@@ -299,5 +300,189 @@ describe('parseTelegramUpdate — edited messages and untouched legacy behavior'
     expect(update.commandTarget).toBe('pixel_admin_bot');
     expect(update.chatType).toBe('private');
     expect(update.fromUserId).toBe(1000000001);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1.19.1 — ORIGINAL M1 (real wire text_mention User) and P1 (plain caption
+// with omitted optional caption_entities) companions on the REAL parser path.
+// The ORIGINAL proof lives in tests/unit/posidon-r119-original-proof.test.ts.
+// ---------------------------------------------------------------------------
+describe('parseTelegramUpdate — R1.19.1 wire User projection (M1)', () => {
+  it('projects a real wire User to the canonical shape and DROPS unrelated optional Telegram flags', () => {
+    const update = messagePayload(
+      messageUpdate({
+        text: 'سلام دوست',
+        entities: [
+          {
+            type: 'text_mention',
+            offset: 5,
+            length: 4,
+            user: {
+              id: 222,
+              is_bot: false,
+              first_name: 'دوست',
+              username: 'fixture_friend',
+              // Ordinary real-User extras: dropped, never a rejection reason.
+              is_premium: true,
+              added_to_attachment_menu: true,
+              language_code: 'fa',
+            },
+          },
+        ],
+      }),
+    );
+    if (!update.richText?.ok) throw new Error('extraction failed');
+    expect(update.richText.entities[0]?.user).toEqual({
+      id: 222,
+      isBot: false,
+      firstName: 'دوست',
+      username: 'fixture_friend',
+      languageCode: 'fa',
+    });
+    // No arbitrary nested raw data survives into the extraction.
+    expect(JSON.stringify(update.richText.entities[0])).not.toContain('is_premium');
+    // And the envelope accepts the projected canonical user.
+    expect(createRichTextEnvelope(update.richText).ok).toBe(true);
+  });
+
+  it('projects the wire User on the caption path too (caption_entities text_mention)', () => {
+    const update = messagePayload(
+      messageUpdate({
+        text: undefined,
+        caption: 'سلام دوست',
+        caption_entities: [
+          {
+            type: 'text_mention',
+            offset: 5,
+            length: 4,
+            user: { id: 223, is_bot: true, first_name: 'ربات', last_name: 'کمک' },
+          },
+        ],
+      }),
+    );
+    if (!update.richCaption?.ok) throw new Error('extraction failed');
+    expect(update.richCaption.entities[0]?.user).toEqual({
+      id: 223,
+      isBot: true,
+      firstName: 'ربات',
+      lastName: 'کمک',
+    });
+  });
+
+  it('fails malformed/wrong-typed/oversized Users EXPLICITLY at the envelope boundary', () => {
+    const cases: unknown[] = [
+      'not-an-object',
+      42,
+      [], // arrays are not objects
+      { id: 224 }, // missing required is_bot/first_name
+      { id: 224, is_bot: 'yes', first_name: 'دوست' }, // wrong-typed flag
+      { id: '224', is_bot: false, first_name: 'دوست' }, // wrong-typed id
+      { id: 224, is_bot: false, first_name: 'د'.repeat(65) }, // oversized name
+      { id: 0, is_bot: false, first_name: 'دوست' }, // id must be positive
+    ];
+    for (const user of cases) {
+      const update = messagePayload(
+        messageUpdate({
+          text: 'سلام دوست',
+          entities: [{ type: 'text_mention', offset: 5, length: 4, user }],
+        }),
+      );
+      // The parser stays shallow (extraction ok) — the ENVELOPE fails typed.
+      if (!update.richText?.ok) throw new Error('parser must not judge user shapes');
+      expect(createRichTextEnvelope(update.richText)).toEqual({
+        ok: false,
+        reason: 'user_invalid',
+        entityIndex: 0,
+      });
+    }
+  });
+});
+
+describe('parseTelegramUpdate — R1.19.1 plain-caption preservation (P1)', () => {
+  it('preserves a plain caption with OMITTED caption_entities as the canonical extraction', () => {
+    const update = messagePayload(
+      messageUpdate({
+        text: undefined,
+        photo: [
+          { file_id: 'synthetic-file', file_unique_id: 'synthetic-unique', width: 1, height: 1 },
+        ],
+        caption: 'کپشن ساده 😀',
+      }),
+    );
+    expect(update.richCaption).toEqual({
+      ok: true,
+      kind: 'caption',
+      text: 'کپشن ساده 😀',
+      entities: [],
+    });
+    expect(update.text).toBeUndefined(); // plain captions have no legacy text field
+    expect(update.command).toBeUndefined(); // captions never become commands
+  });
+
+  it('treats explicit [] identically to omitted metadata, but keeps null/primitive MALFORMED', () => {
+    const omitted = messagePayload(
+      messageUpdate({ text: undefined, caption: 'عنوان', caption_entities: undefined }),
+    );
+    expect(omitted.richCaption).toEqual({ ok: true, kind: 'caption', text: 'عنوان', entities: [] });
+
+    const explicitEmpty = messagePayload(
+      messageUpdate({ text: undefined, caption: 'عنوان', caption_entities: [] }),
+    );
+    expect(explicitEmpty.richCaption).toEqual({
+      ok: true,
+      kind: 'caption',
+      text: 'عنوان',
+      entities: [],
+    });
+
+    for (const broken of [null, 'broken', 42]) {
+      const malformed = messagePayload(
+        messageUpdate({ text: undefined, caption: 'عنوان', caption_entities: broken }),
+      );
+      expect(malformed.richCaption).toEqual({
+        ok: false,
+        kind: 'caption',
+        reason: 'entities_malformed',
+      });
+    }
+  });
+
+  it('preserves whitespace and Markdown-literal captions EXACTLY (no trim, no interpretation)', () => {
+    for (const caption of ['   ', '**بولد**', '_italic_ not parsed', 'خط اول\nخط دوم']) {
+      const update = messagePayload(
+        messageUpdate({ text: undefined, caption, caption_entities: undefined }),
+      );
+      expect(update.richCaption).toEqual({
+        ok: true,
+        kind: 'caption',
+        text: caption,
+        entities: [],
+      });
+    }
+  });
+
+  it('provides no richCaption for an EMPTY caption string (no content to preserve)', () => {
+    const update = messagePayload(
+      messageUpdate({ text: undefined, caption: '', caption_entities: undefined }),
+    );
+    expect(update.richCaption).toBeUndefined();
+  });
+
+  it('applies the same plain-caption preservation to edited_message', () => {
+    const raw = messageUpdate({ text: undefined, caption: 'عنوان ویرایش‌شده' });
+    const edited = parseTelegramUpdate({
+      update_id: 901,
+      edited_message: (raw as { message: Record<string, unknown> }).message,
+    });
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) throw new Error('unreachable');
+    if (edited.update.kind !== 'edited_message') throw new Error('unexpected kind');
+    expect(edited.update.richCaption).toEqual({
+      ok: true,
+      kind: 'caption',
+      text: 'عنوان ویرایش‌شده',
+      entities: [],
+    });
   });
 });

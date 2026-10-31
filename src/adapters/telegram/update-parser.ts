@@ -105,6 +105,10 @@ export interface ParsedMessageFields {
    * R1.19: the same extraction for `caption` + `caption_entities`. A caption
    * is NEVER a bot command; captions beyond the 1024-unit application cap
    * are reported explicitly (`caption_too_large`), never silently dropped.
+   * R1.19.1: a plain caption with OMITTED optional `caption_entities` is
+   * preserved as `ok: true` with an EMPTY entity list (metadata absence is
+   * not content absence); explicit null/primitive metadata stays a typed
+   * `entities_malformed` outcome, never repaired into absence/empty.
    */
   readonly richCaption?: ParsedRichTextExtraction;
 }
@@ -256,6 +260,49 @@ const ENTITY_WIRE_FIELD_MAP = [
 ] as const;
 
 /**
+ * R1.19.1 (M1): bounded shallow projection of the documented minimal
+ * text_mention User fields from the REAL incoming WIRE shape to the canonical
+ * camelCase shape the envelope validates — the same wire->canonical mapping
+ * the storage reader and wire writer already use, now applied on the parser
+ * path so a real `user:{id,is_bot,first_name,...}` object survives into the
+ * domain instead of failing `user_invalid` there.
+ *
+ * Documented minimal field set ONLY: `id` / `is_bot` / `first_name` (required
+ * by the domain) plus the allowed optional `last_name` / `username` /
+ * `language_code`. Every OTHER key — including unrelated optional Telegram
+ * flags a real User payload commonly carries (is_premium,
+ * added_to_attachment_menu, ...) — is DROPPED by the documented ignore
+ * policy: dropped extras never reject an ordinary real User payload, and no
+ * arbitrary nested raw User object is ever retained.
+ *
+ * A non-object `user` is forwarded UNCHANGED so the envelope fails it typed
+ * (`user_invalid`) — the parser never judges field types or bounds (wrong
+ * id/boolean/name types and oversized names fail EXPLICITLY at the envelope
+ * boundary, which re-validates the full canonical shape).
+ */
+const MENTION_USER_WIRE_FIELD_MAP = [
+  ['id', 'id'],
+  ['is_bot', 'isBot'],
+  ['first_name', 'firstName'],
+  ['last_name', 'lastName'],
+  ['username', 'username'],
+  ['language_code', 'languageCode'],
+] as const;
+
+function projectMentionUser(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value; // not an object -> envelope fails it typed (user_invalid)
+  }
+  const projected: Record<string, unknown> = {};
+  for (const [wireKey, camelKey] of MENTION_USER_WIRE_FIELD_MAP) {
+    if (value[wireKey] !== undefined) {
+      projected[camelKey] = value[wireKey];
+    }
+  }
+  return projected;
+}
+
+/**
  * Shallow-project one raw entity. Undefined for anything that is not an
  * object with a bounded non-empty string type (the WHOLE metadata becomes
  * explicitly malformed — never a silently partial list). Telegram's wire
@@ -281,7 +328,8 @@ function projectEntityMetadata(entry: unknown): ParsedMessageEntityMetadata | un
   };
   for (const [wireKey, camelKey] of ENTITY_WIRE_FIELD_MAP) {
     if (entry[wireKey] !== undefined) {
-      projected[camelKey] = entry[wireKey];
+      projected[camelKey] =
+        wireKey === 'user' ? projectMentionUser(entry[wireKey]) : entry[wireKey];
     }
   }
   return projected as unknown as ParsedMessageEntityMetadata;
@@ -363,6 +411,15 @@ function parseMessageLike(
   if (typeof rawCaption === 'string' && rawCaption.length > 0) {
     if (rawCaption.length > RICH_TEXT_LIMITS.maxCaptionUnits) {
       richCaption = { ok: false, kind: 'caption', reason: 'caption_too_large' };
+    } else if (payload['caption_entities'] === undefined) {
+      // R1.19.1 (P1): a plain caption with OMITTED optional caption_entities
+      // is VALID content — metadata absence is not content absence. Plain
+      // text has the legacy `text` field, plain captions have none, so the
+      // caption is preserved here as the canonical plain-caption extraction
+      // (exact text, empty entity list). Explicit null/primitive metadata is
+      // NOT absence — extractRichTextMetadata below fails it typed
+      // (entities_malformed); it is never repaired or treated as empty.
+      richCaption = { ok: true, kind: 'caption', text: rawCaption, entities: [] };
     } else {
       richCaption = extractRichTextMetadata('caption', rawCaption, payload['caption_entities']);
     }

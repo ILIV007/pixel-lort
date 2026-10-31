@@ -56,4 +56,15 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
+  {
+    // R1.19.1: the PERMANENT ORIGINAL acceptance proof (Posidon R1.19.1 M1 /
+    // N1 / P1 + retained F1) is kept byte-verbatim — assertions, counter-
+    // example inputs and the stdout counter probes (`POSIDON_R119_*`) that
+    // reproduce the observed RED/GREEN windows. Test probes never reach
+    // production code paths.
+    files: ['tests/unit/posidon-r119-original-proof.test.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
 );

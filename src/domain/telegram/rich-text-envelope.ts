@@ -43,11 +43,13 @@
  *   unpaired surrogates is rejected explicitly (never repaired);
  * - the documented nesting restrictions are enforced: crossing overlaps are
  *   invalid; code/pre are isolated (they can neither contain nor be
- *   contained); quote types cannot nest (blockquote /
- *   expandable_blockquote may hold non-quote children but never nest in
- *   anything); only the formatting styles (bold, italic, underline,
- *   strikethrough, spoiler) and the two quote types may contain others; all
- *   other entity types are atomic leaves;
+ *   contained); the formatting styles (bold, italic, underline,
+ *   strikethrough, spoiler) can contain AND be part of any other entity
+ *   except pre/code (official formatting-options rules; R1.19.1 corrected
+ *   the be-part-of direction — a bold INSIDE a link is legal); quote types
+ *   never nest (blockquote / expandable_blockquote may hold non-quote
+ *   children but never nest inside anything); all other entity types remain
+ *   atomic leaves among themselves;
  * - identical ranges with the SAME type are rejected as duplicates
  *   (deterministic; no silent widening/repositioning/deduplication); equal
  *   ranges of DIFFERENT types are legal when at least one containment
@@ -258,6 +260,20 @@ const CONTAINER_TYPES: ReadonlySet<string> = new Set([
   'expandable_blockquote',
 ]);
 
+/**
+ * The five formatting styles: per the official Bot API formatting-options
+ * rules they "can contain and can be part of any other entities, except pre
+ * and code". The containing direction is enforced by CONTAINER_TYPES; the
+ * BE-PART-OF direction is the R1.19.1 (N1) correction in `canContain`.
+ */
+const STYLE_TYPES: ReadonlySet<string> = new Set([
+  'bold',
+  'italic',
+  'underline',
+  'strikethrough',
+  'spoiler',
+]);
+
 const QUOTE_TYPES: ReadonlySet<string> = new Set(['blockquote', 'expandable_blockquote']);
 
 /** code/pre can neither contain others nor be contained (leaf-isolated). */
@@ -270,6 +286,16 @@ function isContainableType(type: string): boolean {
 function canContain(outer: RichTextEntity, inner: RichTextEntity): boolean {
   if (ISOLATED_TYPES.has(outer.type) || ISOLATED_TYPES.has(inner.type)) {
     return false;
+  }
+  // R1.19.1 (N1): a style may BE PART OF any other entity except pre/code
+  // (checked above) — bold/italic/underline/strikethrough/spoiler inside a
+  // text_link, mention, quote, ... are legal formatted links/mentions per the
+  // official rules. The reverse direction (a style CONTAINING others) stays
+  // governed by CONTAINER_TYPES below; crossing/overlap rejection, code/pre
+  // isolation, quote non-nesting, duplicate and non-container rules are
+  // unchanged.
+  if (STYLE_TYPES.has(inner.type)) {
+    return true;
   }
   if (!CONTAINER_TYPES.has(outer.type)) {
     return false;

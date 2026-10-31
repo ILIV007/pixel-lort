@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createBotApiClient, TelegramApiError } from '../../src/adapters/telegram/bot-api-client';
+import { parseTelegramUpdate } from '../../src/adapters/telegram/update-parser';
 import {
   createRichTextEnvelope,
+  readRichTextEnvelope,
+  serializeRichTextEnvelope,
   type RichTextEnvelope,
 } from '../../src/domain/telegram/rich-text-envelope';
 import { escapeTelegramHtml } from '../../src/admin/telegram-html';
@@ -293,5 +296,114 @@ describe('createBotApiClient — unchanged HTML path and transport classificatio
     expect(error).toBeInstanceOf(TelegramApiError);
     expect((error as TelegramApiError).code).toBe('telegram_timeout');
     expect((error as TelegramApiError).retryable).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1.19.1 — ORIGINAL M1 and P1 transport companions: the REAL incoming raw
+// update flows through parser -> envelope -> serialize -> read -> the REAL
+// client factory with a captured fake fetch, proving the wire User and the
+// plain caption survive end-to-end with NO parse_mode. The ORIGINAL proof
+// lives in tests/unit/posidon-r119-original-proof.test.ts.
+// ---------------------------------------------------------------------------
+describe('createBotApiClient — R1.19.1 end-to-end correctness companions', () => {
+  it('M1: raw text_mention update reaches the wire with the EXACT Bot API User shape', async () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 99001,
+      message: {
+        message_id: 11,
+        date: 1760000000,
+        chat: { id: 555, type: 'private' },
+        from: { id: 1000000001, is_bot: false, first_name: 'Fixture' },
+        text: 'سلام دوست',
+        entities: [
+          {
+            type: 'text_mention',
+            offset: 5,
+            length: 4,
+            user: {
+              id: 222,
+              is_bot: false,
+              first_name: 'دوست',
+              username: 'fixture_friend',
+              is_premium: true, // real-payload extra: dropped by the parser
+            },
+          },
+        ],
+      },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || parsed.update.kind !== 'message') throw new Error('parse failed');
+    if (!parsed.update.richText?.ok) throw new Error('extraction failed');
+    const envelopeOutcome = createRichTextEnvelope(parsed.update.richText);
+    if (!envelopeOutcome.ok) throw new Error(`envelope failed: ${envelopeOutcome.reason}`);
+    // Persistence round trip: serialize -> defensive read.
+    const serialized = serializeRichTextEnvelope(envelopeOutcome.envelope);
+    if (!serialized.ok) throw new Error('serialize failed');
+    const read = readRichTextEnvelope(serialized.json);
+    if (!read.ok) throw new Error(`read failed: ${read.reason}`);
+    // Transport: the REAL client factory with a captured fake fetch.
+    const { client, requests } = makeClient();
+    await client.sendMessageRich({ chatId: 555, content: read.envelope });
+    expect(requests).toHaveLength(1);
+    const { url, body } = requests[0]!;
+    expect(url).toBe(`https://api.telegram.org/bot${FAKE_TOKEN}/sendMessage`);
+    expect(body['chat_id']).toBe(555);
+    expect(body['text']).toBe('سلام دوست');
+    expect('parse_mode' in body).toBe(false);
+    const entities = semanticEntities(body['entities']);
+    expect(entities[0]).toEqual({
+      type: 'text_mention',
+      offset: 5,
+      length: 4,
+      url: undefined,
+      language: undefined,
+      custom_emoji_id: undefined,
+      unix_time: undefined,
+      date_time_format: undefined,
+      // EXACT wire shape on output: snake_case, minimal documented fields,
+      // no arbitrary nested raw data and no camelCase leakage.
+      user: { id: 222, is_bot: false, first_name: 'دوست', username: 'fixture_friend' },
+    });
+    expect(JSON.stringify(body)).not.toContain('is_premium');
+    expect(JSON.stringify(body)).not.toContain('isBot');
+  });
+
+  it('P1: plain caption flows to a real editMessageCaption with exact caption and empty entities', async () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 99002,
+      edited_message: {
+        message_id: 12,
+        date: 1760000000,
+        chat: { id: 555, type: 'private' },
+        from: { id: 1000000001, is_bot: false, first_name: 'Fixture' },
+        photo: [
+          { file_id: 'synthetic-file', file_unique_id: 'synthetic-unique', width: 1, height: 1 },
+        ],
+        caption: 'کپشن ساده 😀', // NO caption_entities field at all
+      },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || parsed.update.kind !== 'edited_message') throw new Error('parse failed');
+    if (!parsed.update.richCaption?.ok) throw new Error('caption extraction failed');
+    const envelopeOutcome = createRichTextEnvelope(parsed.update.richCaption);
+    if (!envelopeOutcome.ok) throw new Error(`envelope failed: ${envelopeOutcome.reason}`);
+    expect(envelopeOutcome.envelope.kind).toBe('caption');
+    const { client, requests } = makeClient(() => jsonResponse({ ok: true, result: true }));
+    const edited = await client.editMessageCaptionRich({
+      chatId: 555,
+      messageId: 12,
+      content: envelopeOutcome.envelope,
+    });
+    expect(edited).toBe(true);
+    expect(requests).toHaveLength(1);
+    const { url, body } = requests[0]!;
+    expect(url).toBe(`https://api.telegram.org/bot${FAKE_TOKEN}/editMessageCaption`);
+    expect(body['chat_id']).toBe(555);
+    expect(body['message_id']).toBe(12);
+    expect(body['caption']).toBe('کپشن ساده 😀');
+    expect(body['caption_entities']).toEqual([]);
+    expect('parse_mode' in body).toBe(false);
+    expect('text' in body).toBe(false);
   });
 });
