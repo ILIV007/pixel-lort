@@ -8,6 +8,7 @@ import {
   seedStory,
 } from '../helpers/review-test-fixtures';
 import { isSafeTelegramHtml } from '../../src/admin/telegram-html';
+import { buildEventRelationDecisionReport } from '../../src/domain/editorial/event-relation-decision';
 
 /**
  * R1.18 hostile-rendering tests: hostile markup, enormous strings, emoji
@@ -145,5 +146,113 @@ describe('hostile content stays bounded safe HTML', () => {
     for (const codePoint of text) {
       expect(codePoint.length).toBeLessThanOrEqual(2);
     }
+  });
+
+  // R1.18.1 (S1): mandatory safety space is reserved BEFORE variable
+  // content — long but bounded stored content can never crowd the relation
+  // safety notices (or the honest conflict display) out of the reply.
+  it('long stored content cannot crowd out the relation safety notices', async () => {
+    const relationReport = buildEventRelationDecisionReport({
+      disabled: false,
+      snapshot: { sourceItemId: 'item-s1', contentHash: 'a'.repeat(64) },
+      candidates: {
+        entityLookup: { probed: ['entity-s1'], unprobedCount: 0, overflow: false },
+        counts: { uniqueCandidatesObserved: 1, candidatesReported: 1 },
+        candidatesTruncated: false,
+        candidateEntries: [
+          { storyId: 'story-s1-other', origins: ['fingerprint:url'], basisState: 'ok' },
+        ],
+      },
+      pairAttempts: [
+        {
+          storyId: 'story-s1-other',
+          pairId: 'erp-1',
+          state: 'evaluated',
+          sideA: { evidenceId: 'ev-a', sourceItemId: 'item-s1', contentHash: 'a'.repeat(64) },
+          sideB: {
+            storyId: 'story-s1-other',
+            evidenceId: 'ev-b',
+            sourceItemId: 'item-other',
+            contentHash: 'b'.repeat(64),
+            draftId: 'draft-other',
+            draftVersion: 1,
+          },
+          canonicalInputHash: 'c'.repeat(64),
+          verdict: 'different_event_proposed',
+          reasons: ['Related title, but a different launch date.'],
+          conflicts: ['CONFLICT_DIFFERENT_LAUNCH_DATE'],
+          references: [
+            { side: 'A', evidenceId: 'ev-a' },
+            { side: 'B', evidenceId: 'ev-b' },
+          ],
+          aiRunIds: [`edai_${'1'.repeat(32)}`],
+        },
+      ],
+    });
+    await seedHostileDraft(
+      'draft-s1-long',
+      JSON.stringify({
+        schemaVersion: 1,
+        locale: 'fa',
+        headlineFa: 'ه'.repeat(600),
+        summaryFa: 'خ'.repeat(900),
+        sourceReport: {
+          sourceItemId: 'item-s1',
+          sourceName: 'م'.repeat(600),
+          stance: 'mentions',
+          excerptText: 'گ'.repeat(700),
+          truncated: false,
+        },
+        modelClaims: [{ text: 'ا'.repeat(220), evidenceIds: ['ev-a'] }],
+        eventRelation: relationReport,
+      }),
+      'S1 reservation',
+    );
+    const harness = buildReviewHarness();
+    await harness.ingress.processUpdate(privateMessage(7603, OWNER_ID, '/drafts draft-s1-long'));
+    const text = harness.sends[0]!.text;
+    expect(text.length).toBeLessThanOrEqual(3500);
+    expect(isSafeTelegramHtml(text)).toBe(true);
+    // The three mandatory relation safety notices survive long content.
+    expect(text).toContain('*_proposed = model proposal only');
+    expect(text).toContain('Technical states are technical');
+    expect(text).toContain('Missing candidate / non-match is NOT');
+    // The other mandatory notices survive too.
+    expect(text).toContain('NOT approved');
+    expect(text).toContain('UNVERIFIED');
+    // Long content was bounded honestly — the explicit display-truncated
+    // signal is present (stored report CONTENT such as conflicts may be
+    // omitted by space, but never silently: the notice says so).
+    expect(text).toContain('display truncated');
+  });
+
+  it('typed report read outcomes survive long content (state reservation)', async () => {
+    await seedHostileDraft(
+      'draft-s1-state',
+      JSON.stringify({
+        schemaVersion: 1,
+        locale: 'fa',
+        headlineFa: 'ت'.repeat(600),
+        summaryFa: 'ج'.repeat(1500),
+        sourceReport: {
+          sourceItemId: 'item-s1-state',
+          sourceName: 'س'.repeat(400),
+          stance: 'mentions',
+          excerptText: 'د'.repeat(700),
+          truncated: false,
+        },
+        modelClaims: [],
+        // No optional report keys at all: every typed read outcome is the
+        // honest absent state and MUST stay visible in the bounded view.
+      }),
+      'state reservation',
+    );
+    const harness = buildReviewHarness();
+    await harness.ingress.processUpdate(privateMessage(7604, OWNER_ID, '/drafts draft-s1-state'));
+    const text = harness.sends[0]!.text;
+    expect(text.length).toBeLessThanOrEqual(3500);
+    expect(isSafeTelegramHtml(text)).toBe(true);
+    expect(text).toContain('not present in this stored document');
+    expect(text).toContain('Event relation (≤2 pairs, proposals)');
   });
 });

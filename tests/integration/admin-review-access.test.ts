@@ -172,9 +172,28 @@ describe('argument validation — BEFORE any editorial SQL', () => {
     ['control characters', '/drafts draft\u0001acc', 7123],
     ['SQL-injection-shaped input', "/drafts x'; DROP TABLE drafts; --", 7124],
     ['id with tab inside', '/drafts a\tb', 7125],
+    // R1.18.1 (V1): newline-bearing malformed arguments are grammar failures
+    // — NEVER the list action — rejected before any editorial SQL.
+    ['LF separates a trailing token', '/drafts draft-acc-1\nextra', 7126],
+    ['CR inside the argument', '/drafts draft-acc-1\rextra', 7127],
+    ['CRLF between tokens', '/drafts draft-acc-1\r\nextra', 7128],
+    ['vertical tab is whitespace', '/drafts a\u000bb', 7130],
   ])('%s → honest usage reply, zero drafts queries', async (_name, text, updateId) => {
     const harness = buildReviewHarness();
     const outcome = await harness.ingress.processUpdate(privateMessage(updateId, OWNER_ID, text));
+    expect(outcome).toBe('processed');
+    expect(harness.sends).toHaveLength(1);
+    expect(harness.sends[0]!.text).toContain('Invalid argument');
+    expect(harness.executor.stats().draftsSql).toBe(0);
+  });
+
+  it('LF directly after the command is a grammar failure, never the list (V1)', async () => {
+    const harness = buildReviewHarness();
+    // The REAL parser extracts `drafts` (the lookahead accepts any \s); the
+    // remainder begins with a newline — an unsupported separator.
+    const outcome = await harness.ingress.processUpdate(
+      privateMessage(7129, OWNER_ID, '/drafts\ndraft-acc-1', { command: 'drafts' }),
+    );
     expect(outcome).toBe('processed');
     expect(harness.sends).toHaveLength(1);
     expect(harness.sends[0]!.text).toContain('Invalid argument');

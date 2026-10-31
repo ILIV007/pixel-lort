@@ -46,4 +46,14 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
+  {
+    // R1.18.1: the PERMANENT ORIGINAL acceptance probes (Posidon R1.18 S1 /
+    // V1 / C1) are kept verbatim — assertions, counterexample inputs and the
+    // stdout counter probes (`POSIDON_R118_*`) that reproduce the observed
+    // failure windows. Test probes never reach production code paths.
+    files: ['tests/integration/admin-review-originals.test.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
 );

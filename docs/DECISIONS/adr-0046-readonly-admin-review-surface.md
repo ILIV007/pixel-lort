@@ -114,3 +114,38 @@ approved/published` notice, the Persian headline/summary, the bounded
   probe only proves more rows exist); a >128 KiB document shows metadata
   only; legacy/malformed reports show explicit unavailable states; Telegram
   replies remain honest at-least-once as before.
+
+## Addendum — R1.18.1 review-correctness correction (app 1.13.1; schema still 3)
+
+Independent review of the R1.18 slice returned CHANGES_REQUIRED with three
+ORIGINAL acceptance counterexamples; this correction-only addendum records
+their closure (no new capability, no new engine/endpoint, no DDL):
+
+1. **S1 — safety space is now RESERVED before variable content.** The
+   mandatory notices (ready ≠ approved/published; claims UNVERIFIED and
+   presence ≠ truth incl. the section header; guard-unassessed where
+   applicable; candidates ≠ same-event proof; the three relation
+   proposal/technical/no-candidate notices) and every typed report read
+   outcome (absent / unsupported_version / malformed) reserve their exact
+   escaped size BEFORE any stored content is composed. Long but bounded
+   stored text is truncated MORE instead of any mandatory distinction
+   being dropped; omissions by caps/space raise the ONE explicit
+   display-truncated notice (incl. pair-cap, reason/reference/run caps,
+   dropped claim samples and the pair-tail head-only fallback).
+2. **V1 — argument-grammar failure is never the list action.** The command
+   remainder is now extracted in three distinguishable states (`none` /
+   `remainder` / `malformed`) from the ACTUAL whole text: only the
+   documented no-argument form reaches the ready-list action; newline- or
+   control-bearing and extra-token arguments are rejected by the existing
+   whole-token validator BEFORE any editorial SQL (zero SELECTs), with
+   `/language` behavior byte-for-byte preserved.
+3. **C1 — stored conflicts are displayed.** Each rendered pair shows its
+   stored `conflicts` entries verbatim (bounded escaped, DISTINCT from
+   reasons; never translated, replaced or inferred; no new assessment) and
+   omits nothing silently: cap/space omissions raise the honest
+   truncation notice.
+
+The ORIGINAL Posidon R1.18 probes run verbatim (assertions unchanged) in
+the small permanent suite `tests/integration/admin-review-originals.test.ts`
+(RED 3-failed on the untouched `93e279a` baseline with counters identical
+to the independent review log; GREEN after this correction).

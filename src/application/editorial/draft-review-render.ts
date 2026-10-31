@@ -88,12 +88,21 @@ export function formatUtcEpochMs(ms: number): string {
  * are added first and never dropped; content lines are added while they
  * fit. `finish()` always returns a message within budget and, when anything
  * was trimmed or dropped, ends with the explicit display-truncated notice.
+ *
+ * R1.18.1 (S1): mandatory lines (safety notices, typed report states) can
+ * be RESERVED before variable content is composed. Reserved units are
+ * subtracted from every content budget and released only when the line is
+ * actually added — long stored content can never crowd them out; less
+ * content is always preferred over weaker warnings.
  */
 class BudgetedMessage {
   private readonly parts: TelegramSafeHtml[] = [];
   private used = 0;
   private truncated = false;
   private readonly max: number;
+  /** Reserved-but-not-yet-added mandatory line units (R1.18.1 — S1). */
+  private reservedUnits = 0;
+  private readonly reservations = new Map<string, number>();
 
   constructor(
     max: number,
@@ -103,7 +112,48 @@ class BudgetedMessage {
   }
 
   private remaining(): number {
-    return this.max - this.used - TRUNCATION_NOTICE_RESERVE;
+    return this.max - this.used - this.reservedUnits - TRUNCATION_NOTICE_RESERVE;
+  }
+
+  /**
+   * Reserve the exact escaped size of a mandatory line under `key` BEFORE
+   * variable content is composed. Idempotent per key.
+   */
+  reserveLine(key: string, units: number): void {
+    if (this.reservations.has(key)) {
+      return;
+    }
+    this.reservations.set(key, units);
+    this.reservedUnits += units;
+  }
+
+  private releaseLine(key: string): void {
+    const units = this.reservations.get(key);
+    if (units !== undefined) {
+      this.reservedUnits -= units;
+      this.reservations.delete(key);
+    }
+  }
+
+  /** Add a reserved FIXED line (the exact label text — always kept). */
+  addReservedFixed(key: string, label: string): void {
+    this.releaseLine(key);
+    this.addFixed((remaining) => boundedEscaped(label, remaining).text as TelegramSafeHtml);
+  }
+
+  /** Add a reserved labeled-value line (short bounded state value). */
+  addReservedLabeledValue(key: string, label: string, value: string): void {
+    this.releaseLine(key);
+    this.addLabeledValue(label, value);
+  }
+
+  /**
+   * Honest-omission signal (R1.18.1 — C1): whenever a displayed section's
+   * values or entries are dropped by caps or space, the message must say
+   * so instead of silently implying completeness.
+   */
+  flagTruncated(): void {
+    this.truncated = true;
   }
 
   /**
@@ -338,6 +388,7 @@ function addReportState<T>(
   label: string,
   state: ReviewReportState<T> | null,
   labels: ReviewRenderLabels,
+  reservationKey: string,
 ): void {
   if (state === null) {
     return;
@@ -345,8 +396,28 @@ function addReportState<T>(
   if (state.kind === 'ok') {
     return; // rendered by the section-specific summary
   }
-  message.addLabeledValue(label, reportStateLine(state.kind, labels));
+  // R1.18.1 (S1): report read outcomes never disappear in favor of long
+  // article text — the typed state line is added under its reservation.
+  message.addReservedLabeledValue(reservationKey, label, reportStateLine(state.kind, labels));
 }
+
+/**
+ * Escaped unit cost of one fixed line (label text) plus the '\n' join.
+ */
+function fixedLineUnits(label: string): number {
+  return escapeTelegramHtml(label).length + 1;
+}
+
+/**
+ * Escaped unit cost of one labeled-value line ('label value' + join) —
+ * exactly the cost `addLabeledValue` accounts for the same input.
+ */
+function labeledLineUnits(label: string, value: string): number {
+  return escapeTelegramHtml(label).length + 1 + escapeTelegramHtml(value).length + 1;
+}
+
+/** Per-pair stored-conflict entries shown (the strict reader bounds ≤4). */
+const RELATION_CONFLICTS_MAX = 3;
 
 export function renderDraftDetail(
   view: DraftDetailViewModel,
@@ -393,6 +464,52 @@ export function renderDraftDetail(
   }
 
   const doc = view.document;
+
+  // R1.18.1 (S1): reserve ALL mandatory safety/report-state lines BEFORE
+  // any variable content is composed. Conditions mirror the add sites
+  // below exactly, so every reserved line is later released exactly once.
+  message.reserveLine('claimsHeader', fixedLineUnits(labels.labelClaims));
+  message.reserveLine('claimsNote', fixedLineUnits(labels.claimsUnverifiedNote));
+  message.reserveLine('candidatesNote', fixedLineUnits(labels.candidatesNote));
+  if (doc.guard?.kind === 'ok') {
+    message.reserveLine('guardNote', fixedLineUnits(labels.guardUnassessedNote));
+  }
+  if (doc.relation?.kind === 'ok') {
+    message.reserveLine('relProposalNote', fixedLineUnits(labels.relationProposalNote));
+    message.reserveLine('relTechnicalNote', fixedLineUnits(labels.relationTechnicalNote));
+    message.reserveLine('relNoCandidateNote', fixedLineUnits(labels.relationNoCandidateNote));
+  }
+  if (doc.guard !== null && doc.guard.kind !== 'ok') {
+    message.reserveLine(
+      'guardState',
+      labeledLineUnits(labels.labelGuard, reportStateLine(doc.guard.kind, labels)),
+    );
+  }
+  if (doc.discovery !== null && doc.discovery.kind !== 'ok') {
+    message.reserveLine(
+      'discoveryState',
+      labeledLineUnits(labels.labelCandidates, reportStateLine(doc.discovery.kind, labels)),
+    );
+  }
+  if (doc.assessment !== null && doc.assessment.kind !== 'ok') {
+    message.reserveLine(
+      'assessmentState',
+      labeledLineUnits(labels.labelCandidates, reportStateLine(doc.assessment.kind, labels)),
+    );
+  }
+  if (doc.mentions !== null && doc.mentions.kind !== 'ok') {
+    message.reserveLine(
+      'mentionsState',
+      labeledLineUnits(labels.labelMentions, reportStateLine(doc.mentions.kind, labels)),
+    );
+  }
+  if (doc.relation !== null && doc.relation.kind !== 'ok') {
+    message.reserveLine(
+      'relationState',
+      labeledLineUnits(labels.labelRelation, reportStateLine(doc.relation.kind, labels)),
+    );
+  }
+
   message.addLabeledValue(labels.labelHeadline, doc.headlineFa, {
     valueSeparator: ': ',
     valueBudget: FIELD_BUDGETS.headline,
@@ -422,15 +539,20 @@ export function renderDraftDetail(
     { valueBudget: FIELD_BUDGETS.idValue },
   );
 
-  // Model claims — bounded samples, explicitly UNVERIFIED.
-  message.addFixed(
-    (remaining) => boundedEscaped(labels.labelClaims, remaining).text as TelegramSafeHtml,
-  );
+  // Model claims — bounded samples, explicitly UNVERIFIED. The section
+  // header carries the mandatory UNVERIFIED distinction (R1.18.1 — S1):
+  // it is added under its reservation, never crowded out by content.
+  message.addReservedFixed('claimsHeader', labels.labelClaims);
   if (doc.claimSamples.length === 0) {
     message.addFixed(
       (remaining) => boundedEscaped(labels.valueUnavailable, remaining).text as TelegramSafeHtml,
     );
   } else {
+    if (doc.claimSamplesDropped) {
+      // R1.18.1 (C1): entries omitted by caps are an honest truncation, not
+      // a silent completeness claim.
+      message.flagTruncated();
+    }
     doc.claimSamples.slice(0, CLAIM_SAMPLES_SHOWN).forEach((claim, index) => {
       message.addFragment((remaining) => {
         const label = escapeTelegramHtml(`${labels.labelClaimSample} ${index + 1}: `);
@@ -452,12 +574,10 @@ export function renderDraftDetail(
       });
     });
   }
-  message.addFixed(
-    (remaining) => boundedEscaped(labels.claimsUnverifiedNote, remaining).text as TelegramSafeHtml,
-  );
+  message.addReservedFixed('claimsNote', labels.claimsUnverifiedNote);
 
   // Evidence guard — direct-text/unresolved summary + unassessed warning.
-  addReportState(message, labels.labelGuard, doc.guard, labels);
+  addReportState(message, labels.labelGuard, doc.guard, labels, 'guardState');
   if (doc.guard?.kind === 'ok') {
     const guard = doc.guard.report;
     message.addLabeledValue(
@@ -472,14 +592,12 @@ export function renderDraftDetail(
     if (statuses.length > 0) {
       message.addLabeledValue(labels.labelGuard, statuses);
     }
-    message.addFixed(
-      (remaining) => boundedEscaped(labels.guardUnassessedNote, remaining).text as TelegramSafeHtml,
-    );
+    message.addReservedFixed('guardNote', labels.guardUnassessedNote);
   }
 
   // Candidates (discovery + assessment) — historical observations only.
-  addReportState(message, labels.labelCandidates, doc.discovery, labels);
-  addReportState(message, labels.labelCandidates, doc.assessment, labels);
+  addReportState(message, labels.labelCandidates, doc.discovery, labels, 'discoveryState');
+  addReportState(message, labels.labelCandidates, doc.assessment, labels, 'assessmentState');
   if (doc.discovery?.kind === 'ok') {
     const discovery = doc.discovery.report;
     message.addLabeledValue(
@@ -494,12 +612,10 @@ export function renderDraftDetail(
       `assessment: ${assessment.observation} · ${assessment.counts.assessed}`,
     );
   }
-  message.addFixed(
-    (remaining) => boundedEscaped(labels.candidatesNote, remaining).text as TelegramSafeHtml,
-  );
+  message.addReservedFixed('candidatesNote', labels.candidatesNote);
 
   // Entity mentions — historical observation only.
-  addReportState(message, labels.labelMentions, doc.mentions, labels);
+  addReportState(message, labels.labelMentions, doc.mentions, labels, 'mentionsState');
   if (doc.mentions?.kind === 'ok') {
     const mentions = doc.mentions.report;
     message.addLabeledValue(
@@ -509,11 +625,16 @@ export function renderDraftDetail(
   }
 
   // Event relation — proposals vs technical states.
-  addReportState(message, labels.labelRelation, doc.relation, labels);
+  addReportState(message, labels.labelRelation, doc.relation, labels, 'relationState');
   if (doc.relation?.kind === 'ok') {
     const relation = doc.relation.report;
     message.addLabeledValue(labels.labelRelation, `observation: ${relation.observation}`);
-    const pairs = relation.pairs.slice(0, 2);
+    const pairEntries = relation.pairs;
+    const pairs = pairEntries.slice(0, 2);
+    if (pairEntries.length > pairs.length) {
+      // Pair cap (≤2) hit: honest omission, never silent completeness.
+      message.flagTruncated();
+    }
     pairs.forEach((pair, index) => {
       message.addFragment((remaining) => {
         const head = escapeTelegramHtml(
@@ -533,12 +654,40 @@ export function renderDraftDetail(
         ) {
           parts.push(escapeTelegramHtml('B: ') + telegramCode(pair.sideB.storyId));
         }
-        const reasonLines = (pair.reasons ?? []).slice(0, RELATION_REASONS_MAX);
+        const reasonEntries = pair.reasons ?? [];
+        const reasonLines = reasonEntries.slice(0, RELATION_REASONS_MAX);
+        if (reasonEntries.length > reasonLines.length) {
+          message.flagTruncated();
+        }
         for (const reason of reasonLines) {
           const bounded = boundedEscaped(reason, FIELD_BUDGETS.reason);
+          if (bounded.truncated) {
+            message.flagTruncated();
+          }
           parts.push(escapeTelegramHtml('· ') + bounded.text);
         }
-        const referenceLines = (pair.references ?? []).slice(0, RELATION_REFERENCES_MAX);
+        // R1.18.1 (C1): the pair's STORED conflicts — bounded escaped text,
+        // DISTINCT from reasons, verbatim (never translated, replaced or
+        // inferred; no new assessment runs). Honest omission/truncation.
+        const conflictEntries = pair.conflicts ?? [];
+        const conflictLines = conflictEntries.slice(0, RELATION_CONFLICTS_MAX);
+        if (conflictEntries.length > conflictLines.length) {
+          message.flagTruncated();
+        }
+        for (const conflict of conflictLines) {
+          const bounded = boundedEscaped(conflict, FIELD_BUDGETS.conflict);
+          if (bounded.truncated) {
+            message.flagTruncated();
+          }
+          if (bounded.text.length > 0) {
+            parts.push(escapeTelegramHtml('conflict: ') + bounded.text);
+          }
+        }
+        const referenceEntries = pair.references ?? [];
+        const referenceLines = referenceEntries.slice(0, RELATION_REFERENCES_MAX);
+        if (referenceEntries.length > referenceLines.length) {
+          message.flagTruncated();
+        }
         if (referenceLines.length > 0) {
           parts.push(
             escapeTelegramHtml(`${labels.labelEvidenceIds}: `) +
@@ -548,7 +697,11 @@ export function renderDraftDetail(
           );
         }
         // The pair's REAL adjudication run ids (honest provenance; ≤2 shown).
-        const runLines = (pair.aiRunIds ?? []).slice(0, 2);
+        const runEntries = pair.aiRunIds ?? [];
+        const runLines = runEntries.slice(0, 2);
+        if (runEntries.length > runLines.length) {
+          message.flagTruncated();
+        }
         if (runLines.length > 0) {
           parts.push(
             escapeTelegramHtml('runs: ') +
@@ -557,24 +710,18 @@ export function renderDraftDetail(
         }
         const joined = parts.join(escapeTelegramHtml(' · ')) as TelegramSafeHtml;
         if (joined.length > remaining) {
+          // The pair tail does not fit: head-only plus an HONEST truncation
+          // signal — never a silent completeness implication (R1.18.1 — C1).
+          message.flagTruncated();
           const headOnly = head.length <= remaining ? (head as TelegramSafeHtml) : null;
           return headOnly;
         }
         return joined;
       });
     });
-    message.addFixed(
-      (remaining) =>
-        boundedEscaped(labels.relationProposalNote, remaining).text as TelegramSafeHtml,
-    );
-    message.addFixed(
-      (remaining) =>
-        boundedEscaped(labels.relationTechnicalNote, remaining).text as TelegramSafeHtml,
-    );
-    message.addFixed(
-      (remaining) =>
-        boundedEscaped(labels.relationNoCandidateNote, remaining).text as TelegramSafeHtml,
-    );
+    message.addReservedFixed('relProposalNote', labels.relationProposalNote);
+    message.addReservedFixed('relTechnicalNote', labels.relationTechnicalNote);
+    message.addReservedFixed('relNoCandidateNote', labels.relationNoCandidateNote);
   }
 
   return message.finish();

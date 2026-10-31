@@ -59,7 +59,7 @@ import {
   type TelegramSafeHtml,
 } from './telegram-html';
 import { roleHasPermission } from './roles';
-import { parseDraftsArgument } from './review-command';
+import { parseDraftsArgument, type DraftsArgumentParse } from './review-command';
 import { ADMIN_REVIEW_STRINGS, REVIEW_COMMAND } from './review-strings';
 import type { ParsedUpdate } from '../adapters/telegram/update-parser';
 import {
@@ -190,20 +190,52 @@ export function denialText(): TelegramSafeHtml {
 }
 
 /**
- * Extract the WHOLE remainder after the command token ("/language fa",
- * "/language@bot fa extra") — bounded by the command-shape grammar. The
- * result is passed through `normalizeAdminUiLanguage`: a single-token
- * "en"/"fa" (case/space-insensitive) is accepted, while multi-token or
- * unknown remainders are rejected as malformed — a strict admin-facing
- * config command never silently ignores trailing input.
+ * Whole command remainder extraction (R1.18.1 — V1 correctness).
+ *
+ * THREE distinguishable states — never conflated:
+ * - `none`: the command token IS the whole text (or there is no text) —
+ *   the documented no-argument form;
+ * - `remainder`: a `[ \t]+` separator followed by the WHOLE actual
+ *   remaining text (which may still contain newlines/control characters —
+ *   the command's own whole-value validator owns their rejection);
+ * - `malformed`: something follows the command token that is NOT a
+ *   `[ \t]` separator (e.g. a newline directly after `/drafts`) — an
+ *   argument-grammar failure, NEVER the no-argument form.
+ *
+ * V1 root cause: the previous single-regex capture (`(?:[ \t]+(.*))?$`)
+ * could not match newline-bearing input AT ALL, so a malformed whole
+ * argument was indistinguishable from no argument and the review parser
+ * mis-read the grammar failure as the list action (one editorial SELECT
+ * for garbage). Extraction now slices the ACTUAL remainder — partial
+ * matches are impossible — and the command-specific validators reject
+ * newline/control/extra-token arguments BEFORE any editorial SQL.
  */
-const COMMAND_ARGUMENT_PATTERN = /^\/[A-Za-z0-9_]{1,32}(?:@[A-Za-z0-9_]{1,64})?(?:[ \t]+(.*))?$/;
+const COMMAND_TOKEN_PATTERN = /^\/[A-Za-z0-9_]{1,32}(?:@[A-Za-z0-9_]{1,64})?/;
 
-function commandArgumentRemainder(text: string | undefined): string | undefined {
+type CommandRemainder =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'remainder'; readonly text: string }
+  | { readonly kind: 'malformed' };
+
+function commandRemainder(text: string | undefined): CommandRemainder {
   if (text === undefined) {
-    return undefined;
+    return { kind: 'none' };
   }
-  return COMMAND_ARGUMENT_PATTERN.exec(text)?.[1];
+  const match = COMMAND_TOKEN_PATTERN.exec(text);
+  // extractBotCommand validated the command-token shape before routing, so
+  // a no-match here is defensive-only — and NEVER the no-argument form.
+  if (match === null) {
+    return { kind: 'malformed' };
+  }
+  const rest = text.slice(match[0].length);
+  if (rest.length === 0) {
+    return { kind: 'none' };
+  }
+  const separator = rest[0];
+  if (separator !== ' ' && separator !== '\t') {
+    return { kind: 'malformed' };
+  }
+  return { kind: 'remainder', text: rest.replace(/^[ \t]+/u, '') };
 }
 
 function startResponse(ui: AdminUiLanguage): TelegramSafeHtml {
@@ -355,7 +387,16 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
       if (chatId === undefined) {
         return { type: 'noop', reason: 'unroutable_message' };
       }
-      const parsedArgument = parseDraftsArgument(commandArgumentRemainder(update.text));
+      // R1.18.1 (V1): argument-grammar failure is NEVER the list action.
+      // Only `none` is the documented no-argument list form; a captured
+      // remainder is validated as a WHOLE (newlines, control characters,
+      // extra tokens and oversize ids are all rejected BEFORE any editorial
+      // SQL could exist); an unsupported separator is honest invalid usage.
+      const remainder = commandRemainder(update.text);
+      const parsedArgument: DraftsArgumentParse =
+        remainder.kind === 'malformed'
+          ? { kind: 'invalid' }
+          : parseDraftsArgument(remainder.kind === 'none' ? undefined : remainder.text);
       if (parsedArgument.kind === 'list') {
         return { type: 'drafts_list', chatId, uiLanguage: reviewUi };
       }
@@ -421,7 +462,12 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
       // id), but typed defensively — never invent an identity.
       return { type: 'noop', reason: 'unroutable_message' };
     }
-    const argument = commandArgumentRemainder(update.text);
+    // R1.18.1: the language command keeps its EXACT existing behavior —
+    // no argument AND an unparsable argument both fall through to the
+    // status response (a grammar failure was and stays a status response
+    // here, never a state change).
+    const languageRemainder = commandRemainder(update.text);
+    const argument = languageRemainder.kind === 'remainder' ? languageRemainder.text : undefined;
     const language = argument === undefined ? undefined : normalizeAdminUiLanguage(argument);
     if (language === undefined) {
       // No argument or malformed argument: honest localized status/usage

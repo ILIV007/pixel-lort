@@ -951,6 +951,15 @@ independent decisions; executing them is NOT part of this round.
       HTML, ZERO editorial writes/provider calls; offline demo
       `npm run demo:editorial-review`. Explicit early Phase 9A dependency
       pull-forward — NOT a Phase 5/6/9 completion; NO approval/publishing.
+- [x] R1.18.1 review-correctness correction (app 1.13.1; ADR-0046 addendum;
+      schema still 3): the three ORIGINAL Posidon counterexamples closed —
+      S1 mandatory safety/report-state lines RESERVED before variable
+      content (long stored text truncates more; mandatory distinctions never
+      drop); V1 newline-bearing malformed `/drafts` arguments rejected as
+      grammar failures BEFORE any editorial SQL (never the list action);
+      C1 stored conflicts rendered verbatim, distinct from reasons, with
+      honest omission/truncation signals; original probes kept verbatim in
+      `admin-review-originals.test.ts`.
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ⬜
