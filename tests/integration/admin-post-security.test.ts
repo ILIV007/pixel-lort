@@ -574,3 +574,148 @@ describe('R1.20-R approval binding — the previewed version contract (service l
     expect(versions?.count).toBe(1);
   });
 });
+
+describe('R1.20-R approval binding — the OPTIONAL fingerprint contract', () => {
+  let executor: DbExecutor;
+  let clock: ReturnType<typeof mutableClock>;
+
+  beforeEach(async () => {
+    await applyMigrations(env.DB);
+    executor = createDbExecutor(env.DB);
+    for (const table of [
+      'admin_post_publications',
+      'admin_post_approvals',
+      'admin_post_preview_sessions',
+      'admin_post_versions',
+      'admin_post_drafts',
+      'admin_action_tokens',
+      'admins',
+    ]) {
+      await executor.run({ sql: `DELETE FROM ${table}` });
+    }
+    await executor.run({
+      sql: `INSERT INTO admins (telegram_user_id, display_name, role, status, created_at, updated_at)
+            VALUES (?, 'Owner', 'owner', 'active', 1, 1)`,
+      params: [OWNER_ID],
+    });
+    clock = mutableClock(1_700_000_000_000);
+  });
+
+  function makeService(livePublishEnabled = true) {
+    return createAdminPostService({
+      executor,
+      clock,
+      logger: createLogger({ level: 'error', sink: () => {} }),
+      config: { livePublishEnabled, destination: '@pixellores' },
+    });
+  }
+
+  it('omitting the payload fingerprint bypasses NOTHING: the SERVER-SIDE binding still approves the right version and still rejects moved content', async () => {
+    const service = makeService(false);
+    await service.capture({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 7300,
+      text: 'متن بدون اثر انگشت در توکن',
+      richText: undefined,
+      richCaptionPresent: false,
+      hasMediaAttachment: false,
+    });
+    const preview = await service.preview({
+      chatId: OWNER_ID,
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 7301,
+    });
+    if (preview.kind !== 'preview') throw new Error('unreachable');
+    const approveToken = preview.buttons[0]?.[0]?.callbackData.slice(2) ?? '';
+
+    // Strip BOTH fingerprint and version from the token payload: the callback
+    // now carries ONLY the opaque token + session id. The binding must hold
+    // purely through the durable session + stored version rows.
+    await executor.run({
+      sql: 'UPDATE admin_action_tokens SET payload_json = ? WHERE id = ?',
+      params: [JSON.stringify({ sessionId: undefined }), approveToken],
+    });
+    // payload.sessionId undefined would fail the session check — extract the
+    // REAL session id from the sessions table first, then store the reduced
+    // payload (this is exactly what a "fingerprint-optional" client does).
+    const session = await executor.first<{ id: string }>({
+      sql: 'SELECT id FROM admin_post_preview_sessions ORDER BY created_at_ms DESC LIMIT 1',
+    });
+    await executor.run({
+      sql: 'UPDATE admin_action_tokens SET payload_json = ? WHERE id = ?',
+      params: [JSON.stringify({ sessionId: session?.id }), approveToken],
+    });
+
+    const approved = await service.handleCallback({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      token: approveToken,
+    });
+    expect(approved.kind).toBe('answer');
+    if (approved.kind !== 'answer') throw new Error('unreachable');
+    // The binding held: the approval succeeded WITHOUT any fingerprint in
+    // the payload — because the SERVER-SIDE session + stored version agree.
+    expect(approved.callbackText).toContain('APPROVED');
+
+    // The bypass-prevention direction: strip the fingerprint from a token
+    // for an OLDER version after the content moved — still rejected.
+    await service.capture({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 7302,
+      text: 'متن نسخهٔ دو — محتوا عوض شد',
+      richText: undefined,
+      richCaptionPresent: false,
+      hasMediaAttachment: false,
+    });
+    const preview2 = await service.preview({
+      chatId: OWNER_ID,
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 7303,
+    });
+    if (preview2.kind !== 'preview') throw new Error('unreachable');
+    void preview2; // v2 preview is irrelevant; the v1 session is stale now
+    const staleSession = await executor.first<{ id: string }>({
+      sql: `SELECT s.id FROM admin_post_preview_sessions s
+            JOIN admin_post_versions v ON v.draft_id = s.draft_id AND v.version = s.version
+            WHERE v.version = 1
+            ORDER BY s.created_at_ms DESC LIMIT 1`,
+    });
+    expect(staleSession).not.toBeNull();
+    const staleToken = (await import('../../src/domain/admin-post/fingerprint')).randomToken();
+    const { issueActionToken } = await import('../../src/adapters/telegram/action-tokens');
+    await issueActionToken(executor, {
+      token: staleToken,
+      telegramUserId: OWNER_ID,
+      permission: 'publication.publish',
+      action: 'admin_post.publish',
+      targetType: 'admin_post_draft',
+      targetId:
+        (await executor.first<{ id: string }>({ sql: 'SELECT id FROM admin_post_drafts' }))?.id ??
+        '',
+      // fingerprint OMITTED on purpose — only version + stale session
+      payloadJson: JSON.stringify({ version: 1, sessionId: staleSession?.id }),
+      expiresAtMs: clock.now() + 60_000,
+      nowMs: clock.now(),
+    });
+    const stale = await service.handleCallback({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      token: staleToken,
+    });
+    expect(stale.kind).toBe('answer');
+    if (stale.kind !== 'answer') throw new Error('unreachable');
+    // The draft head moved to version 2 — the v1 session cannot act even
+    // though the payload carried no fingerprint to "mismatch".
+    expect(stale.callbackText).toContain('newer version');
+  });
+});
