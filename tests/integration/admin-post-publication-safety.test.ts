@@ -59,6 +59,12 @@ function fakeTransport(behavior: 'ok' | 'timeout' = 'ok'): {
         }
         return { messageId: 777 };
       },
+      async sendPhotoRich() {
+        return { messageId: 777 };
+      },
+      async sendVideoRich() {
+        return { messageId: 777 };
+      },
     },
   };
 }
@@ -319,7 +325,7 @@ describe('R1.20-R service-level publish safety', () => {
       hasText: true,
       text: 'پست تست ایمنی',
       richText: undefined,
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview = await service.preview({

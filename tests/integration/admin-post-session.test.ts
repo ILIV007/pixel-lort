@@ -219,18 +219,35 @@ describe('R1.20-R1 — the explicit capture session (real webhook, real D1)', ()
     });
     expect(edited.status).toBe(503);
 
-    // Media with caption: explicit rejection.
+    // R1.21: an UNSUPPORTED media type (document) is still an explicit
+    // rejection — a single photo/video with an optional caption is now a
+    // complete post, but every other media shape never is.
     const media = await deliver(FLAG_ON_ENV, {
       update_id: 9152,
       message: {
         message_id: 9152,
         chat: { id: EDITOR_ID, type: 'private' },
         from: { id: EDITOR_ID },
-        photo: [{ file_id: 'x', file_unique_id: 'y', width: 1, height: 1 }],
-        caption: 'کپشن به‌تنهایی پست نیست',
+        document: { file_id: 'doc_file_id_x', file_unique_id: 'y' },
+        caption: 'کپشن سند به‌تنهایی پست نیست',
       },
     });
     expect(media.status).toBe(503);
+
+    // R1.21: an ALBUM member (media_group_id present) is rejected explicitly
+    // even when it is a photo — a single album member is never degraded
+    // into a post.
+    const album = await deliver(FLAG_ON_ENV, {
+      update_id: 9152,
+      message: {
+        message_id: 9152,
+        chat: { id: EDITOR_ID, type: 'private' },
+        from: { id: EDITOR_ID },
+        photo: [{ file_id: 'album_photo_id', file_unique_id: 'y', width: 10, height: 10 }],
+        media_group_id: 'group-1',
+      },
+    });
+    expect(album.status).toBe(503);
 
     // Oversize text: explicit rejection.
     const oversize = await deliver(FLAG_ON_ENV, textUpdate(9153, EDITOR_ID, 'a'.repeat(4100)));

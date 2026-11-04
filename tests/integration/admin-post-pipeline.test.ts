@@ -8,7 +8,7 @@ import {
   type AdminPostTransport,
 } from '../../src/application/admin-post/admin-post-service';
 import { findPrimaryPublication, getApproval } from '../../src/adapters/db/admin-post-store';
-import { readRichTextEnvelope } from '../../src/domain/telegram/rich-text-envelope';
+import { readPostContentDocument } from '../../src/domain/admin-post/post-content';
 import type { Clock } from '../../src/shared/time/clock';
 
 /**
@@ -71,6 +71,12 @@ function createFakeTransport(behavior: 'ok' | 'timeout' | 'forbidden' = 'ok'): {
             retryable: false,
           });
         }
+        return { messageId: 4242 };
+      },
+      async sendPhotoRich() {
+        return { messageId: 4242 };
+      },
+      async sendVideoRich() {
         return { messageId: 4242 };
       },
     },
@@ -153,7 +159,7 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     expect(captured.kind).toBe('reply');
@@ -175,16 +181,19 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       params: [draftId],
     });
     expect(versionRow).not.toBeNull();
-    const read = readRichTextEnvelope(versionRow?.envelope_json ?? '');
+    // R1.21: the stored document is the versioned POST-CONTENT document —
+    // re-read through the defensive post-content reader.
+    const read = readPostContentDocument(versionRow?.envelope_json ?? '');
     expect(read.ok).toBe(true);
-    if (read.ok) {
-      expect(read.envelope.text).toBe(POST_TEXT);
-      expect(read.envelope.kind).toBe('text');
-      expect(read.envelope.entities).toHaveLength(3);
-      expect(read.envelope.entities[0]?.type).toBe('bold');
-      expect(read.envelope.entities[1]?.type).toBe('text_link');
-      expect(read.envelope.entities[1]?.url).toBe('https://example.com/pixel');
-      expect(read.envelope.entities[2]?.type).toBe('mention');
+    if (read.ok && read.kind === 'document') {
+      expect(read.document.media).toBe('none');
+      expect(read.document.text?.text).toBe(POST_TEXT);
+      expect(read.document.text?.kind).toBe('text');
+      expect(read.document.text?.entities).toHaveLength(3);
+      expect(read.document.text?.entities[0]?.type).toBe('bold');
+      expect(read.document.text?.entities[1]?.type).toBe('text_link');
+      expect(read.document.text?.entities[1]?.url).toBe('https://example.com/pixel');
+      expect(read.document.text?.entities[2]?.type).toBe('mention');
     }
   });
 
@@ -211,7 +220,7 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
 
@@ -225,8 +234,9 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
     expect(preview.kind).toBe('preview');
     if (preview.kind !== 'preview') throw new Error('unreachable');
     // The preview content is the EXACT stored text + validated entities.
-    expect(preview.content.text).toBe(POST_TEXT);
-    expect(preview.content.entities).toHaveLength(3);
+    expect(preview.content.media).toBe('none');
+    expect(preview.content.text?.text).toBe(POST_TEXT);
+    expect(preview.content.text?.entities).toHaveLength(3);
     // Owner holds both permissions -> both buttons.
     expect(preview.buttons[0]).toHaveLength(2);
 
@@ -282,7 +292,7 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview = await service.preview({
@@ -358,7 +368,7 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview = await service.preview({
@@ -467,7 +477,7 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       hasText: true,
       text: 'متن ساده بدون قالب‌بندی',
       richText: undefined,
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview = await service.preview({

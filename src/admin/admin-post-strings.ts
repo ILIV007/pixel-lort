@@ -11,8 +11,8 @@ type Localized = Readonly<Record<AdminUiLanguage, string>>;
 
 export const ADMIN_POST_STRINGS = {
   sessionStarted: {
-    en: 'Capture session OPEN. Send the post TEXT now — every plain text message you send becomes a new draft version until you use /post_cancel.',
-    fa: 'نشست ثبت باز شد. اکنون متن پست را بفرستید — هر پیام متنی سادهٔ شما تا استفاده از /post_cancel به یک نسخهٔ جدید پیش‌نویس تبدیل می‌شود.',
+    en: 'Capture session OPEN. Send the post TEXT — or a single PHOTO/VIDEO with an optional caption — every message you send becomes a new draft version until you use /post_cancel.',
+    fa: 'نشست ثبت باز شد. متن پست — یا یک عکس/ویدئوی تکی با کپشن اختیاری — بفرستید؛ هر پیامی که بفرستید تا استفاده از /post_cancel به یک نسخهٔ جدید پیش‌نویس تبدیل می‌شود.',
   } satisfies Localized,
   sessionAlreadyOpen: {
     en: 'The capture session is ALREADY open — keep sending the post text, or use /post_cancel to stop capturing.',
@@ -34,21 +34,33 @@ export const ADMIN_POST_STRINGS = {
     en: 'REJECTED: no OPEN draft with that id exists.',
     fa: 'رد شد: پیش‌نویس بازی با آن شناسه وجود ندارد.',
   } satisfies Localized,
-  captureSaved: (version: number): Localized => ({
-    en: `Post captured as version ${version}. Send updated text to create the next version; use /post_preview for a faithful preview.`,
-    fa: `پست به‌عنوان نسخهٔ ${version} ذخیره شد. برای نسخهٔ بعدی متن جدید بفرستید؛ برای پیش‌نمایش وفادار از /post_preview استفاده کنید.`,
+  captureSaved: (draftId: string, version: number): Localized => ({
+    en: `Post captured as version ${version}. Draft id: ${draftId} — share this id with a reviewer for /post_preview <draftId>.`,
+    fa: `پست به‌عنوان نسخهٔ ${version} ذخیره شد. شناسهٔ پیش‌نویس: ${draftId} — این شناسه را برای /post_preview <شناسه> در اختیار بررسی‌کننده بگذارید.`,
   }),
-  captureUpdated: (version: number): Localized => ({
-    en: `Draft updated to version ${version}. Previous approvals for older versions are now INVALID.`,
-    fa: `پیش‌نویس به نسخهٔ ${version} به‌روزرسانی شد. تأییدهای نسخه‌های قبلی دیگر معتبر نیستند.`,
+  captureUpdated: (draftId: string, version: number): Localized => ({
+    en: `Draft ${draftId} updated to version ${version}. Previous approvals for older versions are now INVALID.`,
+    fa: `پیش‌نویس ${draftId} به نسخهٔ ${version} به‌روزرسانی شد. تأییدهای نسخه‌های قبلی دیگر معتبر نیستند.`,
   }),
   captureAlreadyCaptured: {
     en: 'This update was already captured (duplicate delivery).',
     fa: 'این به‌روزرسانی قبلاً ثبت شده است (ارسال تکراری).',
   } satisfies Localized,
   captureMediaRejected: {
-    en: 'REJECTED: media posts are not supported yet. Send TEXT only — a caption is never treated as a complete post.',
-    fa: 'رد شد: پستِ رسانه‌ای هنوز پشتیبانی نمی‌شود. فقط متن بفرستید؛ کپشن به‌تنهایی هرگز پست کامل محسوب نمی‌شود.',
+    en: 'REJECTED: this media type is not supported. Only ONE photo or ONE video (with an optional caption), or plain TEXT, is accepted — albums and every other media type are rejected; a caption alone is never a complete post.',
+    fa: 'رد شد: این نوع رسانه پشتیبانی نمی‌شود. فقط یک عکس یا یک ویدئوی تکی (با کپشن اختیاری) یا متن ساده پذیرفته می‌شود — آلبوم و هر نوع رسانهٔ دیگری رد می‌شود؛ کپشن به‌تنهایی هرگز پست کامل محسوب نمی‌شود.',
+  } satisfies Localized,
+  captureAlbumRejected: {
+    en: 'REJECTED: albums (grouped media) are not supported. Send ONE photo or ONE video as a standalone message.',
+    fa: 'رد شد: آلبوم (رسانه‌های گروهی) پشتیبانی نمی‌شود. یک عکس یا یک ویدئو را به‌صورت پیام جداگانه بفرستید.',
+  } satisfies Localized,
+  captureMediaCaptionRejected: {
+    en: 'REJECTED: the caption is beyond the 1024-character limit or its formatting metadata is malformed. Nothing was saved.',
+    fa: 'رد شد: کپشن از سقف ۱۰۲۴ نویسه بیشتر است یا فرادادهٔ قالب‌بندی آن ناقص است. چیزی ذخیره نشد.',
+  } satisfies Localized,
+  captureMediaFileInvalid: {
+    en: 'REJECTED: the media attachment has no usable file reference. Nothing was saved.',
+    fa: 'رد شد: رسانهٔ پیام مرجع فایل قابل‌استفاده ندارد. چیزی ذخیره نشد.',
   } satisfies Localized,
   captureRichMalformed: {
     en: 'REJECTED: the message rich-text metadata is malformed. Content was NOT saved.',
@@ -97,6 +109,22 @@ export const ADMIN_POST_STRINGS = {
   statusNoDraft: {
     en: 'No open draft.',
     fa: 'پیش‌نویس بازی وجود ندارد.',
+  } satisfies Localized,
+  statusDraftId: (draftId: string): Localized => ({
+    en: `Draft id: ${draftId}`,
+    fa: `شناسهٔ پیش‌نویس: ${draftId}`,
+  }),
+  statusDraftStatus: (status: string): Localized => ({
+    en: `Draft status: ${status}`,
+    fa: `وضعیت پیش‌نویس: ${status}`,
+  }),
+  statusInvalidUsage: {
+    en: 'Invalid usage. Use /post_status (your own open draft) or /post_status <draftId>.',
+    fa: 'استفادهٔ نامعتبر. از /post_status (پیش‌نویس باز خودتان) یا /post_status <شناسهٔ پیش‌نویس> استفاده کنید.',
+  } satisfies Localized,
+  statusPermissionDenied: {
+    en: 'REJECTED: your role does not hold the publication permission required to view another draft\'s publication state.',
+    fa: 'رد شد: نقش شما مجوز انتشار لازم برای دیدن وضعیت انتشار پیش‌نویس دیگری را ندارد.',
   } satisfies Localized,
   statusVersion: (version: number): Localized => ({
     en: `Current version: ${version}`,
@@ -151,8 +179,8 @@ export const ADMIN_POST_STRINGS = {
     fa: 'انتشار در کانال',
   } satisfies Localized,
   previewControlHeader: (version: number): Localized => ({
-    en: `Preview of version ${version} — the message above is the EXACT stored text and entities.`,
-    fa: `پیش‌نمایش نسخهٔ ${version} — پیام بالا دقیقاً متن و موجودیت‌های ذخیره‌شده است.`,
+    en: `Preview of version ${version} — the message above is the EXACT stored content (text/media + entities).`,
+    fa: `پیش‌نمایش نسخهٔ ${version} — پیام بالا دقیقاً محتوای ذخیره‌شده است (متن/رسانه + موجودیت‌ها).`,
   }),
   approveDone: (version: number): Localized => ({
     en: `Version ${version} APPROVED (bound to the previewed content).`,
@@ -217,6 +245,14 @@ export const ADMIN_POST_STRINGS = {
   publishFailedDefinitive: {
     en: 'Publish FAILED definitively (nothing was sent). No auto-retry.',
     fa: 'انتشار به‌طور قطعی ناموفق بود (چیزی ارسال نشد). تلاش مجدد خودکار وجود ندارد.',
+  } satisfies Localized,
+  publishContentChanged: {
+    en: 'Publish BLOCKED: the stored content no longer matches the approved content. Nothing was sent; verify the draft with a fresh preview.',
+    fa: 'انتشار متوقف شد: محتوای ذخیره‌شده دیگر با محتوای تأییدشده مطابقت ندارد. چیزی ارسال نشد؛ پیش‌نویس را با یک پیش‌نمایش تازه بررسی کنید.',
+  } satisfies Localized,
+  publishMediaFileFailed: {
+    en: 'Publish FAILED: the media file reference was rejected (invalid, expired, or unusable file). Nothing was sent.',
+    fa: 'انتشار ناموفق بود: مرجع فایل رسانه رد شد (فایل نامعتبر، منقضی یا غیرقابل‌استفاده). چیزی ارسال نشد.',
   } satisfies Localized,
   publishUncertain: {
     en: 'Publish OUTCOME UNKNOWN (timeout). The message MAY have arrived. Check /post_status — nothing is auto-resent.',

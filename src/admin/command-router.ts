@@ -62,7 +62,11 @@ import {
 import { roleHasPermission } from './roles';
 import { parseDraftsArgument, type DraftsArgumentParse } from './review-command';
 import { ADMIN_REVIEW_STRINGS, REVIEW_COMMAND } from './review-strings';
-import type { ParsedRichTextExtraction, ParsedUpdate } from '../adapters/telegram/update-parser';
+import type {
+  ParsedMediaAttachment,
+  ParsedRichTextExtraction,
+  ParsedUpdate,
+} from '../adapters/telegram/update-parser';
 import { ADMIN_POST_STRINGS } from './admin-post-strings';
 import {
   ADMIN_UI_DENIAL_TEXT,
@@ -200,7 +204,15 @@ export type TelegramAction =
       readonly text: string | undefined;
       readonly hasText: boolean;
       readonly richText: ParsedRichTextExtraction | undefined;
-      readonly richCaptionPresent: boolean;
+      /**
+       * R1.21: the typed SINGLE-media extraction (photo/video file_id or
+       * 'unsupported'); undefined = no media on the message.
+       */
+      readonly media: ParsedMediaAttachment | undefined;
+      /** R1.21: the FULL caption extraction, when a caption is present. */
+      readonly richCaption: ParsedRichTextExtraction | undefined;
+      /** R1.21: the message belongs to an album (media_group_id present). */
+      readonly inMediaGroup: boolean;
       readonly hasMediaAttachment: boolean;
     }
   | {
@@ -216,12 +228,20 @@ export type TelegramAction =
       readonly draftId?: string;
     }
   | {
-      /** R1.20-R: honest status of the caller's open draft (with the confirm-resend button when applicable). */
+      /**
+       * R1.20-R: honest status of the caller's open draft (with the
+       * confirm-resend button when applicable).
+       * R1.21: with an explicit draftId, a `publication.publish` holder
+       * views the publication state of ANY existing draft — the uncertain
+       * recovery path is reachable for the publisher of a post they did not
+       * create (enforced in the service).
+       */
       readonly type: 'admin_post_status';
       readonly chatId: number;
       readonly telegramUserId: number;
       readonly role: AdminRole;
       readonly uiLanguage: AdminUiLanguage;
+      readonly draftId?: string;
     }
   | {
       /** R1.20-R: cancel the caller's open draft and invalidate its approvals. */
@@ -553,14 +573,41 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
               ...(draftId !== undefined ? { draftId } : {}),
             };
           }
-          case 'post_status':
+          case 'post_status': {
+            // R1.21: `/post_status` is the caller's OWN open draft;
+            // `/post_status <draftId>` lets a publication.publish holder
+            // inspect any existing draft's publication state (the same
+            // whole-token argument grammar as /post_preview, validated
+            // BEFORE any service could exist).
+            const remainder = commandRemainder(update.text);
+            let draftId: string | undefined;
+            if (remainder.kind === 'malformed') {
+              return {
+                type: 'send_message',
+                chatId,
+                text: escapeTelegramHtml(ADMIN_POST_STRINGS.statusInvalidUsage[postUi]),
+              };
+            }
+            if (remainder.kind === 'remainder') {
+              const parsedArgument = parseDraftsArgument(remainder.text);
+              if (parsedArgument.kind !== 'detail') {
+                return {
+                  type: 'send_message',
+                  chatId,
+                  text: escapeTelegramHtml(ADMIN_POST_STRINGS.statusInvalidUsage[postUi]),
+                };
+              }
+              draftId = parsedArgument.draftId;
+            }
             return {
               type: 'admin_post_status',
               chatId,
               telegramUserId: update.fromUserId,
               role: actor.role,
               uiLanguage: postUi,
+              ...(draftId !== undefined ? { draftId } : {}),
             };
+          }
           case 'post_cancel':
             return {
               type: 'admin_post_cancel',
@@ -605,7 +652,9 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
             text: update.text,
             hasText: update.hasText === true,
             richText: update.richText,
-            richCaptionPresent: update.richCaption !== undefined,
+            media: update.media,
+            richCaption: update.richCaption,
+            inMediaGroup: update.inMediaGroup === true,
             hasMediaAttachment: update.hasMediaAttachment === true,
           };
         }
@@ -626,7 +675,9 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
           text: update.text,
           hasText: update.hasText === true,
           richText: update.richText,
-          richCaptionPresent: update.richCaption !== undefined,
+          media: update.media,
+          richCaption: update.richCaption,
+          inMediaGroup: update.inMediaGroup === true,
           hasMediaAttachment: update.hasMediaAttachment === true,
         };
       }

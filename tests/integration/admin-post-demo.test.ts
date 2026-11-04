@@ -92,6 +92,12 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
         });
         return { messageId: 31337 };
       },
+      async sendPhotoRich() {
+        return { messageId: 31337 };
+      },
+      async sendVideoRich() {
+        return { messageId: 31337 };
+      },
     };
     const service = createAdminPostService({
       executor,
@@ -122,7 +128,7 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
       hasText: true,
       text: '',
       richText: undefined,
-      richCaptionPresent: true,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: true,
     });
     expect(mediaRejected.kind).toBe('reply');
@@ -148,7 +154,7 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
       hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: ENTITIES },
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     expect(captured.kind).toBe('reply');
@@ -163,10 +169,11 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
     });
     expect(preview.kind).toBe('preview');
     if (preview.kind !== 'preview') throw new Error('unreachable');
-    expect(preview.content.text).toBe(POST_TEXT);
+    expect(preview.content.media).toBe('none');
+    expect(preview.content.text?.text).toBe(POST_TEXT);
     log(
       'PREVIEW (faithful)',
-      `re-read from D1: text matches EXACTLY (${preview.content.text.length} units), entities=${preview.content.entities.length}, control message separate`,
+      `re-read from D1: text matches EXACTLY (${preview.content.text?.text.length} units), entities=${preview.content.text?.entities.length}, control message separate`,
     );
 
     const approveToken = preview.buttons[0]?.[0]?.callbackData.slice(2) ?? '';
@@ -217,7 +224,7 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
       hasText: true,
       text: 'پست دوم برای نمایش نتیجهٔ نامشخص',
       richText: undefined,
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview2 = await service.preview({

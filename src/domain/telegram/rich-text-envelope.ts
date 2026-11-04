@@ -906,27 +906,12 @@ function entityFromWire(raw: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
- * Defensively re-read a stored canonical envelope document. Outcomes are
- * explicit and distinct: malformed_json / unsupported_version /
- * malformed_envelope / serialized_too_large, or the full validation reasons.
+ * Defensively re-validate an ALREADY-DECODED canonical envelope document
+ * (the value `JSON.parse` produced). Same strict shape/version/entity
+ * contract as `readRichTextEnvelope`, shared with container documents that
+ * embed an envelope as a nested object (R1.21 post-content document).
  */
-export function readRichTextEnvelope(json: string): RichTextOutcome {
-  if (typeof json !== 'string' || json.length === 0) {
-    return { ok: false, reason: 'malformed_envelope' };
-  }
-  // Chars <= bytes for UTF-8, so the char pre-check is a cheap bound first.
-  if (json.length > RICH_TEXT_LIMITS.maxSerializedBytes) {
-    return { ok: false, reason: 'serialized_too_large' };
-  }
-  if (new TextEncoder().encode(json).byteLength > RICH_TEXT_LIMITS.maxSerializedBytes) {
-    return { ok: false, reason: 'serialized_too_large' };
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return { ok: false, reason: 'malformed_json' };
-  }
+export function readRichTextEnvelopeValue(parsed: unknown): RichTextOutcome {
   if (!isPlainObject(parsed)) {
     return { ok: false, reason: 'malformed_envelope' };
   }
@@ -952,4 +937,29 @@ export function readRichTextEnvelope(json: string): RichTextOutcome {
       isPlainObject(entry) ? entityFromWire(entry) : entry,
     ),
   });
+}
+
+/**
+ * Defensively re-read a stored canonical envelope document. Outcomes are
+ * explicit and distinct: malformed_json / unsupported_version /
+ * malformed_envelope / serialized_too_large, or the full validation reasons.
+ */
+export function readRichTextEnvelope(json: string): RichTextOutcome {
+  if (typeof json !== 'string' || json.length === 0) {
+    return { ok: false, reason: 'malformed_envelope' };
+  }
+  // Chars <= bytes for UTF-8, so the char pre-check is a cheap bound first.
+  if (json.length > RICH_TEXT_LIMITS.maxSerializedBytes) {
+    return { ok: false, reason: 'serialized_too_large' };
+  }
+  if (new TextEncoder().encode(json).byteLength > RICH_TEXT_LIMITS.maxSerializedBytes) {
+    return { ok: false, reason: 'serialized_too_large' };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return { ok: false, reason: 'malformed_json' };
+  }
+  return readRichTextEnvelopeValue(parsed);
 }

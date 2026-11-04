@@ -12,7 +12,7 @@ import {
   getApproval,
   getVersion,
 } from '../../src/adapters/db/admin-post-store';
-import { readRichTextEnvelope } from '../../src/domain/telegram/rich-text-envelope';
+import { readPostContentDocument } from '../../src/domain/admin-post/post-content';
 
 /**
  * R1.20-R1 — the SAFE three-role flow over the REAL webhook + REAL D1:
@@ -260,13 +260,15 @@ describe('R1.20-R1 — the three-role flow (editor -> reviewer -> publisher)', (
     const ownerTokens = await latestPreviewTokens();
     await deliver(liveEnv, callbackUpdate(++updateSeq, OWNER_ID, ownerTokens.publish!));
 
-    // Read the STORED version bytes and re-derive the fingerprint.
+    // Read the STORED version bytes and re-derive the fingerprint from the
+    // re-read content (R1.21: the stored document is the post-content doc).
     const versionRow = await getVersion(executor, captured.draftId, captured.version);
-    const read = readRichTextEnvelope(versionRow!.envelope_json);
+    const read = readPostContentDocument(versionRow!.envelope_json);
     expect(read.ok).toBe(true);
     if (read.ok) {
-      expect(read.envelope.text).toBe(POST_TEXT);
-      expect(read.envelope.entities).toEqual(POST_ENTITIES);
+      expect(read.document.media).toBe('none');
+      expect(read.document.text?.text).toBe(POST_TEXT);
+      expect(read.document.text?.entities).toEqual(POST_ENTITIES);
     }
     const publication = await findPrimaryPublication(executor, captured.draftId, captured.version);
     expect(versionRow!.fingerprint).toBe(captured.fingerprint);

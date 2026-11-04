@@ -179,6 +179,32 @@ export interface TelegramSendRichInput {
   readonly customEmojiEligible?: boolean;
 }
 
+/**
+ * R1.21 — the SINGLE-media sends. The media is referenced by its Telegram
+ * file_id (opaque, already bounded upstream); the caption is a REQUIRED-kind
+ * 'caption' envelope or absent (a media post without a caption is valid).
+ * A caption envelope here is carried as `caption` + `caption_entities` with
+ * NO parse_mode; there is no text field and no text entities on a media
+ * send — kind mismatches fail typed BEFORE fetch.
+ */
+export interface TelegramSendPhotoRichInput {
+  readonly chatId: number | string;
+  /** Telegram file_id of the photo (opaque reference, never a URL here). */
+  readonly photo: string;
+  /** kind must be 'caption'. Absent = the photo is sent without a caption. */
+  readonly caption?: RichTextEnvelope;
+  readonly customEmojiEligible?: boolean;
+}
+
+export interface TelegramSendVideoRichInput {
+  readonly chatId: number | string;
+  /** Telegram file_id of the video (opaque reference, never a URL here). */
+  readonly video: string;
+  /** kind must be 'caption'. Absent = the video is sent without a caption. */
+  readonly caption?: RichTextEnvelope;
+  readonly customEmojiEligible?: boolean;
+}
+
 export interface TelegramEditRichInput {
   readonly chatId: number;
   readonly messageId: number;
@@ -202,6 +228,10 @@ export interface TelegramEditCaptionRichInput {
  */
 export interface TelegramRichTextClient {
   sendMessageRich(input: TelegramSendRichInput): Promise<TelegramSentMessage>;
+  /** R1.21: the single-photo channel/preview send (sendPhoto, no parse_mode). */
+  sendPhotoRich(input: TelegramSendPhotoRichInput): Promise<TelegramSentMessage>;
+  /** R1.21: the single-video channel/preview send (sendVideo, no parse_mode). */
+  sendVideoRich(input: TelegramSendVideoRichInput): Promise<TelegramSentMessage>;
   editMessageTextRich(input: TelegramEditRichInput): Promise<boolean>;
   editMessageCaptionRich(input: TelegramEditCaptionRichInput): Promise<boolean>;
 }
@@ -409,6 +439,29 @@ export function createBotApiClient(
   }
 
   /**
+   * RUNTIME file_id gate (R1.21): the media reference is an opaque string —
+   * bounded, printable ASCII, never a URL and never interpreted. A malformed
+   * reference is a typed pre-fetch rejection (permanent; nothing was sent).
+   */
+  function requireFileId(fileId: string): string {
+    if (
+      typeof fileId !== 'string' ||
+      fileId.length === 0 ||
+      fileId.length > 256 ||
+      new TextEncoder().encode(fileId).byteLength > 1024
+    ) {
+      throw new TelegramRichContentError('invalid_content');
+    }
+    for (let index = 0; index < fileId.length; index += 1) {
+      const code = fileId.charCodeAt(index);
+      if (code <= 0x20 || code >= 0x7f) {
+        throw new TelegramRichContentError('invalid_content');
+      }
+    }
+    return fileId;
+  }
+
+  /**
    * RUNTIME rich-content gate: the branded envelope type is compile-time
    * only, so the value's OWN fields are re-validated through the domain
    * validator before any fetch. A forged/malformed value fails typed with
@@ -524,6 +577,53 @@ export function createBotApiClient(
           text: content.text,
           entities: richTextEntitiesWire(content.entities),
           disable_web_page_preview: input.disableLinkPreview ?? true,
+        },
+        parseSentMessage,
+      );
+    },
+
+    // ---- R1.21: single-media sends (file_id + caption envelope) --------
+    async sendPhotoRich(input) {
+      // file_id re-checked at the boundary (bounded printable ASCII): a
+      // malformed reference fails typed with ZERO fetch calls.
+      const photo = requireFileId(input.photo);
+      const caption =
+        input.caption === undefined
+          ? undefined
+          : requireRichContent(input.caption, 'caption', input.customEmojiEligible === true);
+      return callMethod(
+        'sendPhoto',
+        {
+          chat_id: input.chatId,
+          photo,
+          ...(caption !== undefined
+            ? {
+                caption: caption.text,
+                caption_entities: richTextEntitiesWire(caption.entities),
+              }
+            : {}),
+        },
+        parseSentMessage,
+      );
+    },
+
+    async sendVideoRich(input) {
+      const video = requireFileId(input.video);
+      const caption =
+        input.caption === undefined
+          ? undefined
+          : requireRichContent(input.caption, 'caption', input.customEmojiEligible === true);
+      return callMethod(
+        'sendVideo',
+        {
+          chat_id: input.chatId,
+          video,
+          ...(caption !== undefined
+            ? {
+                caption: caption.text,
+                caption_entities: richTextEntitiesWire(caption.entities),
+              }
+            : {}),
         },
         parseSentMessage,
       );

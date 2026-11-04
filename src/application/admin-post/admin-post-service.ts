@@ -79,16 +79,27 @@ import { ADMIN_POST_STRINGS } from '../../admin/admin-post-strings';
 import type { AdminRole } from '../../admin/roles';
 import { roleHasPermission } from '../../admin/roles';
 import type { AdminUiLanguage } from '../../admin/ui-language';
-import type { ParsedRichTextExtraction } from '../../adapters/telegram/update-parser';
+import type { ParsedMediaAttachment, ParsedRichTextExtraction } from '../../adapters/telegram/update-parser';
 import {
   createRichTextEnvelope,
-  readRichTextEnvelope,
+  serializeRichTextEnvelope,
   type RichTextEnvelope,
 } from '../../domain/telegram/rich-text-envelope';
-import { randomToken, serializeAndFingerprint } from '../../domain/admin-post/fingerprint';
+import {
+  createPostContentDocument,
+  readPostContentDocument,
+  serializeAndFingerprintPostContent,
+  serializePostContentDocument,
+  type PostContentDocument,
+} from '../../domain/admin-post/post-content';
+import {
+  fingerprintOfSerializedEnvelope,
+  randomToken,
+} from '../../domain/admin-post/fingerprint';
 import { AppError } from '../../shared/errors/app-error';
 import type { Clock } from '../../shared/time/clock';
 import type { Logger } from '../../observability/logger';
+import type { AdminPostVersionRow } from '../../adapters/db/admin-post-store';
 
 /** Preview session + action-token lifetime: conservative 30 minutes. */
 export const ADMIN_POST_SESSION_TTL_MS = 30 * 60 * 1000;
@@ -111,7 +122,8 @@ export type AdminPostExecutionResult =
   | { readonly kind: 'reply'; readonly text: TelegramSafeHtml; readonly buttons?: AdminPostButtons }
   | {
       readonly kind: 'preview';
-      readonly content: RichTextEnvelope;
+      /** R1.21: the complete stored version — media + text/caption envelope. */
+      readonly content: PostContentDocument;
       readonly control: TelegramSafeHtml;
       readonly buttons: AdminPostButtons;
     }
@@ -132,13 +144,28 @@ export interface AdminPostServiceConfig {
 /**
  * The direct-entity transport used for the actual channel send. Injected;
  * absent = publishing temporarily unavailable (nothing is ever sent, nothing
- * is marked terminal by the send path itself).
+ * is marked terminal by the send path itself). R1.21: the transport carries
+ * the FULL send capability of the real client — text, single photo, single
+ * video — so a stored version can always be sent through the same client
+ * shape it was previewed with.
  */
 export interface AdminPostTransport {
   sendMessageRich(input: {
     readonly chatId: number | string;
     readonly content: RichTextEnvelope;
     readonly disableLinkPreview?: boolean;
+    readonly customEmojiEligible?: boolean;
+  }): Promise<{ readonly messageId: number }>;
+  sendPhotoRich(input: {
+    readonly chatId: number | string;
+    readonly photo: string;
+    readonly caption?: RichTextEnvelope;
+    readonly customEmojiEligible?: boolean;
+  }): Promise<{ readonly messageId: number }>;
+  sendVideoRich(input: {
+    readonly chatId: number | string;
+    readonly video: string;
+    readonly caption?: RichTextEnvelope;
     readonly customEmojiEligible?: boolean;
   }): Promise<{ readonly messageId: number }>;
 }
@@ -161,7 +188,15 @@ export interface AdminPostService {
     readonly text: string | undefined;
     readonly hasText: boolean;
     readonly richText: ParsedRichTextExtraction | undefined;
-    readonly richCaptionPresent: boolean;
+    /**
+     * R1.21: the typed SINGLE-media extraction (photo/video file_id, or
+     * 'unsupported' for every other media shape). undefined = no media.
+     */
+    readonly media: ParsedMediaAttachment | undefined;
+    /** R1.21: the FULL caption extraction (kind 'caption'), when present. */
+    readonly richCaption: ParsedRichTextExtraction | undefined;
+    /** R1.21: the message belongs to an album (media_group_id present). */
+    readonly inMediaGroup: boolean;
     readonly hasMediaAttachment: boolean;
   }): Promise<AdminPostExecutionResult>;
   preview(input: {
@@ -181,6 +216,13 @@ export interface AdminPostService {
     readonly telegramUserId: number;
     readonly role: AdminRole;
     readonly uiLanguage: AdminUiLanguage;
+    /**
+     * R1.21: an explicit draft id views ANOTHER admin's draft publication
+     * state (the caller must hold `publication.publish`); absent = the
+     * caller's OWN open draft. The one not-found answer never distinguishes
+     * a nonexistent id from a visible-but-closed draft.
+     */
+    readonly draftId?: string;
   }): Promise<AdminPostExecutionResult>;
   cancel(input: {
     readonly telegramUserId: number;
@@ -230,6 +272,52 @@ function asFingerprint(value: unknown): string | undefined {
 
 function asTokenId(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 && value.length <= 64 ? value : undefined;
+}
+
+/**
+ * R1.21 — the stored-content verification gate shared by PREVIEW and SEND:
+ * re-reads the stored document (defensively, with the documented legacy
+ * fallback), fully re-validates it, and RE-DERIVES the fingerprint from the
+ * canonical serialization of the re-read content. Outcomes:
+ * - 'corrupt': the stored bytes are not a valid post-content document
+ *   (malformed JSON, unknown version, invalid envelope/fileId/media).
+ * - 'changed': the content re-serializes to a DIFFERENT fingerprint than
+ *   the stored column claims — the stored document was altered after its
+ *   fingerprint was written (corruption or tampering). The approved and
+ *   stored content are no longer provably the same; nothing may be sent.
+ * The re-derivation is what makes the approval binding honest end-to-end:
+ * a matching fingerprint COLUMN alone can never prove the content intact.
+ */
+async function readAndVerifyStoredContent(
+  versionRow: AdminPostVersionRow,
+): Promise<
+  | { readonly ok: true; readonly content: PostContentDocument }
+  | { readonly ok: false; readonly reason: 'corrupt' | 'changed' }
+> {
+  const read = readPostContentDocument(versionRow.envelope_json);
+  if (!read.ok) {
+    return { ok: false, reason: 'corrupt' };
+  }
+  let recomputed: string;
+  if (read.kind === 'legacy') {
+    // Legacy R1.20-R1 bare-envelope row: the fingerprint was written over
+    // the bare envelope's canonical bytes — re-derive EXACTLY that way.
+    const serialized = serializeRichTextEnvelope(read.envelope);
+    if (!serialized.ok) {
+      return { ok: false, reason: 'corrupt' };
+    }
+    recomputed = await fingerprintOfSerializedEnvelope(serialized.json);
+  } else {
+    const serialized = serializePostContentDocument(read.document);
+    if (!serialized.ok) {
+      return { ok: false, reason: 'corrupt' };
+    }
+    recomputed = await fingerprintOfSerializedEnvelope(serialized.json);
+  }
+  if (recomputed !== versionRow.fingerprint) {
+    return { ok: false, reason: 'changed' };
+  }
+  return { ok: true, content: read.document };
 }
 
 /**
@@ -394,11 +482,50 @@ export function createAdminPostService(deps: {
   }
 
   /**
+   * R1.21: dispatch ONE stored version to the transport in its EXACT stored
+   * shape — text posts as direct-entity sendMessage, single photo/video as
+   * sendPhoto/sendVideo with the caption envelope (or NO caption field when
+   * the media post has none). There is no conversion, no truncation, and no
+   * media-without-caption degradation anywhere on this path.
+   */
+  async function sendStoredContent(
+    transport: NonNullable<typeof deps.transport>,
+    document: PostContentDocument,
+  ): Promise<{ readonly messageId: number }> {
+    const chatId = destinationChatId(config.destination ?? '');
+    if (document.media === 'photo' || document.media === 'video') {
+      // Unreachable through the document validator (media REQUIRES a
+      // fileId); the typed guard keeps the send honest under any cast.
+      if (document.fileId === undefined) {
+        throw new AppError('internal_error');
+      }
+      if (document.media === 'photo') {
+        return await transport.sendPhotoRich({
+          chatId,
+          photo: document.fileId,
+          ...(document.caption !== undefined ? { caption: document.caption } : {}),
+        });
+      }
+      return await transport.sendVideoRich({
+        chatId,
+        video: document.fileId,
+        ...(document.caption !== undefined ? { caption: document.caption } : {}),
+      });
+    }
+    if (document.text === undefined) {
+      throw new AppError('internal_error');
+    }
+    return await transport.sendMessageRich({ chatId, content: document.text });
+  }
+
+  /**
    * The guarded send + honest outcome recording (publish and the confirmed
    * re-send): claim (queued -> claimed, lease + owner fence) -> read + verify
-   * the stored content -> send through the direct-entity transport -> record
-   * the outcome FENCED by the claim owner. A late response whose lease
-   * expired or whose claim was superseded can never overwrite newer state.
+   * the stored content (R1.21: fingerprint RE-DERIVED from the re-read
+   * document — a fingerprint column alone can no longer pass the gate) ->
+   * send through the direct-entity transport -> record the outcome FENCED by
+   * the claim owner. A late response whose lease expired or whose claim was
+   * superseded can never overwrite newer state.
    */
   async function claimSendAndRecord(input: {
     readonly publicationId: string;
@@ -432,16 +559,30 @@ export function createAdminPostService(deps: {
       });
       return answer(input.ui, localize(input.ui, S.publishFailedDefinitive));
     }
-    const read = readRichTextEnvelope(versionRow.envelope_json);
-    if (!read.ok) {
+    // R1.21 SEND-INTEGRITY GATE: the stored document is re-read, fully
+    // re-validated, and its fingerprint RE-DERIVED. If the stored content
+    // was altered after approval — even while the fingerprint column stayed
+    // untouched — the send is BLOCKED and the outcome is recorded honestly.
+    const verified = await readAndVerifyStoredContent(versionRow);
+    if (!verified.ok) {
+      const isTampered = verified.reason === 'changed';
       await finishPublication(executor, {
         publicationId: input.publicationId,
         claimedBy,
         state: 'failed_definitive',
-        errorCode: 'stored_content_invalid',
+        errorCode: isTampered ? 'content_changed_after_approval' : 'stored_content_invalid',
         nowMs: clock.now(),
       });
-      return answer(input.ui, localize(input.ui, S.storedContentCorrupt));
+      logger.warn('admin_post.publish.send_integrity_blocked', {
+        reason: verified.reason,
+        version: input.version,
+      });
+      return answer(
+        input.ui,
+        isTampered
+          ? localize(input.ui, S.publishContentChanged)
+          : localize(input.ui, S.storedContentCorrupt),
+      );
     }
 
     if (config.destination === undefined || config.destination === '') {
@@ -462,12 +603,10 @@ export function createAdminPostService(deps: {
       logger.warn('admin_post.publish.transport_unavailable', { version: input.version });
       return answer(input.ui, localize(input.ui, S.publishTransportUnavailable));
     }
+    const transport = deps.transport;
 
     try {
-      const sent = await deps.transport.sendMessageRich({
-        chatId: destinationChatId(config.destination),
-        content: read.envelope,
-      });
+      const sent = await sendStoredContent(transport, verified.content);
       const recorded = await finishPublication(executor, {
         publicationId: input.publicationId,
         claimedBy,
@@ -505,6 +644,12 @@ export function createAdminPostService(deps: {
       if (recorded.kind === 'fence_rejected') {
         return answer(input.ui, localize(input.ui, S.publishSentButStateUnknown));
       }
+      if (definitive && verified.content.media !== 'none') {
+        // R1.21: a definitive failure on a media version most commonly means
+        // the file reference was rejected (invalid/expired/unusable) — the
+        // honest answer names that possibility explicitly.
+        return answer(input.ui, localize(input.ui, S.publishMediaFileFailed));
+      }
       return answer(
         input.ui,
         definitive
@@ -512,6 +657,109 @@ export function createAdminPostService(deps: {
           : localize(input.ui, S.publishUncertain),
       );
     }
+  }
+
+  /**
+   * R1.21: the shared status renderer for BOTH views — the creator's own
+   * open draft and the publisher's by-id view of any existing draft. The
+   * draft id line is ALWAYS present (the id is how the roles find the same
+   * post); the capture-session line belongs to the caller and appears only
+   * on the own-draft view. The confirm-resend button follows the SAME
+   * resendable-state rules as before, minted for the CALLER (the by-id
+   * publisher included — the token carries the caller's own identity and
+   * the caller's permission is re-checked on the callback).
+   */
+  async function renderStatus(
+    ui: AdminUiLanguage,
+    caller: { readonly telegramUserId: number; readonly role: AdminRole },
+    draft: { readonly id: string; readonly status: string; readonly current_version: number },
+    options: { readonly byId: boolean; readonly captureSessionLine: boolean },
+  ): Promise<AdminPostExecutionResult> {
+    const lines: string[] = [];
+    if (options.captureSessionLine) {
+      // R1.20-R1: the capture session state is always visible on the
+      // own-draft view — a session left open is discoverable here (plain
+      // texts are being captured!).
+      const captureSession = await findOpenCaptureSession(executor, caller.telegramUserId);
+      lines.push(
+        captureSession !== null
+          ? localize(ui, S.statusSessionOpen)
+          : localize(ui, S.statusSessionClosed),
+      );
+    }
+    lines.push(localize(ui, S.statusDraftId(draft.id)));
+    if (options.byId) {
+      // The by-id view can reach drafts in ANY lifecycle state — the state
+      // is shown honestly instead of silently filtering it away.
+      lines.push(localize(ui, S.statusDraftStatus(draft.status)));
+    }
+    lines.push(localize(ui, S.statusVersion(draft.current_version)));
+    const approval = await getApproval(executor, draft.id, draft.current_version);
+    const publication = await findPrimaryPublication(executor, draft.id, draft.current_version);
+
+    lines.push(
+      approval !== null && approval.state === 'active'
+        ? localize(ui, S.statusApprovalActive)
+        : localize(ui, S.statusApprovalNone),
+    );
+
+    const nowMs = clock.now();
+    let resendablePublication: AdminPostPublicationRow | null = null;
+    if (publication !== null) {
+      switch (publication.state) {
+        case 'queued':
+          lines.push(localize(ui, S.statusPublishQueued));
+          break;
+        case 'claimed':
+          if (
+            publication.lease_expires_at_ms !== null &&
+            publication.lease_expires_at_ms < nowMs
+          ) {
+            lines.push(localize(ui, S.statusPublishUncertain(true)));
+            resendablePublication = publication;
+          } else {
+            lines.push(localize(ui, S.statusPublishQueued));
+          }
+          break;
+        case 'sent':
+          lines.push(localize(ui, S.statusPublishSent));
+          break;
+        case 'failed_definitive':
+          lines.push(localize(ui, S.statusPublishFailed));
+          resendablePublication = publication;
+          break;
+        case 'uncertain':
+          lines.push(localize(ui, S.statusPublishUncertain(false)));
+          resendablePublication = publication;
+          break;
+        case 'superseded':
+          break;
+      }
+    }
+
+    let buttons: AdminPostButtons | undefined;
+    if (resendablePublication !== null && roleHasPermission(caller.role, 'publication.publish')) {
+      const token = await mintToken({
+        telegramUserId: caller.telegramUserId,
+        permission: 'publication.publish',
+        action: ADMIN_POST_ACTION_CONFIRM_REPUBLISH,
+        draftId: draft.id,
+        payload: {
+          publicationId: resendablePublication.id,
+          version: resendablePublication.version,
+          fingerprint: resendablePublication.fingerprint,
+        },
+        expiresAtMs: nowMs + ADMIN_POST_SESSION_TTL_MS,
+        nowMs,
+      });
+      buttons = [[{ text: localize(ui, S.confirmResendButton), callbackData: `a:${token}` }]];
+    }
+
+    return {
+      kind: 'reply',
+      text: composeTelegramHtml(lines.map((line) => escapeTelegramHtml(line))),
+      buttons,
+    };
   }
 
   return {
@@ -559,8 +807,110 @@ export function createAdminPostService(deps: {
         logger.warn('admin_post.capture.denied', { reason: 'missing_permission' });
         return reply(ui, S.capturePermissionDenied);
       }
-      if (input.hasMediaAttachment || input.richCaptionPresent) {
-        return reply(ui, S.captureMediaRejected);
+      if (input.hasMediaAttachment || input.media !== undefined) {
+        // R1.21 SINGLE-MEDIA PATH: exactly one photo or one video (with an
+        // optional faithful caption) is captured as a complete post. Every
+        // other media shape — albums, documents, audio, stickers, conflicting
+        // or malformed media fields — is REJECTED EXPLICITLY here; nothing is
+        // ever degraded into a partial post, and a caption is never stored
+        // without its media.
+        if (input.media === undefined || input.media.kind === 'unsupported') {
+          return reply(ui, S.captureMediaRejected);
+        }
+        if (input.inMediaGroup) {
+          return reply(ui, S.captureAlbumRejected);
+        }
+        // A media message never carries message text or text entities in
+        // Telegram's model; a payload with both is malformed — explicit.
+        if (input.hasText || input.richText !== undefined) {
+          return reply(ui, S.captureInvalidContent);
+        }
+        const fileId = input.media.fileId;
+        if (fileId === undefined) {
+          return reply(ui, S.captureMediaFileInvalid);
+        }
+        if (input.richCaption !== undefined && !input.richCaption.ok) {
+          // Beyond the 1024-unit application cap, or malformed caption
+          // metadata — an explicit rejection, never a silent drop.
+          logger.warn('admin_post.capture.rejected', {
+            reason: `media_caption_${input.richCaption.reason}`,
+          });
+          return reply(ui, S.captureMediaCaptionRejected);
+        }
+        let captionEnvelope: RichTextEnvelope | undefined;
+        if (input.richCaption !== undefined) {
+          const captionOutcome = createRichTextEnvelope({
+            kind: 'caption',
+            text: input.richCaption.text,
+            entities: input.richCaption.entities,
+          });
+          if (!captionOutcome.ok) {
+            logger.warn('admin_post.capture.rejected', { reason: captionOutcome.reason });
+            return reply(ui, S.captureInvalidContent);
+          }
+          captionEnvelope = captionOutcome.envelope;
+        }
+        const documentOutcome = createPostContentDocument({
+          media: input.media.kind,
+          fileId,
+          ...(captionEnvelope !== undefined ? { caption: captionEnvelope } : {}),
+        });
+        if (!documentOutcome.ok) {
+          logger.warn('admin_post.capture.rejected', { reason: documentOutcome.reason });
+          return reply(
+            ui,
+            documentOutcome.reason === 'file_id_invalid'
+              ? S.captureMediaFileInvalid
+              : S.captureInvalidContent,
+          );
+        }
+        const serialized = await serializeAndFingerprintPostContent(documentOutcome.document);
+        if (!serialized.ok) {
+          return reply(ui, S.captureSerializedTooLarge);
+        }
+
+        const duplicate = await findVersionBySourceUpdate(
+          executor,
+          input.updateId,
+          input.telegramUserId,
+        );
+        if (duplicate !== null) {
+          logger.info('admin_post.capture.duplicate_source_update', { version: duplicate.version });
+          return reply(ui, S.captureAlreadyCaptured);
+        }
+
+        const existing = await findOpenDraftByCreator(executor, input.telegramUserId);
+        const nowMs = clock.now();
+        const outcome = await captureVersion(executor, {
+          draftId: randomToken(),
+          existingDraftId: existing?.id,
+          envelopeJson: serialized.json,
+          fingerprint: serialized.fingerprint,
+          sourceUpdateId: input.updateId,
+          telegramUserId: input.telegramUserId,
+          nowMs,
+        });
+        if (outcome.kind === 'limit_reached') {
+          return reply(ui, S.captureVersionLimit);
+        }
+        logger.info('admin_post.capture', {
+          outcome: outcome.kind,
+          version: outcome.version,
+          media: input.media.kind,
+        });
+        return {
+          kind: 'reply',
+          text: escapeTelegramHtml(
+            outcome.kind === 'created'
+              ? localize(ui, S.captureSaved(outcome.draftId, outcome.version))
+              : localize(ui, S.captureUpdated(outcome.draftId, outcome.version)),
+          ),
+        };
+      }
+      // TEXT PATH (no media anywhere on the message): a caption field on a
+      // text message is a contradiction — never captured.
+      if (input.richCaption !== undefined) {
+        return reply(ui, S.captureInvalidContent);
       }
       if (input.hasText !== true) {
         return reply(ui, S.noTextContent);
@@ -582,7 +932,15 @@ export function createAdminPostService(deps: {
         logger.warn('admin_post.capture.rejected', { reason: envelopeOutcome.reason });
         return reply(ui, S.captureInvalidContent);
       }
-      const serialized = await serializeAndFingerprint(envelopeOutcome.envelope);
+      const documentOutcome = createPostContentDocument({
+        media: 'none',
+        text: envelopeOutcome.envelope,
+      });
+      if (!documentOutcome.ok) {
+        logger.warn('admin_post.capture.rejected', { reason: documentOutcome.reason });
+        return reply(ui, S.captureInvalidContent);
+      }
+      const serialized = await serializeAndFingerprintPostContent(documentOutcome.document);
       if (!serialized.ok) {
         return reply(ui, S.captureSerializedTooLarge);
       }
@@ -616,8 +974,8 @@ export function createAdminPostService(deps: {
         kind: 'reply',
         text: escapeTelegramHtml(
           outcome.kind === 'created'
-            ? localize(ui, S.captureSaved(outcome.version))
-            : localize(ui, S.captureUpdated(outcome.version)),
+            ? localize(ui, S.captureSaved(outcome.draftId, outcome.version))
+            : localize(ui, S.captureUpdated(outcome.draftId, outcome.version)),
         ),
       };
     },
@@ -650,17 +1008,20 @@ export function createAdminPostService(deps: {
       if (versionRow === null) {
         return reply(ui, S.storedContentCorrupt);
       }
-      const read = readRichTextEnvelope(versionRow.envelope_json);
-      if (!read.ok || read.envelope.kind !== 'text') {
+      // R1.21: the stored document is re-read (with the legacy fallback),
+      // fully re-validated, and its fingerprint RE-DERIVED from the re-read
+      // content — a mismatch means the stored document was corrupted or
+      // tampered with after its fingerprint was written. Never previewed
+      // from, never approved from, never sent from.
+      const verified = await readAndVerifyStoredContent(versionRow);
+      if (!verified.ok) {
+        logger.warn('admin_post.preview.fingerprint_mismatch', {
+          reason: verified.reason,
+          version: draft.current_version,
+        });
         return reply(ui, S.storedContentCorrupt);
       }
-      // Integrity: re-derive the fingerprint from the stored bytes — a
-      // mismatch means the stored document was corrupted/tampered with.
-      const recomputed = await serializeAndFingerprint(read.envelope);
-      if (!recomputed.ok || recomputed.fingerprint !== versionRow.fingerprint) {
-        logger.warn('admin_post.preview.fingerprint_mismatch', { version: draft.current_version });
-        return reply(ui, S.storedContentCorrupt);
-      }
+      const document = verified.content;
 
       const nowMs = clock.now();
       // Redelivery idempotency: the same source update reuses its session
@@ -722,7 +1083,7 @@ export function createAdminPostService(deps: {
       logger.info('admin_post.preview', { version: draft.current_version });
       return {
         kind: 'preview',
-        content: read.envelope,
+        content: document,
         control: composeTelegramHtml([
           telegramBold(localize(ui, S.previewControlHeader(draft.current_version))),
         ]),
@@ -732,90 +1093,51 @@ export function createAdminPostService(deps: {
 
     async status(input) {
       const ui = input.uiLanguage;
+      // R1.21 BY-ID VIEW: a publisher may inspect the publication state of
+      // ANY existing draft by id — including one they did not create — so
+      // the uncertain-outcome recovery path is reachable for the person
+      // holding `publication.publish`, not only for the creator. Non-holders
+      // get one honest denial; nonexistent ids get the same not-found answer
+      // as everything else (no existence disclosure).
+      if (input.draftId !== undefined) {
+        if (!roleHasPermission(input.role, 'publication.publish')) {
+          logger.warn('admin_post.status.denied', { reason: 'missing_permission' });
+          return reply(ui, S.statusPermissionDenied);
+        }
+        const target = await getDraft(executor, input.draftId);
+        if (target === null) {
+          return reply(ui, S.draftNotFound);
+        }
+        return renderStatus(
+          ui,
+          { telegramUserId: input.telegramUserId, role: input.role },
+          target,
+          { byId: true, captureSessionLine: false },
+        );
+      }
       const draft = await findOpenDraftByCreator(executor, input.telegramUserId);
-      const lines: string[] = [];
-      // R1.20-R1: the capture session state is always visible — a session
-      // left open is discoverable here (plain texts are being captured!).
-      const captureSession = await findOpenCaptureSession(executor, input.telegramUserId);
-      lines.push(
-        captureSession !== null
-          ? localize(ui, S.statusSessionOpen)
-          : localize(ui, S.statusSessionClosed),
-      );
       if (draft === null) {
+        const lines: string[] = [];
+        // R1.20-R1: the capture session state is always visible — a session
+        // left open is discoverable here (plain texts are being captured!).
+        const captureSession = await findOpenCaptureSession(executor, input.telegramUserId);
+        lines.push(
+          captureSession !== null
+            ? localize(ui, S.statusSessionOpen)
+            : localize(ui, S.statusSessionClosed),
+        );
         lines.push(localize(ui, S.statusNoDraft));
         return {
           kind: 'reply',
           text: composeTelegramHtml(lines.map((line) => escapeTelegramHtml(line))),
         };
       }
-      lines.push(localize(ui, S.statusVersion(draft.current_version)));
-      const approval = await getApproval(executor, draft.id, draft.current_version);
-      const publication = await findPrimaryPublication(executor, draft.id, draft.current_version);
-
-      lines.push(
-        approval !== null && approval.state === 'active'
-          ? localize(ui, S.statusApprovalActive)
-          : localize(ui, S.statusApprovalNone),
+      return renderStatus(
+        ui,
+        { telegramUserId: input.telegramUserId, role: input.role },
+        draft,
+        { byId: false, captureSessionLine: true },
       );
-
-      const nowMs = clock.now();
-      let resendablePublication: AdminPostPublicationRow | null = null;
-      if (publication !== null) {
-        switch (publication.state) {
-          case 'queued':
-            lines.push(localize(ui, S.statusPublishQueued));
-            break;
-          case 'claimed':
-            if (
-              publication.lease_expires_at_ms !== null &&
-              publication.lease_expires_at_ms < nowMs
-            ) {
-              lines.push(localize(ui, S.statusPublishUncertain(true)));
-              resendablePublication = publication;
-            } else {
-              lines.push(localize(ui, S.statusPublishQueued));
-            }
-            break;
-          case 'sent':
-            lines.push(localize(ui, S.statusPublishSent));
-            break;
-          case 'failed_definitive':
-            lines.push(localize(ui, S.statusPublishFailed));
-            resendablePublication = publication;
-            break;
-          case 'uncertain':
-            lines.push(localize(ui, S.statusPublishUncertain(false)));
-            resendablePublication = publication;
-            break;
-          case 'superseded':
-            break;
-        }
-      }
-
-      let buttons: AdminPostButtons | undefined;
-      if (resendablePublication !== null && roleHasPermission(input.role, 'publication.publish')) {
-        const token = await mintToken({
-          telegramUserId: input.telegramUserId,
-          permission: 'publication.publish',
-          action: ADMIN_POST_ACTION_CONFIRM_REPUBLISH,
-          draftId: draft.id,
-          payload: {
-            publicationId: resendablePublication.id,
-            version: resendablePublication.version,
-            fingerprint: resendablePublication.fingerprint,
-          },
-          expiresAtMs: nowMs + ADMIN_POST_SESSION_TTL_MS,
-          nowMs,
-        });
-        buttons = [[{ text: localize(ui, S.confirmResendButton), callbackData: `a:${token}` }]];
-      }
-
-      return {
-        kind: 'reply',
-        text: composeTelegramHtml(lines.map((line) => escapeTelegramHtml(line))),
-        buttons,
-      };
     },
 
     async cancel(input) {

@@ -195,27 +195,49 @@ describe('R1.20-R webhook edge — fail-closed gating and scope', () => {
     expect(versions?.count).toBe(0);
   });
 
-  it('explicitly rejects media posts (photo with caption is NEVER a complete post)', async () => {
-    // R1.20-R1: the media rejection fires within an open capture session.
+  it('captures a photo+caption as a complete post and explicitly rejects unsupported media', async () => {
+    // R1.21: a SINGLE photo with an optional caption is now a complete post
+    // (captured within an open session); every OTHER media shape stays an
+    // explicit rejection and never degrades into a partial post.
     await deliver(FLAG_ON_ENV, textUpdate(7006, OWNER_ID, '/post'));
-    const { status, lines } = await deliver(FLAG_ON_ENV, {
+    const captured = await deliver(FLAG_ON_ENV, {
       update_id: 7006,
       message: {
         message_id: 56,
         chat: { id: OWNER_ID, type: 'private' },
         from: { id: OWNER_ID },
-        photo: [{ file_id: 'x', file_unique_id: 'y', width: 1, height: 1 }],
-        caption: 'کپشن به‌تنهایی پست نیست',
+        photo: [
+          { file_id: 'small_photo_id', file_unique_id: 'y1', width: 90, height: 90 },
+          { file_id: 'large_photo_id', file_unique_id: 'y2', width: 800, height: 600 },
+        ],
+        caption: 'کپشن تصویر',
       },
     });
-    expect(status).toBe(503);
-    // R1.20-R1: the rejection is the SERVICE's reply (admin_post_reply).
-    const unavailable = lines.find((l) => l.msg === 'telegram.action.outbound_unavailable');
+    expect(captured.status).toBe(503); // offline reply send, capture SUCCEEDED
+    const versionsAfterPhoto = await executor.first<{ count: number }>({
+      sql: 'SELECT COUNT(*) AS count FROM admin_post_versions',
+    });
+    expect(versionsAfterPhoto?.count).toBe(1);
+
+    // A document is NOT a supported post media type: explicit rejection,
+    // nothing stored, nothing silently dropped.
+    const rejected = await deliver(FLAG_ON_ENV, {
+      update_id: 7006,
+      message: {
+        message_id: 57,
+        chat: { id: OWNER_ID, type: 'private' },
+        from: { id: OWNER_ID },
+        document: { file_id: 'doc_id', file_unique_id: 'z' },
+        caption: 'سند به‌تنهایی پست نیست',
+      },
+    });
+    expect(rejected.status).toBe(503);
+    const unavailable = rejected.lines.find((l) => l.msg === 'telegram.action.outbound_unavailable');
     expect(unavailable?.['action']).toBe('admin_post_reply');
     const versions = await executor.first<{ count: number }>({
       sql: 'SELECT COUNT(*) AS count FROM admin_post_versions',
     });
-    expect(versions?.count).toBe(0);
+    expect(versions?.count).toBe(1);
   });
 
   it('explicitly rejects oversized text beyond the Telegram 4096 bound', async () => {
@@ -342,7 +364,7 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       hasText: true,
       text: 'متن نسخهٔ یک',
       richText: undefined,
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
   }
@@ -488,7 +510,7 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       hasText: true,
       text: 'متن نسخهٔ دو — تغییر یافته',
       richText: undefined,
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const drafts = await executor.first<{ id: string; current_version: number }>({
@@ -579,7 +601,7 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       hasText: true,
       text: 'متن با فرادادهٔ خراب',
       richText: { ok: false, kind: 'text', reason: 'entities_malformed' },
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     expect(result.kind).toBe('reply');
@@ -609,7 +631,7 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       hasText: true,
       text: 'اولین ارسال',
       richText: undefined,
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     expect(first.kind).toBe('reply');
@@ -629,7 +651,7 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       hasText: true,
       text: 'اولین ارسال',
       richText: undefined,
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     expect(second.kind).toBe('reply');
@@ -697,7 +719,7 @@ describe('R1.20-R approval binding — the OPTIONAL fingerprint contract', () =>
       hasText: true,
       text: 'متن بدون اثر انگشت در توکن',
       richText: undefined,
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview = await service.preview({
@@ -758,7 +780,7 @@ describe('R1.20-R approval binding — the OPTIONAL fingerprint contract', () =>
       hasText: true,
       text: 'متن نسخهٔ دو — محتوا عوض شد',
       richText: undefined,
-      richCaptionPresent: false,
+      media: undefined, richCaption: undefined, inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview2 = await service.preview({

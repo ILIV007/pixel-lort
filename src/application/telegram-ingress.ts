@@ -126,7 +126,11 @@ import { AppError, toAppError, type AppErrorCode } from '../shared/errors/app-er
 import type { Clock } from '../shared/time/clock';
 import type { Logger } from '../observability/logger';
 import type { EditorialReviewService } from './editorial/draft-review-view';
-import type { AdminPostButtons, AdminPostService } from './admin-post/admin-post-service';
+import type {
+  AdminPostButtons,
+  AdminPostService,
+} from './admin-post/admin-post-service';
+import type { PostContentDocument } from '../domain/admin-post/post-content';
 
 export type TelegramUpdateOutcome = 'processed' | 'duplicate' | 'failed';
 
@@ -281,6 +285,52 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     return botApi as TelegramRichTextClient;
   }
 
+  /**
+   * R1.21: deliver ONE stored version to the preview chat in its EXACT
+   * stored shape — the same dispatch the channel send uses, through the same
+   * client. A media version whose client lacks the media capability fails
+   * retryably (honest unavailability — never a textified downgrade).
+   */
+  async function sendAdminPostContent(
+    rich: TelegramRichTextClient,
+    chatId: number,
+    content: PostContentDocument,
+  ): Promise<void> {
+    if (content.media === 'photo' || content.media === 'video') {
+      if (content.fileId === undefined) {
+        logger.error('telegram.action.preview_media_invalid', { media: content.media });
+        throw new AppError('internal_error');
+      }
+      if (content.media === 'photo' && typeof rich.sendPhotoRich !== 'function') {
+        logger.warn('telegram.action.rich_media_unavailable', { media: 'photo' });
+        throw new AppError('service_unavailable');
+      }
+      if (content.media === 'video' && typeof rich.sendVideoRich !== 'function') {
+        logger.warn('telegram.action.rich_media_unavailable', { media: 'video' });
+        throw new AppError('service_unavailable');
+      }
+      if (content.media === 'photo') {
+        await rich.sendPhotoRich({
+          chatId,
+          photo: content.fileId,
+          ...(content.caption !== undefined ? { caption: content.caption } : {}),
+        });
+        return;
+      }
+      await rich.sendVideoRich({
+        chatId,
+        video: content.fileId,
+        ...(content.caption !== undefined ? { caption: content.caption } : {}),
+      });
+      return;
+    }
+    if (content.text === undefined) {
+      logger.error('telegram.action.preview_content_invalid');
+      throw new AppError('internal_error');
+    }
+    await rich.sendMessageRich({ chatId, content: content.text });
+  }
+
   /** Execute one admin-post service action and deliver its outbound result. */
   async function executeAdminPost(
     action:
@@ -331,7 +381,9 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
             text: action.text,
             hasText: action.hasText,
             richText: action.richText,
-            richCaptionPresent: action.richCaptionPresent,
+            media: action.media,
+            richCaption: action.richCaption,
+            inMediaGroup: action.inMediaGroup,
             hasMediaAttachment: action.hasMediaAttachment,
           });
         case 'admin_post_preview':
@@ -348,6 +400,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
             telegramUserId: action.telegramUserId,
             role: action.role,
             uiLanguage: action.uiLanguage,
+            draftId: action.draftId,
           });
         case 'admin_post_cancel':
           return adminPost.cancel({
@@ -367,11 +420,13 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         return;
       case 'preview': {
         // CONTROL/CONTENT SEPARATION: the content message is the EXACT
-        // stored envelope (text + entities, NO parse_mode); the control
-        // message (label + buttons) travels separately so the content text
-        // and its UTF-16 offsets are never altered by admin surface data.
+        // stored version (R1.21: text+entities for text posts, sendPhoto/
+        // sendVideo + caption envelope for single-media posts — NO parse_mode
+        // anywhere); the control message (label + buttons) travels separately
+        // so the content text and its UTF-16 offsets are never altered by
+        // admin surface data.
         const rich = requireRichApi('admin_post_preview');
-        await rich.sendMessageRich({ chatId: action.chatId, content: result.content });
+        await sendAdminPostContent(rich, action.chatId, result.content);
         await sendSafely(action.chatId, result.control, 'admin_post_control', result.buttons);
         return;
       }

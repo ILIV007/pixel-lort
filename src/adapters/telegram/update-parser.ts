@@ -42,6 +42,111 @@ export const TELEGRAM_UPDATE_LIMITS = {
 const MAX_SAFE_ID = Number.MAX_SAFE_INTEGER;
 
 /**
+ * R1.21 — SINGLE-media extraction application bound for a Telegram file_id
+ * (an opaque reference string). Mirrors the post-content document cap so a
+ * file_id accepted by the parser can never fail the document validator.
+ */
+const MAX_MEDIA_FILE_ID_CHARS = 256;
+
+/** Photo dimensions can be huge but not unbounded — capped for area math. */
+const MAX_PHOTO_DIMENSION = 100_000;
+
+/**
+ * R1.21 — the typed SINGLE-media attachment extracted from a message.
+ * `photo` / `video` carry the LARGEST variant's (photo) or the video's
+ * Telegram file_id; EVERY other media shape (documents, audio, animation,
+ * voice, video_note, sticker, albums via media_group_id, conflicting or
+ * malformed media fields) maps to `unsupported` — the caller REJECTS it
+ * explicitly, nothing is ever degraded into a partial post.
+ */
+export type ParsedMediaAttachment =
+  | { readonly kind: 'photo'; readonly fileId: string }
+  | { readonly kind: 'video'; readonly fileId: string }
+  | { readonly kind: 'unsupported' };
+
+/**
+ * Bounded file_id validation: a non-empty printable-ASCII string within the
+ * application cap. file_id is opaque — never interpreted, only carried.
+ */
+function boundedFileId(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_MEDIA_FILE_ID_CHARS) {
+    return undefined;
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x20 || code >= 0x7f) {
+      return undefined;
+    }
+  }
+  return value;
+}
+
+/** Largest photo variant by bounded (width*height); ties keep the later entry. */
+function largestPhotoFileId(photo: readonly unknown[]): string | undefined {
+  let best: { readonly fileId: string; readonly area: number } | undefined;
+  for (const entry of photo) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const fileId = boundedFileId(record['file_id']);
+    if (fileId === undefined) {
+      continue;
+    }
+    const width = toSafeInteger(record['width'], { min: 1, max: MAX_PHOTO_DIMENSION }) ?? 0;
+    const height = toSafeInteger(record['height'], { min: 1, max: MAX_PHOTO_DIMENSION }) ?? 0;
+    const area = width * height;
+    if (best === undefined || area >= best.area) {
+      best = { fileId, area };
+    }
+  }
+  return best?.fileId;
+}
+
+/**
+ * Extract the typed SINGLE-media attachment. A message carrying MORE than
+ * one media field (photo + video, photo + document, ...) is malformed by
+ * Telegram's own model and maps to `unsupported` (never one-half of it).
+ */
+function extractMediaAttachment(payload: Record<string, unknown>): ParsedMediaAttachment {
+  const photo = payload['photo'];
+  const video = payload['video'];
+  const otherMedia =
+    payload['document'] !== undefined ||
+    payload['audio'] !== undefined ||
+    payload['animation'] !== undefined ||
+    payload['voice'] !== undefined ||
+    payload['video_note'] !== undefined ||
+    payload['sticker'] !== undefined;
+  const photoPresent = photo !== undefined;
+  const videoPresent = video !== undefined;
+  if (photoPresent && videoPresent) {
+    return { kind: 'unsupported' };
+  }
+  if (photoPresent && otherMedia) {
+    return { kind: 'unsupported' };
+  }
+  if (videoPresent && otherMedia) {
+    return { kind: 'unsupported' };
+  }
+  if (photoPresent) {
+    if (!Array.isArray(photo)) {
+      return { kind: 'unsupported' };
+    }
+    const fileId = largestPhotoFileId(photo);
+    return fileId === undefined ? { kind: 'unsupported' } : { kind: 'photo', fileId };
+  }
+  if (videoPresent) {
+    if (typeof video !== 'object' || video === null || Array.isArray(video)) {
+      return { kind: 'unsupported' };
+    }
+    const fileId = boundedFileId((video as Record<string, unknown>)['file_id']);
+    return fileId === undefined ? { kind: 'unsupported' } : { kind: 'video', fileId };
+  }
+  return { kind: 'unsupported' };
+}
+
+/**
  * The exact Telegram chat types the admin surface may reason about (Phase 2B:
  * /language requires a PRIVATE chat). Fixed allowlist — any other or
  * malformed `chat.type` value is treated as ABSENT (fail closed).
@@ -151,6 +256,19 @@ export interface ParsedMessageFields {
    * or retained. Never logged.
    */
   readonly hasMediaAttachment?: boolean;
+  /**
+   * R1.21: the typed SINGLE-media extraction. `photo`/`video` carry the
+   * Telegram file_id (largest photo variant / the video itself); every other
+   * media shape is `unsupported`. Never logged.
+   */
+  readonly media?: ParsedMediaAttachment;
+  /**
+   * R1.21: PASSIVE presence flag — the message belongs to an ALBUM
+   * (`media_group_id` present). Album members are rejected explicitly by the
+   * capture surface; a single album member is never degraded into a post.
+   * Never logged.
+   */
+  readonly inMediaGroup?: boolean;
 }
 
 export interface ParsedCallbackFields {
@@ -471,6 +589,11 @@ function parseMessageLike(
     }
   }
 
+  // R1.21: typed single-media extraction (photo/video file_id) + the album
+  // membership flag. Purely additive to the presence flag above.
+  const media = extractMediaAttachment(payload);
+  const inMediaGroup = payload['media_group_id'] !== undefined;
+
   return {
     kind,
     updateId,
@@ -489,6 +612,8 @@ function parseMessageLike(
     ...(richCaption !== undefined ? { richCaption } : {}),
     ...(hasText ? { hasText } : {}),
     ...(mediaAttachment ? { hasMediaAttachment: mediaAttachment } : {}),
+    ...(media.kind !== 'unsupported' || mediaAttachment ? { media } : {}),
+    ...(inMediaGroup ? { inMediaGroup } : {}),
   };
 }
 

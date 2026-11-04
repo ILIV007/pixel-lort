@@ -65,12 +65,32 @@ function okTransport(messageId = 4242): AdminPostTransport {
     async sendMessageRich() {
       return { messageId };
     },
+    async sendPhotoRich() {
+      return { messageId };
+    },
+    async sendVideoRich() {
+      return { messageId };
+    },
   };
 }
 
 function timeoutTransport(): AdminPostTransport {
   return {
     async sendMessageRich() {
+      throw Object.assign(new Error('Telegram API timeout'), {
+        name: 'TelegramApiError',
+        code: 'telegram_timeout',
+        retryable: true,
+      });
+    },
+    async sendPhotoRich() {
+      throw Object.assign(new Error('Telegram API timeout'), {
+        name: 'TelegramApiError',
+        code: 'telegram_timeout',
+        retryable: true,
+      });
+    },
+    async sendVideoRich() {
       throw Object.assign(new Error('Telegram API timeout'), {
         name: 'TelegramApiError',
         code: 'telegram_timeout',
@@ -661,6 +681,12 @@ describe('R1.20-R1 — honest outcomes on the REAL callback path (no auto-retry,
       async sendMessageRich(input) {
         sentText = input.content.text;
         return { messageId: 9 };
+      },
+      async sendPhotoRich() {
+        throw new Error('unexpected photo send in this test');
+      },
+      async sendVideoRich() {
+        throw new Error('unexpected video send in this test');
       },
     };
     const clock = mutableClock(START);
