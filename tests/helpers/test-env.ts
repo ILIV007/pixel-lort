@@ -10,13 +10,17 @@ import type { WorkerEnv } from '../../src/shared/types/env';
  */
 export function createTestEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
   return {
-    APP_VERSION: '1.14.1-test',
+    APP_VERSION: '1.15.0-test',
     ENVIRONMENT: 'development',
     LOG_LEVEL: 'debug',
     // R1.18 (ADR-0046): the read-only review gate ships OFF in the test-env
     // default too — suites that exercise the review surface enable it
     // explicitly.
     ADMIN_REVIEW_ENABLED: 'false',
+    // R1.20-R: the admin post pipeline gates ship OFF in the test-env
+    // default too — suites that exercise the surface enable them explicitly.
+    ADMIN_POST_ENABLED: 'false',
+    ADMIN_POST_LIVE_PUBLISH_ENABLED: 'false',
     ...overrides,
   };
 }

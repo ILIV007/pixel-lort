@@ -29,7 +29,7 @@
  */
 import { beforeEach, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
-import { applyMigrations, splitSqlStatements } from '../helpers/migrations';
+import { applyMigrations, MIGRATIONS, splitSqlStatements } from '../helpers/migrations';
 import { createDbExecutor } from '../../src/adapters/db/db-executor';
 import { scanPendingDlqDeliveries } from '../../src/adapters/db/job-store';
 import { canonicalizeJson } from '../../src/domain/jobs/payloads';
@@ -95,7 +95,14 @@ async function ensureProposed0004(): Promise<void> {
 }
 
 beforeEach(async () => {
-  await applyMigrations(env.DB); // DEFAULT plan — schema 3
+  // R1.20-R: the DEFAULT plan now continues to the alternative version-4
+  // candidate (0005_admin_post_pipeline). This lab proves the R09 0004
+  // candidate ON TOP OF THE ACCEPTED SCHEMA 3 base, so the base is applied
+  // EXPLICITLY (versions <= 3) — the two candidates stay exclusive branches.
+  await applyMigrations(
+    env.DB,
+    MIGRATIONS.filter((migration) => migration.version <= 3),
+  );
   await db.run({ sql: 'DELETE FROM jobs' });
 });
 
