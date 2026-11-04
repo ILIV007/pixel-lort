@@ -123,7 +123,7 @@ export const ADMIN_POST_STRINGS = {
     fa: 'استفادهٔ نامعتبر. از /post_status (پیش‌نویس باز خودتان) یا /post_status <شناسهٔ پیش‌نویس> استفاده کنید.',
   } satisfies Localized,
   statusPermissionDenied: {
-    en: 'REJECTED: your role does not hold the publication permission required to view another draft\'s publication state.',
+    en: "REJECTED: your role does not hold the publication permission required to view another draft's publication state.",
     fa: 'رد شد: نقش شما مجوز انتشار لازم برای دیدن وضعیت انتشار پیش‌نویس دیگری را ندارد.',
   } satisfies Localized,
   statusVersion: (version: number): Localized => ({

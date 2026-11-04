@@ -128,7 +128,9 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
       hasText: true,
       text: '',
       richText: undefined,
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: true,
     });
     expect(mediaRejected.kind).toBe('reply');
@@ -154,7 +156,9 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
       hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: ENTITIES },
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     expect(captured.kind).toBe('reply');
@@ -224,7 +228,9 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
       hasText: true,
       text: 'پست دوم برای نمایش نتیجهٔ نامشخص',
       richText: undefined,
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview2 = await service.preview({

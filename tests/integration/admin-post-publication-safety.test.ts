@@ -325,7 +325,9 @@ describe('R1.20-R service-level publish safety', () => {
       hasText: true,
       text: 'پست تست ایمنی',
       richText: undefined,
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview = await service.preview({

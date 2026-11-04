@@ -232,7 +232,9 @@ describe('R1.20-R webhook edge — fail-closed gating and scope', () => {
       },
     });
     expect(rejected.status).toBe(503);
-    const unavailable = rejected.lines.find((l) => l.msg === 'telegram.action.outbound_unavailable');
+    const unavailable = rejected.lines.find(
+      (l) => l.msg === 'telegram.action.outbound_unavailable',
+    );
     expect(unavailable?.['action']).toBe('admin_post_reply');
     const versions = await executor.first<{ count: number }>({
       sql: 'SELECT COUNT(*) AS count FROM admin_post_versions',
@@ -364,7 +366,9 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       hasText: true,
       text: 'متن نسخهٔ یک',
       richText: undefined,
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
   }
@@ -510,7 +514,9 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       hasText: true,
       text: 'متن نسخهٔ دو — تغییر یافته',
       richText: undefined,
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const drafts = await executor.first<{ id: string; current_version: number }>({
@@ -601,7 +607,9 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       hasText: true,
       text: 'متن با فرادادهٔ خراب',
       richText: { ok: false, kind: 'text', reason: 'entities_malformed' },
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     expect(result.kind).toBe('reply');
@@ -631,7 +639,9 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       hasText: true,
       text: 'اولین ارسال',
       richText: undefined,
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     expect(first.kind).toBe('reply');
@@ -651,7 +661,9 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       hasText: true,
       text: 'اولین ارسال',
       richText: undefined,
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     expect(second.kind).toBe('reply');
@@ -719,7 +731,9 @@ describe('R1.20-R approval binding — the OPTIONAL fingerprint contract', () =>
       hasText: true,
       text: 'متن بدون اثر انگشت در توکن',
       richText: undefined,
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview = await service.preview({
@@ -780,7 +794,9 @@ describe('R1.20-R approval binding — the OPTIONAL fingerprint contract', () =>
       hasText: true,
       text: 'متن نسخهٔ دو — محتوا عوض شد',
       richText: undefined,
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview2 = await service.preview({

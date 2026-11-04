@@ -79,7 +79,10 @@ import { ADMIN_POST_STRINGS } from '../../admin/admin-post-strings';
 import type { AdminRole } from '../../admin/roles';
 import { roleHasPermission } from '../../admin/roles';
 import type { AdminUiLanguage } from '../../admin/ui-language';
-import type { ParsedMediaAttachment, ParsedRichTextExtraction } from '../../adapters/telegram/update-parser';
+import type {
+  ParsedMediaAttachment,
+  ParsedRichTextExtraction,
+} from '../../adapters/telegram/update-parser';
 import {
   createRichTextEnvelope,
   serializeRichTextEnvelope,
@@ -92,10 +95,7 @@ import {
   serializePostContentDocument,
   type PostContentDocument,
 } from '../../domain/admin-post/post-content';
-import {
-  fingerprintOfSerializedEnvelope,
-  randomToken,
-} from '../../domain/admin-post/fingerprint';
+import { fingerprintOfSerializedEnvelope, randomToken } from '../../domain/admin-post/fingerprint';
 import { AppError } from '../../shared/errors/app-error';
 import type { Clock } from '../../shared/time/clock';
 import type { Logger } from '../../observability/logger';
@@ -711,10 +711,7 @@ export function createAdminPostService(deps: {
           lines.push(localize(ui, S.statusPublishQueued));
           break;
         case 'claimed':
-          if (
-            publication.lease_expires_at_ms !== null &&
-            publication.lease_expires_at_ms < nowMs
-          ) {
+          if (publication.lease_expires_at_ms !== null && publication.lease_expires_at_ms < nowMs) {
             lines.push(localize(ui, S.statusPublishUncertain(true)));
             resendablePublication = publication;
           } else {
@@ -1132,12 +1129,10 @@ export function createAdminPostService(deps: {
           text: composeTelegramHtml(lines.map((line) => escapeTelegramHtml(line))),
         };
       }
-      return renderStatus(
-        ui,
-        { telegramUserId: input.telegramUserId, role: input.role },
-        draft,
-        { byId: false, captureSessionLine: true },
-      );
+      return renderStatus(ui, { telegramUserId: input.telegramUserId, role: input.role }, draft, {
+        byId: false,
+        captureSessionLine: true,
+      });
     },
 
     async cancel(input) {

@@ -1113,3 +1113,57 @@ design; see the Phase 1B section above.)_
       migration-0005, admin-post-pipeline, admin-post-security,
       admin-post-publication-safety and the offline demo
       (`npm run demo:admin-post`); R1.19.1 regression suites stay green.
+
+## R1.21 — post path completion + single photo/video (review candidate, NOT activated)
+
+- [x] SEND-INTEGRITY GATE (2A): before EVERY send — first publish AND the
+      human-confirmed re-send — the stored content is re-read, fully
+      re-validated, and its fingerprint RE-DERIVED from the re-read document
+      (previously the stored fingerprint column alone was compared). A
+      version whose stored bytes were altered after approval — even with an
+      untouched fingerprint column — can never be sent: the publication is
+      recorded `failed_definitive` with a stable
+      `content_changed_after_approval` error code and the answer says the
+      content no longer matches the approval. Proven for text AND media
+      versions, and for the confirmed recovery path (a tampered version
+      cannot ride it).
+- [x] USABLE ROLE FLOW (2B): the DRAFT ID now reaches the creator in the
+      capture reply ("Draft id: …") and in /post_status; `/post_status
+<draftId>` (same whole-token argument grammar as /post_preview) gives
+      a `publication.publish` holder the publication state — including the
+      uncertain-outcome recovery path — of a post they did NOT create;
+      non-holders get one honest denial, unknown ids get the one not-found
+      answer (no existence oracle), and the confirm-re-send button is minted
+      for the calling publisher. The flow tests take EVERY id and button
+      from the bot's REAL replies (recorded network sends) — never from a
+      direct DB read or undelivered tokens.
+- [x] SINGLE PHOTO/VIDEO (3): a single photo (largest variant file_id) or a
+      single video, with an OPTIONAL faithful caption (text byte-for-byte +
+      validated caption_entities, UTF-16 offsets preserved), is captured as
+      a complete post inside the same explicit session/permission gates.
+      The stored version is the versioned POST-CONTENT DOCUMENT
+      (schemaVersion 1: media none|photo|video + fileId + text/caption
+      envelope) — the fingerprint covers the media identity, the caption
+      and the entities together. Preview sends sendPhoto/sendVideo with
+      caption+caption_entities (NO parse_mode, no text field); the channel
+      send is the SAME dispatch through the SAME real client; a media post
+      without a caption is a valid distinct case and a caption can never be
+      stored or published without its media (structural invariant +
+      kind-checked transport). ALBUMS (media_group_id), documents, audio,
+      stickers and every conflicting/malformed media shape are rejected
+      EXPLICITLY — nothing is degraded into a partial post. Caption bounds
+      (1024 units), oversized captions and malformed caption metadata are
+      explicit rejections. A file reference the Bot API rejects at send
+      time (invalid/expired/unusable) is a definitive failure reported
+      honestly (publishMediaFileFailed answer); file_id is never treated as
+      an eternal access guarantee. No media download, no R2, no parallel
+      media system; no rights claim from the fact an admin sent media.
+- [x] Legacy compatibility: R1.20-R1 rows (bare envelope + fingerprint) are
+      read via the documented fallback and their fingerprint re-derived the
+      exact legacy way; the migration chain stays 0004 → 0005 (schema 5, no
+      new migration needed — the document lives in the existing
+      envelope_json column).
+- [x] Gates: 5 new suites (unit post-content, unit parser-media,
+      integration media, integration role-flow-UI, integration
+      send-integrity) added to `test:db`; full `npm run check` green; all
+      R1.19.1/R1.20-R1 regression suites stay green.

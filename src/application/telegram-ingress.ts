@@ -126,10 +126,7 @@ import { AppError, toAppError, type AppErrorCode } from '../shared/errors/app-er
 import type { Clock } from '../shared/time/clock';
 import type { Logger } from '../observability/logger';
 import type { EditorialReviewService } from './editorial/draft-review-view';
-import type {
-  AdminPostButtons,
-  AdminPostService,
-} from './admin-post/admin-post-service';
+import type { AdminPostButtons, AdminPostService } from './admin-post/admin-post-service';
 import type { PostContentDocument } from '../domain/admin-post/post-content';
 
 export type TelegramUpdateOutcome = 'processed' | 'duplicate' | 'failed';

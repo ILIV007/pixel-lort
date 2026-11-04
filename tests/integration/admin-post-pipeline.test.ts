@@ -159,7 +159,9 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     expect(captured.kind).toBe('reply');
@@ -220,7 +222,9 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
 
@@ -292,7 +296,9 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview = await service.preview({
@@ -368,7 +374,9 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview = await service.preview({
@@ -477,7 +485,9 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       hasText: true,
       text: 'متن ساده بدون قالب‌بندی',
       richText: undefined,
-      media: undefined, richCaption: undefined, inMediaGroup: false,
+      media: undefined,
+      richCaption: undefined,
+      inMediaGroup: false,
       hasMediaAttachment: false,
     });
     const preview = await service.preview({

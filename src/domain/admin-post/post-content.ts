@@ -136,7 +136,11 @@ export type PostContentReadOutcome =
   | { readonly ok: false; readonly reason: PostContentReadFailureReason };
 
 function isValidFileId(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > POST_CONTENT_LIMITS.maxFileIdUnits) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > POST_CONTENT_LIMITS.maxFileIdUnits
+  ) {
     return false;
   }
   if (new TextEncoder().encode(value).byteLength > POST_CONTENT_LIMITS.maxFileIdBytes) {
@@ -206,9 +210,11 @@ export function createPostContentDocument(input: PostContentInput): PostContentC
 }
 
 /** Envelope -> its canonical wire object (the exact serialized shape). */
-function envelopeWire(envelope: RichTextEnvelope): { readonly ok: true; readonly wire: Record<string, unknown> } | {
-  readonly ok: false;
-} {
+function envelopeWire(envelope: RichTextEnvelope):
+  | { readonly ok: true; readonly wire: Record<string, unknown> }
+  | {
+      readonly ok: false;
+    } {
   const serialized = serializeRichTextEnvelope(envelope);
   if (!serialized.ok) {
     return { ok: false };
@@ -221,12 +227,12 @@ function envelopeWire(envelope: RichTextEnvelope): { readonly ok: true; readonly
  * and key order are fixed by construction (deterministic bytes); the
  * fingerprint over this JSON is the version's content proof.
  */
-export function serializePostContentDocument(
-  document: PostContentDocument,
-): { readonly ok: true; readonly json: string; readonly byteLength: number } | {
-  readonly ok: false;
-  readonly reason: 'serialized_too_large';
-} {
+export function serializePostContentDocument(document: PostContentDocument):
+  | { readonly ok: true; readonly json: string; readonly byteLength: number }
+  | {
+      readonly ok: false;
+      readonly reason: 'serialized_too_large';
+    } {
   const textWire =
     document.text === undefined ? { ok: true as const, wire: null } : envelopeWire(document.text);
   if (!textWire.ok) {

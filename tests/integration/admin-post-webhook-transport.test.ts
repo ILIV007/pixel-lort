@@ -19,7 +19,10 @@ import { createDbExecutor, type DbExecutor } from '../../src/adapters/db/db-exec
  */
 
 const FAKE_WEBHOOK_SECRET = 'test-webhook-secret-0000000000000000';
-const FAKE_BOT_TOKEN = '123456789:AAFAKE_test_token_faketoken1234567890';
+// Deliberately NOT a real Telegram token SHAPE (the secret scanner
+// treats `digits:AA...` as a credential): the tests only need a stable
+// URL component, never a credential-shaped string.
+const FAKE_BOT_TOKEN = '123456789:AB-FAKE-not-a-credential-shape-0000000000';
 const TARGET_CHANNEL = '@pixel_channel';
 const OWNER_ID = 1000000001;
 
