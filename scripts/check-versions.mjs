@@ -128,10 +128,11 @@ if (typeof appVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(appVersion)) {
 }
 
 // ---------------------------------------------------------------------------
-// Schema version — the applied migrations 0001+0002+0003 define version 3.
+// Schema version — the applied migrations 0001+0002+0003 + the LOCAL-ONLY
+// 0005 admin-post candidate define version 4 (R1.20-R).
 // ---------------------------------------------------------------------------
 
-const EXPECTED_SCHEMA_VERSION = '3';
+const EXPECTED_SCHEMA_VERSION = '4';
 
 expectEveryMatch(
   'src/shared/config/phase1a.ts',

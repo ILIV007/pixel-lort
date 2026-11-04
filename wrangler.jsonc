@@ -18,14 +18,14 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.14.1",
+    "APP_VERSION": "1.15.0",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
     // replaced by the real commit identifier at deploy time in later phases;
     // SCHEMA_VERSION is validated as a strict positive decimal integer.
     "APP_COMMIT": "local-dev",
-    "SCHEMA_VERSION": "3",
+    "SCHEMA_VERSION": "4",
     // Phase 2A Telegram ingress flag (non-secret; ADR-0024). The webhook
     // route fails closed unless this is "true" AND the Phase 2 secrets are
     // configured (BOT_TOKEN / WEBHOOK_SECRET / OWNER_TELEGRAM_ID via
@@ -77,6 +77,13 @@
     // editorial queries. It NEVER implies AI/EDITORIAL/ingestion/relation
     // gates, the Telegram ingress itself, or any write path.
     "ADMIN_REVIEW_ENABLED": "false",
+    // R1.20-R admin post pipeline gates (non-secret). FAIL-CLOSED defaults:
+    // ADMIN_POST_ENABLED gates the authorized admin post capture/preview/
+    // approve/callback surface; ADMIN_POST_LIVE_PUBLISH_ENABLED gates ONLY
+    // the real channel send (an approved post can NEVER reach the channel
+    // while it is "false"). Both ship "false" everywhere in this round.
+    "ADMIN_POST_ENABLED": "false",
+    "ADMIN_POST_LIVE_PUBLISH_ENABLED": "false",
   },
 
   // ---------------------------------------------------------------------------
@@ -157,11 +164,11 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.14.1",
+        "APP_VERSION": "1.15.0",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
-        "SCHEMA_VERSION": "3",
+        "SCHEMA_VERSION": "4",
         // Owner-authorized Preview live wiring. Secret VALUES remain in
         // Cloudflare only: BOT_TOKEN, WEBHOOK_SECRET, OWNER_TELEGRAM_ID.
         // Production is unchanged; local defaults above remain disabled.

@@ -1067,3 +1067,49 @@ design; see the Phase 1B section above.)_
 - [x] Reviewer regression suites added and green (message-order fencing,
       corrupt-row recovery); full gate re-run on clean installs at every
       round.
+
+## R1.20-R — admin post pipeline (REBUILD round; review candidate, NOT activated)
+
+- [x] Authorized admin post CAPTURE (subphase A): plain (non-command) text
+      from an authorized admin in a PRIVATE chat only; groups/channels and
+      unauthorized senders keep silent legacy noop semantics; edited
+      messages are explicitly rejected and never applied; media posts
+      (including caption-only) are EXPLICITLY rejected — a caption is never
+      treated as a complete post; oversized/empty/malformed-rich-text
+      content is rejected with stable replies; nothing is silently dropped.
+- [x] Durable versioned STORAGE (subphase B): migration
+      `0005_admin_post_pipeline.sql` (schema 3 → 4, LOCAL candidate); the
+      canonical R1.19 rich-text envelope is stored verbatim with a stable
+      SHA-256 content fingerprint; one OPEN draft per creator, each content
+      message appends a version and atomically invalidates older approvals;
+      a redelivered update can never create a duplicate version
+      (durable source-update guard on top of the telegram_updates claim).
+- [x] Faithful PREVIEW (subphase C): the content message is the EXACT
+      stored envelope re-read from D1, re-validated and fingerprint-verified
+      (a corrupted stored document fails loudly, never silently);
+      control information (label + buttons) travels in a SEPARATE message so
+      text and UTF-16 offsets are never altered; NO parse_mode anywhere.
+- [x] Version-bound APPROVAL (subphase D): the callback token is consumed
+      exactly once, bound to ONE user, and resolved through the durable
+      preview-session row; the optional fingerprint field cannot bypass the
+      binding (session + stored version must agree server-side) and a
+      foreign fingerprint is rejected as tampered; one ACTIVE approval per
+      version; stale versions, unknown/expired sessions and revoked
+      permissions all fail closed with honest replies.
+- [x] Safe/recoverable PUBLICATION (subphase E): destination is the
+      operator-configured TARGET_CHANNEL (never user input); the partial
+      UNIQUE index admits one primary publication per version; the send is
+      claimed (lease + owner fence) and the outcome recorded HONESTLY as
+      sent / failed_definitive (proved non-delivery) / uncertain (timeout,
+      network, 5xx, unreadable response — the message MAY have arrived);
+      uncertain outcomes are NEVER auto-resent; the ONLY re-send path is the
+      explicit human-confirmed supersede flow (/post_status confirm button,
+      audit-linked via supersede_of); a late response from a worker whose
+      claim was superseded can never flip the newer state (fence-tested);
+      LIVE publication ships default-OFF
+      (ADMIN_POST_LIVE_PUBLISH_ENABLED=false) and while OFF the publish
+      action stops BEFORE any publication row or Bot API call.
+- [x] Self-check integration (subphase F): 47 new tests across
+      migration-0005, admin-post-pipeline, admin-post-security,
+      admin-post-publication-safety and the offline demo
+      (`npm run demo:admin-post`); R1.19.1 regression suites stay green.

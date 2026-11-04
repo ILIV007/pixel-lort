@@ -40,6 +40,19 @@ migration list below.
   first; execution on any real database requires separate owner approval
   and the transition/preflight/rollback runbook
   (`docs/reviews/PIXEL_ROUND1_9_MIGRATION_0004_TRANSITION.md`).
+- `0005_admin_post_pipeline.sql` — **R1.20-R PRODUCT CANDIDATE (LOCAL ONLY —
+  proposed, NOT applied to any real database)**: the admin post pipeline
+  (five tables: drafts, versions, preview_sessions, approvals, publications
+  - 5 indexes incl. the partial UNIQUE `idx_admin_post_pub_primary`
+    admitting ONE primary publication per (draft, version)) +
+    `schema_metadata` 3 → 4. The DEFAULT test plan (and this round's
+    applied-path candidate) — the file number reflects append order; the
+    TARGET VERSION is 4, making it the version-4 alternative to the Round 1.9
+    `0004_source_poll_ownership` candidate (which stays applied ONLY through
+    the explicit ROUND19 plan). The two candidates are mutually exclusive
+    upgrade branches over the same accepted 0001–0003 base; applying both to
+    one database requires an explicit owner renumbering decision. NO
+    Cloudflare/wrangler migration command has been or may be run for it.
 
 ## Rules (ADR-0019, AGENTS.md §6)
 
@@ -47,7 +60,8 @@ migration list below.
    Schema changes append a new file (`0003_*.sql` and newer) whose SQL also
    advances `schema_metadata.schema_version` inside the same atomic unit.
    0001–0003 remain the ONLY APPLIED files; `0004_source_poll_ownership.sql`
-   is a Round 1.9 LOCAL candidate with zero real-database applications.
+   (Round 1.9 R09) and `0005_admin_post_pipeline.sql` (R1.20-R admin post
+   pipeline) are LOCAL candidates with zero real-database applications.
 2. **Application metadata vs. Wrangler bookkeeping.** `schema_metadata`
    describes WHAT the running application expects (read by `/health/ready`
    and `/version`); wrangler's `d1_migrations` table records WHICH FILES

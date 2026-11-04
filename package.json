@@ -1,8 +1,8 @@
 {
   "name": "pixel",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "private": true,
-  "description": "Pixel — Persian-language autonomous Telegram gaming editorial agent for the pixel lores channel (@pixellores). Cloudflare Workers foundation.",
+  "description": "Pixel \u2014 Persian-language autonomous Telegram gaming editorial agent for the pixel lores channel (@pixellores). Cloudflare Workers foundation.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -32,7 +32,8 @@
     "demo:entity-mentions": "vitest run tests/integration/entity-mentions-demo.test.ts",
     "demo:event-relations": "vitest run tests/integration/event-relations-demo.test.ts",
     "demo:editorial-review": "vitest run tests/integration/editorial-review-demo.test.ts",
-    "demo:telegram-rich-text": "vitest run tests/integration/telegram-rich-text-demo.test.ts"
+    "demo:telegram-rich-text": "vitest run tests/integration/telegram-rich-text-demo.test.ts",
+    "demo:admin-post": "vitest run tests/integration/admin-post-demo.test.ts"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
