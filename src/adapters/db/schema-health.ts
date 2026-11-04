@@ -130,7 +130,18 @@ export type SchemaCapabilityUnresolvedReason =
   /** A value that is not a positive safe integer (corrupt/oversized). */
   | 'schema_capability_metadata_invalid'
   /** A well-formed integer that is NOT an exactly-known version (≠3, ≠4). */
-  | 'schema_capability_version_unsupported';
+  | 'schema_capability_version_unsupported'
+  /**
+   * R1.20-R: version 4 is recorded WITHOUT the R09 ownership migration id —
+   * the two schema-4 candidates (0004_source_poll_ownership vs
+   * 0005_admin_post_pipeline) are distinguished by migration_id; an unknown
+   * id at version 4 must never be interpreted as either capability.
+   */
+  | 'schema_capability_migration_id_unknown';
+
+/** The migration_id values that identify a KNOWN schema-4 shape. */
+export const SCHEMA_V4_OWNERSHIP_MIGRATION_ID = '0004_source_poll_ownership';
+export const SCHEMA_V4_ADMIN_POST_MIGRATION_ID = '0005_admin_post_pipeline';
 
 /** The three distinct, typed capability states (R19-01 — no boolean merge). */
 export type SchemaCapability =
@@ -140,6 +151,16 @@ export type SchemaCapability =
     }
   | {
       readonly kind: 'known_v4_ownership';
+      readonly appliedSchemaVersion: 4;
+    }
+  | {
+      /**
+       * R1.20-R: the admin-post schema-4 candidate. The INGESTION tables are
+       * byte-identical to the accepted schema 3, so every ingestion path
+       * treats this state EXACTLY like the legacy mode (the R09 ownership
+       * column simply does not exist here).
+       */
+      readonly kind: 'known_v4_admin_post';
       readonly appliedSchemaVersion: 4;
     }
   | {
@@ -173,7 +194,29 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
     return { kind: 'known_v3_legacy', appliedSchemaVersion: 3 };
   }
   if (parsed === 4) {
-    return { kind: 'known_v4_ownership', appliedSchemaVersion: 4 };
+    // R1.20-R: TWO version-4 candidates exist (the R09 ownership candidate
+    // and the admin-post pipeline candidate). The recorded migration_id
+    // distinguishes them — a bare version number can never be the only
+    // evidence for the ownership column shape.
+    let idRow: { value: string } | null;
+    try {
+      idRow = await executor.first<{ value: string }>({
+        sql: `SELECT value FROM ${SCHEMA_METADATA_TABLE} WHERE key = ?`,
+        params: [SCHEMA_METADATA.migrationIdKey],
+      });
+    } catch {
+      return { kind: 'unresolved', reason: 'schema_capability_metadata_read_failed' };
+    }
+    if (idRow === null || idRow.value === '') {
+      return { kind: 'unresolved', reason: 'schema_capability_metadata_missing' };
+    }
+    if (idRow.value === SCHEMA_V4_OWNERSHIP_MIGRATION_ID) {
+      return { kind: 'known_v4_ownership', appliedSchemaVersion: 4 };
+    }
+    if (idRow.value === SCHEMA_V4_ADMIN_POST_MIGRATION_ID) {
+      return { kind: 'known_v4_admin_post', appliedSchemaVersion: 4 };
+    }
+    return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
   }
   return { kind: 'unresolved', reason: 'schema_capability_version_unsupported' };
 }

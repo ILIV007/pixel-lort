@@ -53,6 +53,31 @@ const KNOWN_CHAT_TYPES: ReadonlySet<string> = new Set([
   'channel',
 ]);
 
+/**
+ * R1.20-R: media attachment field names checked for PRESENCE only (the
+ * admin post surface must be able to reject media posts EXPLICITLY instead
+ * of silently treating them as contentless). Values are never read.
+ */
+const MEDIA_ATTACHMENT_FIELDS: ReadonlySet<string> = new Set([
+  'photo',
+  'video',
+  'document',
+  'audio',
+  'animation',
+  'voice',
+  'video_note',
+  'sticker',
+]);
+
+function hasMediaAttachment(payload: Record<string, unknown>): boolean {
+  for (const field of MEDIA_ATTACHMENT_FIELDS) {
+    if (payload[field] !== undefined) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Bounded chat-type extraction: known values only, everything else absent. */
 function boundedChatType(value: unknown): string | undefined {
   if (typeof value !== 'string' || !KNOWN_CHAT_TYPES.has(value)) {
@@ -111,6 +136,21 @@ export interface ParsedMessageFields {
    * `entities_malformed` outcome, never repaired into absence/empty.
    */
   readonly richCaption?: ParsedRichTextExtraction;
+  /**
+   * R1.20-R: PASSIVE presence flag — the raw `text` field is a non-empty
+   * string, REGARDLESS of the application bound. This lets callers
+   * distinguish "no text" from "text present but beyond the bound" so an
+   * oversized post can be rejected EXPLICITLY instead of silently
+   * mis-classified as contentless. Never logged.
+   */
+  readonly hasText?: boolean;
+  /**
+   * R1.20-R: PASSIVE presence flag — the message carries a media attachment
+   * (photo/video/document/audio/animation/voice/video_note/sticker).
+   * Presence only: no attachment content, id, or file reference is extracted
+   * or retained. Never logged.
+   */
+  readonly hasMediaAttachment?: boolean;
 }
 
 export interface ParsedCallbackFields {
@@ -397,7 +437,13 @@ function parseMessageLike(
   }
   const chat = payload['chat'];
   const from = payload['from'];
-  const text = boundedText(payload['text']);
+  // R1.20-R: raw presence flags BEFORE the bound projection — hasText is
+  // true for ANY non-empty string text (even beyond the application bound),
+  // so an oversized post stays explicitly distinguishable from no content.
+  const rawText = payload['text'];
+  const hasText = typeof rawText === 'string' && rawText.length > 0;
+  const mediaAttachment = hasMediaAttachment(payload);
+  const text = boundedText(rawText);
   const parsedCommand = text === undefined ? undefined : extractBotCommand(text);
 
   // R1.19: rich-text metadata is extracted from BOTH content kinds
@@ -441,6 +487,8 @@ function parseMessageLike(
     commandTarget: parsedCommand?.targetUsername,
     ...(richText !== undefined ? { richText } : {}),
     ...(richCaption !== undefined ? { richCaption } : {}),
+    ...(hasText ? { hasText } : {}),
+    ...(mediaAttachment ? { hasMediaAttachment: mediaAttachment } : {}),
   };
 }
 

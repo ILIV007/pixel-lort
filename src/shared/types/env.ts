@@ -228,6 +228,20 @@ export interface WorkerEnv {
    */
   readonly ADMIN_REVIEW_ENABLED?: string;
   /**
+   * NON-SECRET admin post pipeline gate ('true' | 'false'; default 'false';
+   * R1.20-R). INDEPENDENT fail-closed flag for the authorized admin post
+   * capture/preview/approve/callback surface. Never implies the ingress,
+   * AI, editorial, ingestion, or ANY send path.
+   */
+  readonly ADMIN_POST_ENABLED?: string;
+  /**
+   * NON-SECRET admin post LIVE publication gate ('true' | 'false'; default
+   * 'false'; R1.20-R). While OFF an approved post can NEVER reach the real
+   * channel — the publish action stops before any publication row or Bot
+   * API call. Independent of ADMIN_POST_ENABLED.
+   */
+  readonly ADMIN_POST_LIVE_PUBLISH_ENABLED?: string;
+  /**
    * Workers AI binding (blueprint §4 binding name AI). Optional: only
    * present where wrangler.jsonc declares it (preview — configuration-as-
    * code reconciliation of the owner-approved dashboard binding). With

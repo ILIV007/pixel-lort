@@ -47,6 +47,7 @@ import { AppError, type AppErrorCode } from '../../../shared/errors/app-error';
 import { parseWorkerConfig } from '../../../shared/config/phase0';
 import { parseTelegramPhase2Config } from '../../../shared/config/phase2';
 import { parseAdminReviewConfig } from '../../../shared/config/phase9';
+import { parseAdminPostConfig } from '../../../shared/config/phase10';
 import { timingSafeEqualStrings } from '../../../shared/security/timing-safe';
 import {
   BoundedReadError,
@@ -57,6 +58,7 @@ import {
 import type { WorkerEnv } from '../../../shared/types/env';
 import { createTelegramIngress } from '../../../application/telegram-ingress';
 import { createEditorialReviewService } from '../../../application/editorial/draft-review-view';
+import { createAdminPostService } from '../../../application/admin-post/admin-post-service';
 import { createAuthorizationService } from '../../../admin/authorization';
 import { createCommandRouter } from '../../../admin/command-router';
 import { createDbExecutor } from '../../../adapters/db/db-executor';
@@ -235,6 +237,23 @@ export async function handleTelegramWebhook(
   }
   const reviewEnabled = review.config.reviewEnabled;
 
+  // R1.20-R: the admin post pipeline gates are parsed fail-closed —
+  // absent/false AND any invalid-present value both DISABLE (the invalid
+  // value is logged as a stable field/reason pair, never as a value).
+  // ADMIN_POST_ENABLED gates the capture/preview/approve/callback surface;
+  // ADMIN_POST_LIVE_PUBLISH_ENABLED (independent, default false) gates ONLY
+  // the actual channel send.
+  const adminPostFlags = parseAdminPostConfig(env as Readonly<Record<string, unknown>>);
+  if (!adminPostFlags.result.ok) {
+    for (const issue of adminPostFlags.result.issues) {
+      ctx.logger.warn('telegram.webhook.admin_post_config_invalid', {
+        field: issue.field,
+        reason: issue.reason,
+      });
+    }
+  }
+  const adminPostEnabled = adminPostFlags.config.adminPostEnabled;
+
   const ingress = createTelegramIngress({
     executor,
     authorization: createAuthorizationService({
@@ -248,10 +267,26 @@ export async function handleTelegramWebhook(
       // username source exists yet, so every explicitly-targeted command is
       // ignored (fail closed). Wiring arrives with Phase 2B.
       reviewEnabled,
+      adminPostEnabled,
     }),
     // R1.18: the read-only review service is wired ONLY while the gate is
     // ON — the SAME production factory the offline demo shares.
     editorialReview: reviewEnabled ? createEditorialReviewService({ executor }) : undefined,
+    // R1.20-R: the admin post service is wired ONLY while its gate is ON;
+    // the transport is the SAME combined Bot API client (direct-entity
+    // send), and the destination is the operator-configured TARGET_CHANNEL
+    // (never user input). The live-publish flag ships OFF.
+    adminPost: adminPostEnabled
+      ? createAdminPostService({
+          executor,
+          clock: systemClock,
+          logger: ctx.logger,
+          config: {
+            livePublishEnabled: adminPostFlags.config.livePublishEnabled,
+            destination: phase2.config.targetChannel,
+          },
+        })
+      : undefined,
     // Offline mode without BOT_TOKEN: noop actions complete; outbound
     // actions fail retryably (never silently skipped-and-acked).
     botApi:

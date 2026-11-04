@@ -118,11 +118,15 @@ import type { CommandRouter, TelegramAction } from '../admin/command-router';
 import { isSafeTelegramHtml, type TelegramSafeHtml } from '../admin/telegram-html';
 import type { AdminUiLanguage } from '../admin/ui-language';
 import { createAdminUiLanguageStore } from '../adapters/db/admin-ui-language-store';
-import type { TelegramBotApiClient } from '../adapters/telegram/bot-api-client';
+import type {
+  TelegramBotApiClient,
+  TelegramRichTextClient,
+} from '../adapters/telegram/bot-api-client';
 import { AppError, toAppError, type AppErrorCode } from '../shared/errors/app-error';
 import type { Clock } from '../shared/time/clock';
 import type { Logger } from '../observability/logger';
 import type { EditorialReviewService } from './editorial/draft-review-view';
+import type { AdminPostButtons, AdminPostService } from './admin-post/admin-post-service';
 
 export type TelegramUpdateOutcome = 'processed' | 'duplicate' | 'failed';
 
@@ -178,8 +182,11 @@ export interface TelegramIngressDeps {
   readonly authorization: AuthorizationService;
   readonly commandRouter: CommandRouter;
   /** Optional: absent (no BOT_TOKEN) means offline mode — noop actions
-   *  complete; outbound actions fail as retryable service_unavailable. */
-  readonly botApi?: TelegramBotApiClient;
+   *  complete; outbound actions fail as retryable service_unavailable.
+   *  R1.20-R: the combined client factory also carries the rich-text
+   *  methods; a legacy client without them keeps working for every legacy
+   *  action, and admin-post PREVIEW sends fail honestly without them. */
+  readonly botApi?: TelegramBotApiClient & Partial<TelegramRichTextClient>;
   /**
    * R1.18 (ADR-0046): the injected read-only editorial review service that
    * executes the typed `drafts_list` / `drafts_detail` actions the router
@@ -188,6 +195,13 @@ export interface TelegramIngressDeps {
    * retryably (honest service_unavailable — never silently skipped).
    */
   readonly editorialReview?: EditorialReviewService;
+  /**
+   * R1.20-R: the injected admin post pipeline service that executes the
+   * typed `admin_post_*` actions the router emits while the
+   * `ADMIN_POST_ENABLED` gate is ON. Absent = retryable wiring failure,
+   * never a silent skip.
+   */
+  readonly adminPost?: AdminPostService;
   readonly clock: Clock;
   readonly logger: Logger;
 }
@@ -206,7 +220,16 @@ export interface TelegramIngress {
 }
 
 export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngress {
-  const { executor, authorization, commandRouter, botApi, editorialReview, clock, logger } = deps;
+  const {
+    executor,
+    authorization,
+    commandRouter,
+    botApi,
+    editorialReview,
+    adminPost,
+    clock,
+    logger,
+  } = deps;
 
   /**
    * Per-admin admin-UI-language store over the EXISTING settings table,
@@ -232,6 +255,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     chatId: number,
     text: TelegramSafeHtml,
     actionType: string,
+    buttons?: AdminPostButtons,
   ): Promise<void> {
     const client = requireBotApi(actionType);
     // Defense-in-depth: only builder-composed text may reach the Bot API.
@@ -239,7 +263,108 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
       logger.error('telegram.action.html_rejected', { action: actionType });
       throw new AppError('internal_error');
     }
-    await client.sendMessage({ chatId, text });
+    await client.sendMessage({
+      chatId,
+      text,
+      ...(buttons !== undefined && buttons.length > 0
+        ? { replyMarkup: { inline_keyboard: buttons } }
+        : {}),
+    });
+  }
+
+  /** The rich-text transport methods (R1.19) for admin-post preview sends. */
+  function requireRichApi(actionType: string): TelegramRichTextClient {
+    if (botApi === undefined || botApi.sendMessageRich === undefined) {
+      logger.warn('telegram.action.rich_unavailable', { action: actionType });
+      throw new AppError('service_unavailable');
+    }
+    return botApi as TelegramRichTextClient;
+  }
+
+  /** Execute one admin-post service action and deliver its outbound result. */
+  async function executeAdminPost(
+    action:
+      | Extract<TelegramAction, { readonly type: 'admin_post_capture' }>
+      | Extract<TelegramAction, { readonly type: 'admin_post_preview' }>
+      | Extract<TelegramAction, { readonly type: 'admin_post_status' }>
+      | Extract<TelegramAction, { readonly type: 'admin_post_cancel' }>
+      | Extract<TelegramAction, { readonly type: 'admin_post_callback' }>,
+  ): Promise<void> {
+    if (adminPost === undefined) {
+      logger.warn('telegram.action.admin_post_unavailable', { action: action.type });
+      throw new AppError('service_unavailable');
+    }
+
+    if (action.type === 'admin_post_callback') {
+      const result = await adminPost.handleCallback({
+        telegramUserId: action.telegramUserId,
+        role: action.role,
+        uiLanguage: action.uiLanguage,
+        token: action.token,
+      });
+      if (result.kind === 'answer') {
+        await requireBotApi('admin_post_callback').answerCallbackQuery({
+          callbackQueryId: action.callbackQueryId,
+          text: result.callbackText,
+        });
+      }
+      return;
+    }
+
+    const result = await (async () => {
+      switch (action.type) {
+        case 'admin_post_capture':
+          return adminPost.capture({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+            updateId: action.updateId,
+            text: action.text,
+            richText: action.richText,
+            richCaptionPresent: action.richCaptionPresent,
+            hasMediaAttachment: action.hasMediaAttachment,
+          });
+        case 'admin_post_preview':
+          return adminPost.preview({
+            chatId: action.chatId,
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+            updateId: action.updateId,
+          });
+        case 'admin_post_status':
+          return adminPost.status({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+          });
+        case 'admin_post_cancel':
+          return adminPost.cancel({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+          });
+      }
+    })();
+    if (result === undefined || result.kind === 'answer' || result.kind === 'none') {
+      return;
+    }
+
+    switch (result.kind) {
+      case 'reply':
+        await sendSafely(action.chatId, result.text, 'admin_post_reply', result.buttons);
+        return;
+      case 'preview': {
+        // CONTROL/CONTENT SEPARATION: the content message is the EXACT
+        // stored envelope (text + entities, NO parse_mode); the control
+        // message (label + buttons) travels separately so the content text
+        // and its UTF-16 offsets are never altered by admin surface data.
+        const rich = requireRichApi('admin_post_preview');
+        await rich.sendMessageRich({ chatId: action.chatId, content: result.content });
+        await sendSafely(action.chatId, result.control, 'admin_post_control', result.buttons);
+        return;
+      }
+    }
   }
 
   /** Execute a routed action against the injected Bot API client. */
@@ -300,6 +425,13 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         await sendSafely(action.chatId, text, 'set_admin_ui_language');
         return;
       }
+      case 'admin_post_capture':
+      case 'admin_post_preview':
+      case 'admin_post_status':
+      case 'admin_post_cancel':
+      case 'admin_post_callback':
+        await executeAdminPost(action);
+        return;
     }
   }
 

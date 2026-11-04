@@ -108,6 +108,16 @@ export interface TelegramSendMessageInput {
   readonly chatId: number;
   readonly text: TelegramSafeHtml;
   readonly disableLinkPreview?: boolean;
+  /**
+   * R1.20-R: optional inline keyboard for CONTROL messages (admin post
+   * preview/status buttons). Absent = identical payload as before. Callback
+   * data strings are the opaque `a:<token>` contract only.
+   */
+  readonly replyMarkup?: {
+    readonly inline_keyboard: ReadonlyArray<
+      ReadonlyArray<{ readonly text: string; readonly callbackData: string }>
+    >;
+  };
 }
 
 export interface TelegramEditMessageInput {
@@ -152,7 +162,11 @@ export class TelegramRichContentError extends Error {
 }
 
 export interface TelegramSendRichInput {
-  readonly chatId: number;
+  /**
+   * Numeric chat id, or an operator-configured @username target (Telegram
+   * resolves usernames server-side; never user input).
+   */
+  readonly chatId: number | string;
   /** kind must be 'text' — a caption envelope fails typed before fetch. */
   readonly content: RichTextEnvelope;
   /** Existing documented policy: link previews disabled by default. */
@@ -453,6 +467,18 @@ export function createBotApiClient(
           text: requireSafeHtml(input.text),
           parse_mode: 'HTML',
           disable_web_page_preview: input.disableLinkPreview ?? true,
+          ...(input.replyMarkup !== undefined
+            ? {
+                reply_markup: {
+                  inline_keyboard: input.replyMarkup.inline_keyboard.map((row) =>
+                    row.map((button) => ({
+                      text: button.text,
+                      callback_data: button.callbackData,
+                    })),
+                  ),
+                },
+              }
+            : {}),
         },
         parseSentMessage,
       );

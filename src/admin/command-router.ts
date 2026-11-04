@@ -52,6 +52,7 @@
  */
 import type { ActorResolution } from './authorization';
 import { parseCallbackData } from './callback-tokens';
+import type { AdminRole } from './roles';
 import {
   composeTelegramHtml,
   escapeTelegramHtml,
@@ -61,7 +62,8 @@ import {
 import { roleHasPermission } from './roles';
 import { parseDraftsArgument, type DraftsArgumentParse } from './review-command';
 import { ADMIN_REVIEW_STRINGS, REVIEW_COMMAND } from './review-strings';
-import type { ParsedUpdate } from '../adapters/telegram/update-parser';
+import type { ParsedRichTextExtraction, ParsedUpdate } from '../adapters/telegram/update-parser';
+import { ADMIN_POST_STRINGS } from './admin-post-strings';
 import {
   ADMIN_UI_DENIAL_TEXT,
   ADMIN_UI_STRINGS,
@@ -79,6 +81,12 @@ export function isInitialAdminCommand(command: string): command is InitialAdminC
   return (INITIAL_ADMIN_COMMANDS as readonly string[]).includes(command);
 }
 
+export const ADMIN_POST_COMMANDS = ['post_preview', 'post_status', 'post_cancel'] as const;
+
+function isAdminPostCommand(command: string): boolean {
+  return (ADMIN_POST_COMMANDS as readonly string[]).includes(command);
+}
+
 export type NoopReason =
   | 'unsupported_update'
   | 'not_a_command'
@@ -91,7 +99,9 @@ export type NoopReason =
   | 'language_edited_message'
   | 'language_missing_ordering_metadata'
   | 'review_not_private_chat'
-  | 'review_edited_message';
+  | 'review_edited_message'
+  | 'post_not_private_chat'
+  | 'post_edited_message';
 
 /**
  * Denial reasons. `unauthorized` keeps the FIXED minimal English text (the
@@ -153,6 +163,64 @@ export type TelegramAction =
       readonly savedText: TelegramSafeHtml;
       /** Honest reply when an older retried message lost the write fence. */
       readonly staleText: TelegramSafeHtml;
+    }
+  | {
+      /**
+       * R1.20-R: capture one authorized admin's plain (non-command) private
+       * text message as the next version of their open draft. The router
+       * only validated scope/shape; ALL content decisions (media rejection,
+       * rich-text contract, dedup, persistence) happen in the injected
+       * admin-post service — the router NEVER queries D1.
+       */
+      readonly type: 'admin_post_capture';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+      readonly updateId: number;
+      readonly text: string;
+      readonly richText: ParsedRichTextExtraction | undefined;
+      readonly richCaptionPresent: boolean;
+      readonly hasMediaAttachment: boolean;
+    }
+  | {
+      /** R1.20-R: faithful preview of the caller's open draft's current version. */
+      readonly type: 'admin_post_preview';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+      readonly updateId: number;
+    }
+  | {
+      /** R1.20-R: honest status of the caller's open draft (with the confirm-resend button when applicable). */
+      readonly type: 'admin_post_status';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+    }
+  | {
+      /** R1.20-R: cancel the caller's open draft and invalidate its approvals. */
+      readonly type: 'admin_post_cancel';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+    }
+  | {
+      /**
+       * R1.20-R: resolve an `a:<token>` callback through the admin-post
+       * service (approve / publish / confirm-republish). The token is
+       * consumed exactly once, bound to ONE user, and re-validated against
+       * the SERVER-SIDE preview binding — never trusted from the payload.
+       */
+      readonly type: 'admin_post_callback';
+      readonly callbackQueryId: string;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+      readonly token: string;
     };
 
 export interface CommandRouteContext {
@@ -172,6 +240,13 @@ export interface CommandRouteContext {
    * ONLY the new read commands — it never widens any other behavior.
    */
   readonly reviewEnabled?: boolean;
+  /**
+   * R1.20-R: whether the admin post pipeline surface is enabled (the
+   * `ADMIN_POST_ENABLED` fail-closed flag, parsed by the caller).
+   * Default/absent = DISABLED: non-command text keeps the exact legacy
+   * `not_a_command` noop and callback queries keep `callback_not_supported`.
+   */
+  readonly adminPostEnabled?: boolean;
 }
 
 export interface CommandRouter {
@@ -293,6 +368,8 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
   const normalizedExpectedBot = expectedBotUsername?.toLowerCase();
   // R1.18: the review gate is fail-closed — absent/false both DISABLE.
   const reviewEnabled = context.reviewEnabled === true;
+  // R1.20-R: the admin post gate is fail-closed — absent/false both DISABLE.
+  const adminPostEnabled = context.adminPostEnabled === true;
 
   function respond(
     command: InitialAdminCommand,
@@ -330,25 +407,174 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
       if (!callback.ok) {
         return { type: 'noop', reason: 'malformed_callback_data' };
       }
+      // ---- R1.20-R admin post callbacks --------------------------------
+      // Enabled ONLY while the fail-closed gate is ON and the actor is
+      // AUTHORIZED (no feedback — and no token resolution — for anyone
+      // else; unauthorized senders keep the exact legacy noop). The token
+      // is opaque here; ALL binding/validation happens in the service.
+      if (adminPostEnabled) {
+        if (actor.kind === 'unauthorized') {
+          return { type: 'noop', reason: 'callback_not_supported' };
+        }
+        if (update.callbackQueryId === undefined || update.fromUserId === undefined) {
+          return { type: 'noop', reason: 'malformed_callback_data' };
+        }
+        return {
+          type: 'admin_post_callback',
+          callbackQueryId: update.callbackQueryId,
+          telegramUserId: update.fromUserId,
+          role: actor.role,
+          uiLanguage: uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE,
+          token: callback.token,
+        };
+      }
       // Token contract verified; menu resolution (admin_action_tokens) is
       // the Phase 9 admin-menu feature. Nothing is consumed here.
       return { type: 'noop', reason: 'callback_not_supported' };
     }
 
     const { command, chatId } = update;
-    if (command === undefined) {
-      return { type: 'noop', reason: 'not_a_command' };
-    }
     if (update.commandTarget !== undefined) {
       // Explicitly addressed command: execute ONLY when it targets THIS bot.
       // No expected username configured -> every explicit target is another
-      // bot's command and is ignored.
+      // bot's command and is ignored. (Non-command content never carries a
+      // target, so this check is order-safe.)
       if (
         normalizedExpectedBot === undefined ||
         update.commandTarget.toLowerCase() !== normalizedExpectedBot
       ) {
         return { type: 'noop', reason: 'command_for_other_bot' };
       }
+    }
+
+    // ---- R1.20-R admin post surface --------------------------------------
+    // Handled ONLY while the fail-closed gate is ON, BEFORE the legacy
+    // `not_a_command` early return: non-command text (and media) from an
+    // authorized admin in a private chat is the CAPTURE surface. While OFF
+    // the whole block is unreachable and the exact legacy behavior applies
+    // (non-command text -> `not_a_command` noop; /post_* ->
+    // `command_not_allowlisted`).
+    if (adminPostEnabled) {
+      if (command !== undefined && isAdminPostCommand(command)) {
+        if (actor.kind === 'unauthorized') {
+          if (chatId === undefined) {
+            return { type: 'noop', reason: 'unroutable_message' };
+          }
+          return { type: 'denied', chatId, reason: 'unauthorized', text: denialText() };
+        }
+        if (update.chatType !== 'private') {
+          return { type: 'noop', reason: 'post_not_private_chat' };
+        }
+        if (update.kind !== 'message') {
+          return { type: 'noop', reason: 'post_edited_message' };
+        }
+        if (chatId === undefined || update.fromUserId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        const postUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
+        switch (command) {
+          case 'post_preview':
+            return {
+              type: 'admin_post_preview',
+              chatId,
+              telegramUserId: update.fromUserId,
+              role: actor.role,
+              uiLanguage: postUi,
+              updateId: update.updateId,
+            };
+          case 'post_status':
+            return {
+              type: 'admin_post_status',
+              chatId,
+              telegramUserId: update.fromUserId,
+              role: actor.role,
+              uiLanguage: postUi,
+            };
+          case 'post_cancel':
+            return {
+              type: 'admin_post_cancel',
+              chatId,
+              telegramUserId: update.fromUserId,
+              role: actor.role,
+              uiLanguage: postUi,
+            };
+        }
+      }
+      // Capture: plain (non-command) content from an AUTHORIZED admin in a
+      // PRIVATE chat. Groups/channels stay silent noop (no group feedback,
+      // matching the /language convention); unauthorized senders keep the
+      // legacy noop (no feedback); edited messages get an explicit
+      // rejection in private chats (an edit must NEVER enter the pipeline).
+      if (command === undefined) {
+        if (update.chatType !== 'private') {
+          return { type: 'noop', reason: 'post_not_private_chat' };
+        }
+        if (actor.kind === 'unauthorized') {
+          // Legacy behavior for unauthorized senders — no feedback.
+          return { type: 'noop', reason: 'not_a_command' };
+        }
+        if (update.kind === 'edited_message') {
+          if (chatId === undefined) {
+            return { type: 'noop', reason: 'unroutable_message' };
+          }
+          return {
+            type: 'send_message',
+            chatId,
+            text: escapeTelegramHtml(
+              ADMIN_POST_STRINGS.editedMessageRejected[uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE],
+            ),
+          };
+        }
+        if (update.kind !== 'message') {
+          return { type: 'noop', reason: 'unsupported_update' };
+        }
+        if (chatId === undefined || update.fromUserId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        const postUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
+        // Explicit shape rejections BEFORE the service: oversized text is
+        // distinguishable (hasText with no projected text); media and
+        // contentless messages are rejected with stable replies. The
+        // rich-content CONTRACT checks happen in the service.
+        if (update.hasText !== true) {
+          if (update.hasMediaAttachment === true || update.richCaption !== undefined) {
+            return {
+              type: 'send_message',
+              chatId,
+              text: escapeTelegramHtml(ADMIN_POST_STRINGS.captureMediaRejected[postUi]),
+            };
+          }
+          return {
+            type: 'send_message',
+            chatId,
+            text: escapeTelegramHtml(ADMIN_POST_STRINGS.noTextContent[postUi]),
+          };
+        }
+        if (update.text === undefined) {
+          // hasText with no bounded text => beyond the 4096 bound.
+          return {
+            type: 'send_message',
+            chatId,
+            text: escapeTelegramHtml(ADMIN_POST_STRINGS.textTooLong[postUi]),
+          };
+        }
+        return {
+          type: 'admin_post_capture',
+          chatId,
+          telegramUserId: update.fromUserId,
+          role: actor.role,
+          uiLanguage: postUi,
+          updateId: update.updateId,
+          text: update.text,
+          richText: update.richText,
+          richCaptionPresent: update.richCaption !== undefined,
+          hasMediaAttachment: update.hasMediaAttachment === true,
+        };
+      }
+    }
+
+    if (command === undefined) {
+      return { type: 'noop', reason: 'not_a_command' };
     }
     // ---- R1.18 read-only review (`/drafts`) -------------------------------
     // Handled when (and ONLY when) the fail-closed gate is ON. While OFF the

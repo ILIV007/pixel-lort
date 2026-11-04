@@ -2,6 +2,7 @@ import migration0001 from '../../migrations/0001_initial_schema.sql?raw';
 import migration0002 from '../../migrations/0002_telegram_update_lifecycle.sql?raw';
 import migration0003 from '../../migrations/0003_job_dlq_delivery.sql?raw';
 import migration0004Candidate from '../../migrations/0004_source_poll_ownership.sql?raw';
+import migration0005 from '../../migrations/0005_admin_post_pipeline.sql?raw';
 import migration0002Synthetic from '../fixtures/migration-0002-synthetic.sql?raw';
 
 /**
@@ -62,7 +63,25 @@ export const MIGRATIONS: readonly MigrationDescriptor[] = [
   { id: '0001_initial_schema', version: 1, sql: migration0001 },
   { id: '0002_telegram_update_lifecycle', version: 2, sql: migration0002 },
   { id: '0003_job_dlq_delivery', version: 3, sql: migration0003 },
+  { id: '0005_admin_post_pipeline', version: 4, sql: migration0005 },
 ];
+
+/**
+ * The APPLIED accepted history (migrations 0001–0003, schema version 3) —
+ * the append-only base BOTH schema-4 candidates stand on.
+ *
+ * NOTE on version numbering: `0005_admin_post_pipeline` (the R1.20-R admin
+ * post pipeline) is the DEFAULT plan's version-4 migration — file numbers
+ * reflect append order, target versions reflect the schema state over the
+ * applied history. `0004_source_poll_ownership` (the Round 1.9 R09
+ * candidate) is the ALTERNATIVE version-4 candidate and is applied ONLY
+ * through the explicit ROUND19 plan below. The two candidates are mutually
+ * exclusive upgrade branches over the same applied version-3 base; applying
+ * both to one database requires an explicit owner renumbering decision.
+ */
+const APPLIED_MIGRATION_BASE: readonly MigrationDescriptor[] = MIGRATIONS.filter(
+  (migration) => migration.version <= 3,
+);
 
 /** Synthetic version-2 descriptor — TEST INFRASTRUCTURE ONLY. */
 export const SYNTHETIC_MIGRATION_0002: MigrationDescriptor = {
@@ -100,7 +119,7 @@ export const ROUND19_CANDIDATE_MIGRATION_0004: MigrationDescriptor = {
  * registered anywhere in the product.
  */
 export const ROUND19_MIGRATION_PLAN: readonly MigrationDescriptor[] = [
-  ...MIGRATIONS,
+  ...APPLIED_MIGRATION_BASE,
   ROUND19_CANDIDATE_MIGRATION_0004,
 ];
 
