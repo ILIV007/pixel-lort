@@ -116,6 +116,7 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
     await executor.run({ sql: 'DELETE FROM admin_post_preview_sessions' });
     await executor.run({ sql: 'DELETE FROM admin_post_versions' });
     await executor.run({ sql: 'DELETE FROM admin_post_drafts' });
+    await executor.run({ sql: 'DELETE FROM settings' });
     await executor.run({ sql: 'DELETE FROM admin_action_tokens' });
     await executor.run({ sql: 'DELETE FROM telegram_updates' });
     await executor.run({ sql: 'DELETE FROM admins' });
@@ -136,11 +137,20 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       config: { livePublishEnabled: false, destination: '@pixellores' },
     });
 
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 99000,
+    });
     const captured = await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 9100,
+      kind: 'message',
+      hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
       richCaptionPresent: false,
@@ -185,11 +195,20 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       logger: silentLogger(),
       config: { livePublishEnabled: true, destination: '@pixellores' },
     });
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 99001,
+    });
     await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 9101,
+      kind: 'message',
+      hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
       richCaptionPresent: false,
@@ -247,11 +266,20 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       config: { livePublishEnabled: true, destination: '@pixellores' },
       transport: fake.transport,
     });
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 99002,
+    });
     await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 9110,
+      kind: 'message',
+      hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
       richCaptionPresent: false,
@@ -314,11 +342,20 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       config: { livePublishEnabled: true, destination: '@pixellores' },
       transport: fake.transport,
     });
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 99003,
+    });
     await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 9120,
+      kind: 'message',
+      hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: POST_ENTITIES },
       richCaptionPresent: false,
@@ -414,11 +451,20 @@ describe('R1.20-R admin post pipeline — real path over real D1', () => {
       config: { livePublishEnabled: true, destination: '@pixellores' },
       transport: fake.transport,
     });
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 99004,
+    });
     await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 9130,
+      kind: 'message',
+      hasText: true,
       text: 'متن ساده بدون قالب‌بندی',
       richText: undefined,
       richCaptionPresent: false,

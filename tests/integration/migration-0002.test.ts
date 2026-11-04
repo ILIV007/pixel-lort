@@ -96,22 +96,23 @@ describe('migration 0002 — populated schema-v1 database upgrades to schema v2'
     const result = await applyMigrations(db);
 
     expect(result.observedVersion).toBe(1);
-    // R1.20-R: the append-only default plan now continues through the
-    // LOCAL-ONLY 0005 admin-post candidate — the populated v1 database
-    // upgrades through 0002 + 0003 + 0005 in one pending-only pass.
+    // R1.20-R1: the LINEAR default plan now continues through the
+    // LOCAL-ONLY 0004 + 0005 candidates — the populated v1 database
+    // upgrades through 0002 + 0003 + 0004 + 0005 in one pending-only pass.
     expect(result.applied.map((migration) => migration.id)).toEqual([
       '0002_telegram_update_lifecycle',
       '0003_job_dlq_delivery',
+      '0004_source_poll_ownership',
       '0005_admin_post_pipeline',
     ]);
-    expect(result.finalVersion).toBe(4);
-    expect(await appliedSchemaVersion()).toBe(4);
+    expect(result.finalVersion).toBe(5);
+    expect(await appliedSchemaVersion()).toBe(5);
 
     const metadata = await db
       .prepare(`SELECT key, value FROM schema_metadata ORDER BY key`)
       .all<{ key: string; value: string }>();
     const byKey = new Map(metadata.results.map((row) => [row.key, row.value]));
-    expect(byKey.get('schema_version')).toBe('4');
+    expect(byKey.get('schema_version')).toBe('5');
     expect(byKey.get('migration_id')).toBe('0005_admin_post_pipeline');
     expect(byKey.get('applied_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     // The UPDATE statements did not duplicate metadata rows.
@@ -188,10 +189,10 @@ describe('migration 0002 — populated schema-v1 database upgrades to schema v2'
     await applyMigrations(db);
     const again = await applyMigrations(db);
 
-    expect(again.observedVersion).toBe(4);
+    expect(again.observedVersion).toBe(5);
     expect(again.applied).toEqual([]);
-    expect(again.finalVersion).toBe(4);
-    expect(await appliedSchemaVersion()).toBe(4);
+    expect(again.finalVersion).toBe(5);
+    expect(await appliedSchemaVersion()).toBe(5);
 
     // No duplicate rows anywhere: legacy rows are exactly the three seeded.
     const updates = await db

@@ -303,11 +303,20 @@ describe('R1.20-R service-level publish safety', () => {
     captureUpdateId: number,
     previewUpdateId: number,
   ): Promise<{ approve: string; publish: string }> {
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 99000,
+    });
     await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: captureUpdateId,
+      kind: 'message',
+      hasText: true,
       text: 'پست تست ایمنی',
       richText: undefined,
       richCaptionPresent: false,

@@ -41,12 +41,27 @@
 --                               `uncertain` (the message MAY have arrived);
 --                               there is NO exactly-once delivery claim.
 --
+-- LINEAR MIGRATION PATH (R1.20-R1 correction): the migration history is one
+-- strictly ascending chain over the applied 0001–0003 base —
+--   schema 3 -> 4 via 0004_source_poll_ownership (the R09 ownership
+--   candidate: source_state.poll_owner_job_id + the outstanding-poll
+--   partial unique index),
+--   schema 4 -> 5 via THIS file (the admin post pipeline stands ON TOP of
+--   the ownership migration, exactly the order real Wrangler applies the
+--   files: lexical filename order, one atomic batch per file).
+-- Version 5 therefore MEANS "ownership present AND admin post present";
+-- the previous non-linear shape (0005 writing version 4, which made two
+-- different database shapes share one version number and left the 0004
+-- changes invisible to the metadata after a sequential apply) is retired.
+-- Both migrations remain LOCAL-ONLY candidates until the owner separately
+-- authorizes remote application.
+--
 -- Integrity is enforced by CHECK constraints + the guarded transitions in
 -- src/adapters/db/admin-post-store.ts; cross-table consistency (draft ->
 -- versions -> approvals/publications) is maintained by the service inside
 -- atomic D1 batches. Applied migrations are append-only (AGENTS.md §6);
 -- this migration advances the APPLICATION schema metadata (schema_metadata —
--- ADR-0019) to version 4 inside the same atomic batch. Wrangler's own
+-- ADR-0019) from 4 to 5 inside the same atomic batch. Wrangler's own
 -- `d1_migrations` bookkeeping is untouched by application code. Remote
 -- application is performed exclusively by `wrangler d1 migrations apply`
 -- with explicit owner approval — NONE has been requested or executed.
@@ -127,7 +142,7 @@ CREATE INDEX idx_admin_post_pub_state
   ON admin_post_publications(state, updated_at_ms);
 
 UPDATE schema_metadata
-   SET value = '4',
+   SET value = '5',
        updated_at_ms = CAST(strftime('%s', 'now') AS INTEGER) * 1000
  WHERE key = 'schema_version';
 

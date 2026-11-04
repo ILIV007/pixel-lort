@@ -49,9 +49,10 @@ import {
   captureVersion,
   cancelOpenDraft,
   claimPublication,
-  consumeApproval,
-  createPublication,
+  closeCaptureSession,
+  consumeApprovalAndCreatePublication,
   createPreviewSession,
+  findOpenCaptureSession,
   findOpenDraftByCreator,
   findPreviewSessionBySourceUpdate,
   findPrimaryPublication,
@@ -62,8 +63,9 @@ import {
   getPreviewSession,
   getPublication,
   getVersion,
-  recordApproval,
-  supersedePublication,
+  openCaptureSession,
+  recordApprovalFenced,
+  supersedeAndCreatePublication,
   type AdminPostPublicationRow,
 } from '../../adapters/db/admin-post-store';
 import { consumeActionToken, issueActionToken } from '../../adapters/telegram/action-tokens';
@@ -142,12 +144,22 @@ export interface AdminPostTransport {
 }
 
 export interface AdminPostService {
+  /** R1.20-R1: open (or re-open) the caller's EXPLICIT capture session. */
+  startSession(input: {
+    readonly telegramUserId: number;
+    readonly role: AdminRole;
+    readonly uiLanguage: AdminUiLanguage;
+    readonly updateId: number;
+  }): Promise<AdminPostExecutionResult>;
   capture(input: {
     readonly telegramUserId: number;
     readonly role: AdminRole;
     readonly uiLanguage: AdminUiLanguage;
     readonly updateId: number;
-    readonly text: string;
+    /** R1.20-R1: the session gate distinguishes fresh messages from edits. */
+    readonly kind: 'message' | 'edited_message';
+    readonly text: string | undefined;
+    readonly hasText: boolean;
     readonly richText: ParsedRichTextExtraction | undefined;
     readonly richCaptionPresent: boolean;
     readonly hasMediaAttachment: boolean;
@@ -158,6 +170,12 @@ export interface AdminPostService {
     readonly role: AdminRole;
     readonly uiLanguage: AdminUiLanguage;
     readonly updateId: number;
+    /**
+     * R1.20-R1: an explicit draft id previews ANOTHER admin's open draft
+     * (the caller must hold `draft.view`); absent = the caller's OWN open
+     * draft. The previewed version is server-side bound either way.
+     */
+    readonly draftId?: string;
   }): Promise<AdminPostExecutionResult>;
   status(input: {
     readonly telegramUserId: number;
@@ -497,11 +515,59 @@ export function createAdminPostService(deps: {
   }
 
   return {
+    async startSession(input) {
+      const ui = input.uiLanguage;
+      // Defense in depth: the router already denies callers whose role lacks
+      // the permission, but the SERVICE re-checks (fail closed) before any
+      // state change — a session can never be opened without draft.create.
+      if (!roleHasPermission(input.role, 'draft.create')) {
+        logger.warn('admin_post.session.denied', { reason: 'missing_permission' });
+        return reply(ui, S.capturePermissionDenied);
+      }
+      const nowMs = clock.now();
+      const existing = await findOpenCaptureSession(executor, input.telegramUserId);
+      await openCaptureSession(executor, {
+        telegramUserId: input.telegramUserId,
+        startedAtMs: nowMs,
+        updateId: input.updateId,
+      });
+      logger.info('admin_post.session', { outcome: existing !== null ? 'already_open' : 'opened' });
+      return reply(ui, existing !== null ? S.sessionAlreadyOpen : S.sessionStarted);
+    },
+
     async capture(input) {
       const ui = input.uiLanguage;
-      // Explicit rejections first — nothing is ever silently dropped.
+      // R1.20-R1 SESSION GATE — FIRST, before any feedback: outside an
+      // explicitly opened capture session every plain admin message is an
+      // ORDINARY message — silent legacy behavior, no reply, no state, no
+      // post data created or changed. (A redelivered update of a message
+      // that WAS captured re-enters the duplicate-source-update guard only
+      // while the session is open; a closed session has nothing to change.)
+      const session = await findOpenCaptureSession(executor, input.telegramUserId);
+      if (session === null) {
+        return { kind: 'none' };
+      }
+      // Explicit rejections next — nothing is ever silently dropped WHILE a
+      // session is open. An edited message NEVER enters the pipeline.
+      if (input.kind === 'edited_message') {
+        return reply(ui, S.editedMessageRejected);
+      }
+      // Authorization (defense in depth): the router denies the /post start
+      // without draft.create; the service re-checks on EVERY capture so a
+      // role revoked mid-session can never write post data.
+      if (!roleHasPermission(input.role, 'draft.create')) {
+        logger.warn('admin_post.capture.denied', { reason: 'missing_permission' });
+        return reply(ui, S.capturePermissionDenied);
+      }
       if (input.hasMediaAttachment || input.richCaptionPresent) {
         return reply(ui, S.captureMediaRejected);
+      }
+      if (input.hasText !== true) {
+        return reply(ui, S.noTextContent);
+      }
+      if (input.text === undefined) {
+        // hasText with no bounded text => beyond the 4096 bound.
+        return reply(ui, S.textTooLong);
       }
       if (input.richText !== undefined && !input.richText.ok) {
         logger.warn('admin_post.capture.rejected', { reason: 'rich_metadata_malformed' });
@@ -558,9 +624,27 @@ export function createAdminPostService(deps: {
 
     async preview(input) {
       const ui = input.uiLanguage;
-      const draft = await findOpenDraftByCreator(executor, input.telegramUserId);
-      if (draft === null) {
-        return reply(ui, S.noOpenDraft);
+      // R1.20-R1: an explicit draft id previews ANOTHER admin's open draft —
+      // the caller must hold `draft.view` (the same blueprint permission the
+      // read-only review surface requires to see drafts). The ONE honest
+      // not-found answer never distinguishes a nonexistent id from a closed
+      // draft (no existence disclosure beyond the draft.view grant).
+      let draft: Awaited<ReturnType<typeof findOpenDraftByCreator>>;
+      if (input.draftId !== undefined) {
+        if (!roleHasPermission(input.role, 'draft.view')) {
+          logger.warn('admin_post.preview.denied', { reason: 'missing_permission' });
+          return reply(ui, S.previewPermissionDenied);
+        }
+        const target = await getDraft(executor, input.draftId);
+        if (target === null || target.status !== 'open') {
+          return reply(ui, S.draftNotFound);
+        }
+        draft = target;
+      } else {
+        draft = await findOpenDraftByCreator(executor, input.telegramUserId);
+        if (draft === null) {
+          return reply(ui, S.noOpenDraft);
+        }
       }
       const versionRow = await getVersion(executor, draft.id, draft.current_version);
       if (versionRow === null) {
@@ -649,13 +733,26 @@ export function createAdminPostService(deps: {
     async status(input) {
       const ui = input.uiLanguage;
       const draft = await findOpenDraftByCreator(executor, input.telegramUserId);
+      const lines: string[] = [];
+      // R1.20-R1: the capture session state is always visible — a session
+      // left open is discoverable here (plain texts are being captured!).
+      const captureSession = await findOpenCaptureSession(executor, input.telegramUserId);
+      lines.push(
+        captureSession !== null
+          ? localize(ui, S.statusSessionOpen)
+          : localize(ui, S.statusSessionClosed),
+      );
       if (draft === null) {
-        return reply(ui, S.statusNoDraft);
+        lines.push(localize(ui, S.statusNoDraft));
+        return {
+          kind: 'reply',
+          text: composeTelegramHtml(lines.map((line) => escapeTelegramHtml(line))),
+        };
       }
+      lines.push(localize(ui, S.statusVersion(draft.current_version)));
       const approval = await getApproval(executor, draft.id, draft.current_version);
       const publication = await findPrimaryPublication(executor, draft.id, draft.current_version);
 
-      const lines: string[] = [localize(ui, S.statusVersion(draft.current_version))];
       lines.push(
         approval !== null && approval.state === 'active'
           ? localize(ui, S.statusApprovalActive)
@@ -723,6 +820,9 @@ export function createAdminPostService(deps: {
 
     async cancel(input) {
       const ui = input.uiLanguage;
+      // R1.20-R1: cancelling ALWAYS closes the capture session (even when no
+      // open draft exists) — the admin is never left silently capturing.
+      await closeCaptureSession(executor, input.telegramUserId);
       const draft = await findOpenDraftByCreator(executor, input.telegramUserId);
       if (draft === null) {
         return reply(ui, S.cancelNone);
@@ -762,7 +862,7 @@ export function createAdminPostService(deps: {
           logger.warn('admin_post.approve.rejected', { reason: bound.reason });
           return rejectionAnswer(ui, bound.reason);
         }
-        const outcome = await recordApproval(executor, {
+        const outcome = await recordApprovalFenced(executor, {
           draftId,
           version: bound.version,
           fingerprint: bound.fingerprint,
@@ -771,6 +871,11 @@ export function createAdminPostService(deps: {
           nowMs,
         });
         logger.info('admin_post.approve', { outcome: outcome.kind, version: bound.version });
+        if (outcome.kind === 'stale') {
+          // R1.20-R1: the head-fence caught a capture that committed between
+          // the bind and the write — the version is no longer current.
+          return answer(ui, localize(ui, S.staleVersion));
+        }
         return answer(
           ui,
           outcome.kind === 'approved'
@@ -791,9 +896,10 @@ export function createAdminPostService(deps: {
           logger.info('admin_post.publish.blocked_flag_off', { version: bound.version });
           return answer(ui, localize(ui, S.publishDisabled));
         }
-        // Publication-state check FIRST so an already-attempted version gets
-        // the honest answer (sent / in progress / safe re-send path) instead
-        // of a misleading approval error.
+        // Fast-path honesty: an already-attempted version gets the honest
+        // answer (sent / in progress / safe re-send path) without touching
+        // the approval. The race-safe work happens in the ATOMIC transition
+        // below.
         const existing = await findPrimaryPublication(executor, draftId, bound.version);
         if (existing !== null) {
           if (existing.state === 'sent') {
@@ -804,15 +910,13 @@ export function createAdminPostService(deps: {
           }
           return answer(ui, localize(ui, S.publishUseStatus));
         }
-        const approval = await consumeApproval(executor, {
-          draftId,
-          version: bound.version,
-          fingerprint: bound.fingerprint,
-        });
-        if (approval.kind === 'not_active') {
-          return answer(ui, localize(ui, S.publishNoApproval));
-        }
-        const created = await createPublication(executor, {
+        // R1.20-R1 ATOMIC transition: consuming the approval and creating
+        // the publication are ONE batch — a crash between them is
+        // impossible (and the transition doubles as the honest recovery
+        // path for a legitimately-consumed approval whose publication never
+        // got created). A losing race rolls the whole batch back: the
+        // approval stays with the winner.
+        const created = await consumeApprovalAndCreatePublication(executor, {
           id: randomToken(),
           draftId,
           version: bound.version,
@@ -823,6 +927,9 @@ export function createAdminPostService(deps: {
         });
         if (created.kind === 'already_exists') {
           return answer(ui, localize(ui, S.publishAlreadyInProgress));
+        }
+        if (created.kind === 'not_active') {
+          return answer(ui, localize(ui, S.publishNoApproval));
         }
         logger.info('admin_post.publish.queued', { version: bound.version });
         return claimSendAndRecord({
@@ -870,14 +977,13 @@ export function createAdminPostService(deps: {
         if (!config.livePublishEnabled) {
           return answer(ui, localize(ui, S.publishDisabled));
         }
-        const superseded = await supersedePublication(executor, {
-          publicationId,
-          nowMs: now,
-        });
-        if (superseded.kind === 'not_resendable') {
-          return answer(ui, localize(ui, S.publishUseStatus));
-        }
-        const created = await createPublication(executor, {
+        // R1.20-R1 ATOMIC transition: the guarded supersede and the
+        // replacement insert are ONE batch — the insert happens ONLY when
+        // the old row is already superseded inside the same transaction, so
+        // a crash or a losing race can never leave a superseded publication
+        // without its replacement (or create a second publication for a
+        // version whose primary is not resendable).
+        const created = await supersedeAndCreatePublication(executor, {
           id: randomToken(),
           draftId,
           version,
@@ -885,10 +991,14 @@ export function createAdminPostService(deps: {
           destination: config.destination ?? '',
           supersedeOf: publicationId,
           attempt: publication.attempt + 1,
+          // Batch-unique marker: the replacement insert is bound to THIS
+          // batch's supersede (a second confirm can never ride a previous
+          // batch's superseded state).
+          supersedeMarker: randomToken(),
           nowMs: clock.now(),
         });
-        if (created.kind === 'already_exists') {
-          return answer(ui, localize(ui, S.publishAlreadyInProgress));
+        if (created.kind === 'not_resendable') {
+          return answer(ui, localize(ui, S.publishUseStatus));
         }
         logger.info('admin_post.republish.queued', {
           version,

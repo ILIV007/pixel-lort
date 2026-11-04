@@ -254,6 +254,20 @@ export async function handleTelegramWebhook(
   }
   const adminPostEnabled = adminPostFlags.config.adminPostEnabled;
 
+  // R1.20-R1: the REAL combined Bot API client is built ONCE and wired BOTH
+  // as the legacy action transport AND as the admin post pipeline's
+  // direct-entity channel transport (the SAME client instance — no second
+  // client, no bypass path). The LIVE flag still gates the send INSIDE the
+  // service (a wired transport never implies a live send: while
+  // ADMIN_POST_LIVE_PUBLISH_ENABLED is off, the publish action stops BEFORE
+  // any publication row or Bot API call). Without BOT_TOKEN the offline
+  // mode keeps its documented behavior (adminPost wired without transport:
+  // a publish attempt reports honestly and the row stays under its lease).
+  const botApi =
+    phase2.config.botToken !== undefined
+      ? createBotApiClient({ botToken: phase2.config.botToken, logger: ctx.logger })
+      : undefined;
+
   const ingress = createTelegramIngress({
     executor,
     authorization: createAuthorizationService({
@@ -273,9 +287,10 @@ export async function handleTelegramWebhook(
     // ON — the SAME production factory the offline demo shares.
     editorialReview: reviewEnabled ? createEditorialReviewService({ executor }) : undefined,
     // R1.20-R: the admin post service is wired ONLY while its gate is ON;
-    // the transport is the SAME combined Bot API client (direct-entity
-    // send), and the destination is the operator-configured TARGET_CHANNEL
-    // (never user input). The live-publish flag ships OFF.
+    // R1.20-R1: the transport is the SAME real Bot API client instance built
+    // above (direct-entity send), and the destination is the
+    // operator-configured TARGET_CHANNEL (never user input). The
+    // live-publish flag ships OFF and gates the send inside the service.
     adminPost: adminPostEnabled
       ? createAdminPostService({
           executor,
@@ -285,14 +300,12 @@ export async function handleTelegramWebhook(
             livePublishEnabled: adminPostFlags.config.livePublishEnabled,
             destination: phase2.config.targetChannel,
           },
+          transport: botApi,
         })
       : undefined,
     // Offline mode without BOT_TOKEN: noop actions complete; outbound
     // actions fail retryably (never silently skipped-and-acked).
-    botApi:
-      phase2.config.botToken !== undefined
-        ? createBotApiClient({ botToken: phase2.config.botToken, logger: ctx.logger })
-        : undefined,
+    botApi,
     clock: systemClock,
     logger: ctx.logger,
   });

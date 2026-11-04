@@ -100,6 +100,8 @@ describe('R1.20-R webhook edge — fail-closed gating and scope', () => {
       'admin_post_drafts',
       'admin_action_tokens',
       'telegram_updates',
+      // R1.20-R1: the capture session lives in the settings table.
+      'settings',
       'admins',
     ]) {
       await executor.run({ sql: `DELETE FROM ${table}` });
@@ -119,6 +121,14 @@ describe('R1.20-R webhook edge — fail-closed gating and scope', () => {
   });
 
   it('captures authorized private text while the flag is ON (durable version row)', async () => {
+    // R1.20-R1: the capture requires the EXPLICIT /post session start.
+    const started = await deliver({ ...FLAG_ON_ENV }, textUpdate(7002, OWNER_ID, '/post'));
+    expect(started.status).toBe(503); // the confirmation reply is outbound (offline mode)
+    const startUnavailable = started.lines.find(
+      (l) => l.msg === 'telegram.action.outbound_unavailable',
+    );
+    expect(startUnavailable?.['action']).toBe('admin_post_reply');
+
     const { status, lines } = await deliver(
       { ...FLAG_ON_ENV },
       textUpdate(7002, OWNER_ID, 'پست فارسی برای ذخیره'),
@@ -163,6 +173,9 @@ describe('R1.20-R webhook edge — fail-closed gating and scope', () => {
   });
 
   it('explicitly rejects edited messages (an edit never enters the pipeline)', async () => {
+    // R1.20-R1: outside a session an edit stays SILENT; inside one it gets
+    // the explicit rejection. Open the session first.
+    await deliver(FLAG_ON_ENV, textUpdate(7005, OWNER_ID, '/post'));
     const { status, lines } = await deliver(FLAG_ON_ENV, {
       update_id: 7005,
       edited_message: {
@@ -173,8 +186,9 @@ describe('R1.20-R webhook edge — fail-closed gating and scope', () => {
       },
     });
     expect(status).toBe(503);
+    // R1.20-R1: the rejection is the SERVICE's reply (admin_post_reply).
     const unavailable = lines.find((l) => l.msg === 'telegram.action.outbound_unavailable');
-    expect(unavailable?.['action']).toBe('send_message');
+    expect(unavailable?.['action']).toBe('admin_post_reply');
     const versions = await executor.first<{ count: number }>({
       sql: 'SELECT COUNT(*) AS count FROM admin_post_versions',
     });
@@ -182,6 +196,8 @@ describe('R1.20-R webhook edge — fail-closed gating and scope', () => {
   });
 
   it('explicitly rejects media posts (photo with caption is NEVER a complete post)', async () => {
+    // R1.20-R1: the media rejection fires within an open capture session.
+    await deliver(FLAG_ON_ENV, textUpdate(7006, OWNER_ID, '/post'));
     const { status, lines } = await deliver(FLAG_ON_ENV, {
       update_id: 7006,
       message: {
@@ -193,8 +209,9 @@ describe('R1.20-R webhook edge — fail-closed gating and scope', () => {
       },
     });
     expect(status).toBe(503);
+    // R1.20-R1: the rejection is the SERVICE's reply (admin_post_reply).
     const unavailable = lines.find((l) => l.msg === 'telegram.action.outbound_unavailable');
-    expect(unavailable?.['action']).toBe('send_message');
+    expect(unavailable?.['action']).toBe('admin_post_reply');
     const versions = await executor.first<{ count: number }>({
       sql: 'SELECT COUNT(*) AS count FROM admin_post_versions',
     });
@@ -202,13 +219,16 @@ describe('R1.20-R webhook edge — fail-closed gating and scope', () => {
   });
 
   it('explicitly rejects oversized text beyond the Telegram 4096 bound', async () => {
+    // R1.20-R1: the oversize rejection fires within an open capture session.
+    await deliver(FLAG_ON_ENV, textUpdate(7007, OWNER_ID, '/post'));
     const { status, lines } = await deliver(
       FLAG_ON_ENV,
       textUpdate(7007, OWNER_ID, 'a'.repeat(4100)),
     );
     expect(status).toBe(503);
+    // R1.20-R1: the rejection is the SERVICE's reply (admin_post_reply).
     const unavailable = lines.find((l) => l.msg === 'telegram.action.outbound_unavailable');
-    expect(unavailable?.['action']).toBe('send_message');
+    expect(unavailable?.['action']).toBe('admin_post_reply');
     const versions = await executor.first<{ count: number }>({
       sql: 'SELECT COUNT(*) AS count FROM admin_post_versions',
     });
@@ -277,6 +297,8 @@ describe('R1.20-R approval binding — the previewed version contract (service l
       'admin_post_versions',
       'admin_post_drafts',
       'admin_action_tokens',
+      // R1.20-R1: the capture session lives in the settings table.
+      'settings',
       'admins',
     ]) {
       await executor.run({ sql: `DELETE FROM ${table}` });
@@ -304,11 +326,20 @@ describe('R1.20-R approval binding — the previewed version contract (service l
   }
 
   async function captureVersion1(service: ReturnType<typeof makeService>): Promise<void> {
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 71000,
+    });
     await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 7100,
+      kind: 'message',
+      hasText: true,
       text: 'متن نسخهٔ یک',
       richText: undefined,
       richCaptionPresent: false,
@@ -441,11 +472,20 @@ describe('R1.20-R approval binding — the previewed version contract (service l
     expect(approved.callbackText).toContain('APPROVED');
 
     // Content update -> version 2; the v1 approval must be invalidated.
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 71001,
+    });
     await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 7104,
+      kind: 'message',
+      hasText: true,
       text: 'متن نسخهٔ دو — تغییر یافته',
       richText: undefined,
       richCaptionPresent: false,
@@ -523,11 +563,20 @@ describe('R1.20-R approval binding — the previewed version contract (service l
 
   it('malformed rich-text metadata is rejected explicitly (never stored, never dropped)', async () => {
     const service = makeService(false);
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 71002,
+    });
     const result = await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 7107,
+      kind: 'message',
+      hasText: true,
       text: 'متن با فرادادهٔ خراب',
       richText: { ok: false, kind: 'text', reason: 'entities_malformed' },
       richCaptionPresent: false,
@@ -544,22 +593,40 @@ describe('R1.20-R approval binding — the previewed version contract (service l
 
   it('a redelivered capture (same update_id) can never create a duplicate version', async () => {
     const service = makeService(false);
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 71003,
+    });
     const first = await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 7108,
+      kind: 'message',
+      hasText: true,
       text: 'اولین ارسال',
       richText: undefined,
       richCaptionPresent: false,
       hasMediaAttachment: false,
     });
     expect(first.kind).toBe('reply');
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 71004,
+    });
     const second = await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 7108,
+      kind: 'message',
+      hasText: true,
       text: 'اولین ارسال',
       richText: undefined,
       richCaptionPresent: false,
@@ -589,6 +656,8 @@ describe('R1.20-R approval binding — the OPTIONAL fingerprint contract', () =>
       'admin_post_versions',
       'admin_post_drafts',
       'admin_action_tokens',
+      // R1.20-R1: the capture session lives in the settings table.
+      'settings',
       'admins',
     ]) {
       await executor.run({ sql: `DELETE FROM ${table}` });
@@ -612,11 +681,20 @@ describe('R1.20-R approval binding — the OPTIONAL fingerprint contract', () =>
 
   it('omitting the payload fingerprint bypasses NOTHING: the SERVER-SIDE binding still approves the right version and still rejects moved content', async () => {
     const service = makeService(false);
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 71005,
+    });
     await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 7300,
+      kind: 'message',
+      hasText: true,
       text: 'متن بدون اثر انگشت در توکن',
       richText: undefined,
       richCaptionPresent: false,
@@ -664,11 +742,20 @@ describe('R1.20-R approval binding — the OPTIONAL fingerprint contract', () =>
 
     // The bypass-prevention direction: strip the fingerprint from a token
     // for an OLDER version after the content moved — still rejected.
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'en',
+      updateId: 71006,
+    });
     await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'en',
       updateId: 7302,
+      kind: 'message',
+      hasText: true,
       text: 'متن نسخهٔ دو — محتوا عوض شد',
       richText: undefined,
       richCaptionPresent: false,

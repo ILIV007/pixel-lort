@@ -128,11 +128,13 @@ if (typeof appVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(appVersion)) {
 }
 
 // ---------------------------------------------------------------------------
-// Schema version — the applied migrations 0001+0002+0003 + the LOCAL-ONLY
-// 0005 admin-post candidate define version 4 (R1.20-R).
+// Schema version — the LINEAR migration candidate chain: the applied
+// 0001+0002+0003 base + the LOCAL-ONLY candidates 0004 (ownership) → 4 and
+// 0005 (admin post) → 5 (R1.20-R1). The real applied runtime stays 3 until
+// the owner authorizes the remote migration.
 // ---------------------------------------------------------------------------
 
-const EXPECTED_SCHEMA_VERSION = '4';
+const EXPECTED_SCHEMA_VERSION = '5';
 
 expectEveryMatch(
   'src/shared/config/phase1a.ts',

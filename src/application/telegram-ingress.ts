@@ -284,6 +284,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
   /** Execute one admin-post service action and deliver its outbound result. */
   async function executeAdminPost(
     action:
+      | Extract<TelegramAction, { readonly type: 'admin_post_start' }>
       | Extract<TelegramAction, { readonly type: 'admin_post_capture' }>
       | Extract<TelegramAction, { readonly type: 'admin_post_preview' }>
       | Extract<TelegramAction, { readonly type: 'admin_post_status' }>
@@ -313,13 +314,22 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
 
     const result = await (async () => {
       switch (action.type) {
+        case 'admin_post_start':
+          return adminPost.startSession({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+            updateId: action.updateId,
+          });
         case 'admin_post_capture':
           return adminPost.capture({
             telegramUserId: action.telegramUserId,
             role: action.role,
             uiLanguage: action.uiLanguage,
             updateId: action.updateId,
+            kind: action.kind,
             text: action.text,
+            hasText: action.hasText,
             richText: action.richText,
             richCaptionPresent: action.richCaptionPresent,
             hasMediaAttachment: action.hasMediaAttachment,
@@ -331,6 +341,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
             role: action.role,
             uiLanguage: action.uiLanguage,
             updateId: action.updateId,
+            draftId: action.draftId,
           });
         case 'admin_post_status':
           return adminPost.status({
@@ -425,6 +436,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         await sendSafely(action.chatId, text, 'set_admin_ui_language');
         return;
       }
+      case 'admin_post_start':
       case 'admin_post_capture':
       case 'admin_post_preview':
       case 'admin_post_status':

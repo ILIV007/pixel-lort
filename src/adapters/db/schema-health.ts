@@ -36,6 +36,14 @@ const VERSION_POSITIVE_INTEGER_PATTERN = /^[1-9][0-9]*$/;
  */
 export const OWNERSHIP_SCHEMA_VERSION = 4;
 
+/**
+ * R1.20-R1 — the schema version of the LINEAR path's final candidate state:
+ * migration candidate 0005 (admin post pipeline) applied ON TOP of 0004.
+ * Version 5 therefore MEANS "ownership present AND admin post present".
+ * Capability marker only — never a health expectation.
+ */
+export const ADMIN_POST_SCHEMA_VERSION = 5;
+
 export const SCHEMA_METADATA = {
   table: SCHEMA_METADATA_TABLE,
   versionKey: 'schema_version',
@@ -129,21 +137,25 @@ export type SchemaCapabilityUnresolvedReason =
   | 'schema_capability_metadata_missing'
   /** A value that is not a positive safe integer (corrupt/oversized). */
   | 'schema_capability_metadata_invalid'
-  /** A well-formed integer that is NOT an exactly-known version (≠3, ≠4). */
+  /** A well-formed integer that is NOT an exactly-known version (≠3, ≠4, ≠5). */
   | 'schema_capability_version_unsupported'
   /**
-   * R1.20-R: version 4 is recorded WITHOUT the R09 ownership migration id —
-   * the two schema-4 candidates (0004_source_poll_ownership vs
-   * 0005_admin_post_pipeline) are distinguished by migration_id; an unknown
-   * id at version 4 must never be interpreted as either capability.
+   * The recorded migration_id does not identify a known shape for the
+   * parsed version — a bare version number is never sufficient evidence for
+   * a table-shape capability.
    */
   | 'schema_capability_migration_id_unknown';
 
-/** The migration_id values that identify a KNOWN schema-4 shape. */
+/** The migration_id values that identify a KNOWN shape. */
 export const SCHEMA_V4_OWNERSHIP_MIGRATION_ID = '0004_source_poll_ownership';
-export const SCHEMA_V4_ADMIN_POST_MIGRATION_ID = '0005_admin_post_pipeline';
+/**
+ * Identifies the version-4 RETIRED shape (the pre-R1.20-R1 non-linear
+ * candidate where 0005 wrote version 4 over the 0004-less chain) AND the
+ * version-5 linear shape — the version number itself distinguishes them.
+ */
+export const SCHEMA_ADMIN_POST_MIGRATION_ID = '0005_admin_post_pipeline';
 
-/** The three distinct, typed capability states (R19-01 — no boolean merge). */
+/** The distinct, typed capability states (R19-01 — no boolean merge). */
 export type SchemaCapability =
   | {
       readonly kind: 'known_v3_legacy';
@@ -155,13 +167,27 @@ export type SchemaCapability =
     }
   | {
       /**
-       * R1.20-R: the admin-post schema-4 candidate. The INGESTION tables are
-       * byte-identical to the accepted schema 3, so every ingestion path
-       * treats this state EXACTLY like the legacy mode (the R09 ownership
-       * column simply does not exist here).
+       * The RETIRED non-linear shape (pre-R1.20-R1): version 4 recorded with
+       * the 0005 migration id — the admin-post tables exist but the R09
+       * ownership column does NOT. The ingestion tables are byte-identical
+       * to the accepted schema 3, so every ingestion path treats this state
+       * EXACTLY like the legacy mode. Only disposable databases created by
+       * the retired candidate can ever report it; the linear chain can no
+       * longer produce it.
        */
       readonly kind: 'known_v4_admin_post';
       readonly appliedSchemaVersion: 4;
+    }
+  | {
+      /**
+       * R1.20-R1: the LINEAR final candidate state — 0005 applied on top of
+       * 0004. BOTH capabilities are present: the ownership column + the
+       * outstanding-poll index (from 0004) AND the admin post tables (from
+       * 0005). Every ingestion path treats this state exactly like the
+       * ownership mode; the admin post pipeline is available.
+       */
+      readonly kind: 'known_v5_admin_post';
+      readonly appliedSchemaVersion: 5;
     }
   | {
       readonly kind: 'unresolved';
@@ -193,11 +219,12 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
   if (parsed === 3) {
     return { kind: 'known_v3_legacy', appliedSchemaVersion: 3 };
   }
-  if (parsed === 4) {
-    // R1.20-R: TWO version-4 candidates exist (the R09 ownership candidate
-    // and the admin-post pipeline candidate). The recorded migration_id
-    // distinguishes them — a bare version number can never be the only
-    // evidence for the ownership column shape.
+  if (parsed === 4 || parsed === 5) {
+    // The migration_id distinguishes the shapes a version number alone can
+    // never prove: at version 4 the ownership column exists ONLY under the
+    // 0004 id; at version 5 the linear chain requires the 0005 id (and
+    // implies 0004's changes). Anything else is UNRESOLVED — no invented
+    // valid shapes.
     let idRow: { value: string } | null;
     try {
       idRow = await executor.first<{ value: string }>({
@@ -210,11 +237,17 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
     if (idRow === null || idRow.value === '') {
       return { kind: 'unresolved', reason: 'schema_capability_metadata_missing' };
     }
-    if (idRow.value === SCHEMA_V4_OWNERSHIP_MIGRATION_ID) {
-      return { kind: 'known_v4_ownership', appliedSchemaVersion: 4 };
+    if (parsed === 4) {
+      if (idRow.value === SCHEMA_V4_OWNERSHIP_MIGRATION_ID) {
+        return { kind: 'known_v4_ownership', appliedSchemaVersion: 4 };
+      }
+      if (idRow.value === SCHEMA_ADMIN_POST_MIGRATION_ID) {
+        return { kind: 'known_v4_admin_post', appliedSchemaVersion: 4 };
+      }
+      return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
     }
-    if (idRow.value === SCHEMA_V4_ADMIN_POST_MIGRATION_ID) {
-      return { kind: 'known_v4_admin_post', appliedSchemaVersion: 4 };
+    if (idRow.value === SCHEMA_ADMIN_POST_MIGRATION_ID) {
+      return { kind: 'known_v5_admin_post', appliedSchemaVersion: 5 };
     }
     return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
   }

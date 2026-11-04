@@ -25,7 +25,7 @@
     // replaced by the real commit identifier at deploy time in later phases;
     // SCHEMA_VERSION is validated as a strict positive decimal integer.
     "APP_COMMIT": "local-dev",
-    "SCHEMA_VERSION": "4",
+    "SCHEMA_VERSION": "5",
     // Phase 2A Telegram ingress flag (non-secret; ADR-0024). The webhook
     // route fails closed unless this is "true" AND the Phase 2 secrets are
     // configured (BOT_TOKEN / WEBHOOK_SECRET / OWNER_TELEGRAM_ID via
@@ -168,7 +168,7 @@
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
-        "SCHEMA_VERSION": "4",
+        "SCHEMA_VERSION": "5",
         // Owner-authorized Preview live wiring. Secret VALUES remain in
         // Cloudflare only: BOT_TOKEN, WEBHOOK_SECRET, OWNER_TELEGRAM_ID.
         // Production is unchanged; local defaults above remain disabled.

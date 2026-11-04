@@ -249,11 +249,15 @@ it('R191-S4: an oversized integer beyond MAX_SAFE_INTEGER is invalid metadata, n
   expect(await stateRow()).toEqual(before);
 });
 
-it('R191-S5: unsupported schema 5 must not reactivate the legacy scheduling path', async () => {
+it('R191-S5: an unknown migration id at schema 5 must not reactivate the legacy scheduling path', async () => {
+  // R1.20-R1: schema 5 IS the known LINEAR final state — but ONLY with the
+  // 0005 migration id. This database stopped at the 0004 candidate (id
+  // 0004), so a bare version bump to 5 with the WRONG id fails closed with
+  // the precise unknown-id reason (never legacy, never ownership).
   await db.run({ sql: "UPDATE schema_metadata SET value='5' WHERE key='schema_version'" });
   expect(await resolveSchemaCapability(db)).toEqual({
     kind: 'unresolved',
-    reason: 'schema_capability_version_unsupported',
+    reason: 'schema_capability_migration_id_unknown',
   });
   const before = await stateRow();
   const outcome = await scheduleDueSources({
@@ -265,7 +269,7 @@ it('R191-S5: unsupported schema 5 must not reactivate the legacy scheduling path
   });
   expect(outcome).toEqual({
     kind: 'capability_unresolved',
-    reason: 'schema_capability_version_unsupported',
+    reason: 'schema_capability_migration_id_unknown',
   });
   expect(await jobCount()).toBe(0);
   expect(await stateRow()).toEqual(before);
@@ -473,8 +477,10 @@ it('R191-H3: oversized/unsafe metadata stops the handler before any ingestion ef
   expect(await stateRow()).toEqual(before);
 });
 
-it('R191-H4: unsupported schema 5 must not silently reactivate the legacy ingestion path (CE4 product coverage)', async () => {
+it('R191-H4: an unknown migration id at schema 5 must not silently reactivate the legacy ingestion path (CE4 product coverage)', async () => {
   await currentOwner();
+  // R1.20-R1: schema 5 with the WRONG migration id (this database stopped
+  // at the 0004 candidate) is UNRESOLVED — the handler stays fail-closed.
   await db.run({ sql: "UPDATE schema_metadata SET value='5' WHERE key='schema_version'" });
   const before = await stateRow();
   expect(await invokeHandler(db, 1)).toEqual({

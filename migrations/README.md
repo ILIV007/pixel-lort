@@ -26,33 +26,36 @@ migration list below.
   `schema_version = 2` with `migration_id = 0002_telegram_update_lifecycle`
   inside the same atomic batch.
 - `0004_source_poll_ownership.sql` — **Round 1.9 PRODUCT CANDIDATE (LOCAL
-  ONLY — proposed, NOT applied anywhere real)**: the R09 source-poll
+  ONLY — proposed, NOT applied to any real database)**: the R09 source-poll
   ownership capability (`source_state.poll_owner_job_id` durable
   winner-owned data + the partial unique outstanding-poll index
   `idx_jobs_source_outstanding_poll` + `schema_metadata` 3 → 4). The DDL
   statements are byte-identical to the independently reviewed Round 1.5
   design fixture (`tests/fixtures/proposed-0004-source-poll-ownership.sql`).
-  APPLIED ONLY to disposable workerd D1 test databases through the explicit
-  test-only plan `ROUND19_MIGRATION_PLAN` (tests/helpers/migrations.ts); it
-  is deliberately NOT a member of the default `MIGRATIONS` list and NO
-  Cloudflare/wrangler migration command has been or may be run for it.
-  Creating the index REQUIRES the C.3 duplicate preflight to be empty
-  first; execution on any real database requires separate owner approval
-  and the transition/preflight/rollback runbook
+  A real database receives it exclusively through `wrangler d1 migrations
+apply` with explicit owner approval (NONE requested or executed); in
+  tests it reaches disposable workerd D1 databases as step 4 of the LINEAR
+  default plan, or through the explicit `ROUND19_MIGRATION_PLAN`
+  (tests/helpers/migrations.ts) for suites that exercise the schema-4
+  intermediate state. Creating the index REQUIRES the C.3 duplicate
+  preflight to be empty first (the migration batch rolls back completely
+  otherwise — proven by test); execution on any real database requires
+  separate owner approval and the transition/preflight/rollback runbook
   (`docs/reviews/PIXEL_ROUND1_9_MIGRATION_0004_TRANSITION.md`).
 - `0005_admin_post_pipeline.sql` — **R1.20-R PRODUCT CANDIDATE (LOCAL ONLY —
   proposed, NOT applied to any real database)**: the admin post pipeline
   (five tables: drafts, versions, preview_sessions, approvals, publications
   - 5 indexes incl. the partial UNIQUE `idx_admin_post_pub_primary`
     admitting ONE primary publication per (draft, version)) +
-    `schema_metadata` 3 → 4. The DEFAULT test plan (and this round's
-    applied-path candidate) — the file number reflects append order; the
-    TARGET VERSION is 4, making it the version-4 alternative to the Round 1.9
-    `0004_source_poll_ownership` candidate (which stays applied ONLY through
-    the explicit ROUND19 plan). The two candidates are mutually exclusive
-    upgrade branches over the same accepted 0001–0003 base; applying both to
-    one database requires an explicit owner renumbering decision. NO
-    Cloudflare/wrangler migration command has been or may be run for it.
+    `schema_metadata` 4 → 5. R1.20-R1 LINEAR PATH: this candidate stands ON
+    TOP of `0004_source_poll_ownership` — real Wrangler applies the files in
+    lexical filename order, so a database that walked the whole chain
+    reports schema 5 with BOTH capabilities present (the version number and
+    the recorded `migration_id` distinguish every state honestly; see
+    `resolveSchemaCapability`). The retired non-linear shape (0005 writing
+    version 4 over the 0004-less chain) is detectable and documented but no
+    longer producible. NO Cloudflare/wrangler migration command has been or
+    may be run for it.
 
 ## Rules (ADR-0019, AGENTS.md §6)
 

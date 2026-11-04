@@ -81,7 +81,7 @@ export function isInitialAdminCommand(command: string): command is InitialAdminC
   return (INITIAL_ADMIN_COMMANDS as readonly string[]).includes(command);
 }
 
-export const ADMIN_POST_COMMANDS = ['post_preview', 'post_status', 'post_cancel'] as const;
+export const ADMIN_POST_COMMANDS = ['post', 'post_preview', 'post_status', 'post_cancel'] as const;
 
 function isAdminPostCommand(command: string): boolean {
   return (ADMIN_POST_COMMANDS as readonly string[]).includes(command);
@@ -166,11 +166,27 @@ export type TelegramAction =
     }
   | {
       /**
+       * R1.20-R1: EXPLICITLY open the caller's capture session (`/post`).
+       * The router has already gated: authorized + private chat + fresh
+       * message + the `draft.create` permission. The service re-checks the
+       * permission (defense in depth) and opens the durable session.
+       */
+      readonly type: 'admin_post_start';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+      readonly updateId: number;
+    }
+  | {
+      /**
        * R1.20-R: capture one authorized admin's plain (non-command) private
-       * text message as the next version of their open draft. The router
-       * only validated scope/shape; ALL content decisions (media rejection,
-       * rich-text contract, dedup, persistence) happen in the injected
-       * admin-post service — the router NEVER queries D1.
+       * message as post content — ONLY while their EXPLICIT capture session
+       * is open (R1.20-R1: the session gate lives in the SERVICE, which can
+       * query D1; the router stays pure). The router only validated scope;
+       * ALL content/session/shape decisions (media rejection, edited
+       * messages, oversize, rich-text contract, dedup, persistence) happen
+       * in the injected admin-post service — the router NEVER queries D1.
        */
       readonly type: 'admin_post_capture';
       readonly chatId: number;
@@ -178,19 +194,26 @@ export type TelegramAction =
       readonly role: AdminRole;
       readonly uiLanguage: AdminUiLanguage;
       readonly updateId: number;
-      readonly text: string;
+      /** Fresh message vs edit — an edit NEVER enters the pipeline. */
+      readonly kind: 'message' | 'edited_message';
+      /** Bounded text when present; undefined = absent or beyond the 4096 bound. */
+      readonly text: string | undefined;
+      readonly hasText: boolean;
       readonly richText: ParsedRichTextExtraction | undefined;
       readonly richCaptionPresent: boolean;
       readonly hasMediaAttachment: boolean;
     }
   | {
-      /** R1.20-R: faithful preview of the caller's open draft's current version. */
+      /** R1.20-R: faithful preview of the caller's open draft's current version.
+       *  R1.20-R1: with an explicit draftId, previews ANOTHER admin's open
+       *  draft (the caller must hold `draft.view`; enforced in the service). */
       readonly type: 'admin_post_preview';
       readonly chatId: number;
       readonly telegramUserId: number;
       readonly role: AdminRole;
       readonly uiLanguage: AdminUiLanguage;
       readonly updateId: number;
+      readonly draftId?: string;
     }
   | {
       /** R1.20-R: honest status of the caller's open draft (with the confirm-resend button when applicable). */
@@ -473,7 +496,53 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         }
         const postUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
         switch (command) {
-          case 'post_preview':
+          case 'post': {
+            // R1.20-R1: the EXPLICIT capture-session start. A pure
+            // permission gate (no D1): roles without `draft.create` get the
+            // honest localized denial; the service re-checks fail-closed.
+            if (!roleHasPermission(actor.role, 'draft.create')) {
+              return {
+                type: 'denied',
+                chatId,
+                reason: 'insufficient_permission',
+                text: escapeTelegramHtml(ADMIN_POST_STRINGS.capturePermissionDenied[postUi]),
+              };
+            }
+            return {
+              type: 'admin_post_start',
+              chatId,
+              telegramUserId: update.fromUserId,
+              role: actor.role,
+              uiLanguage: postUi,
+              updateId: update.updateId,
+            };
+          }
+          case 'post_preview': {
+            // R1.20-R1: `/post_preview` previews the caller's OWN open
+            // draft; `/post_preview <draftId>` previews ANOTHER admin's
+            // open draft (the `draft.view` permission is enforced in the
+            // service — the router only validates the ARGUMENT grammar,
+            // whole-token, before any service could exist).
+            const remainder = commandRemainder(update.text);
+            let draftId: string | undefined;
+            if (remainder.kind === 'malformed') {
+              return {
+                type: 'send_message',
+                chatId,
+                text: escapeTelegramHtml(ADMIN_POST_STRINGS.previewInvalidUsage[postUi]),
+              };
+            }
+            if (remainder.kind === 'remainder') {
+              const parsedArgument = parseDraftsArgument(remainder.text);
+              if (parsedArgument.kind !== 'detail') {
+                return {
+                  type: 'send_message',
+                  chatId,
+                  text: escapeTelegramHtml(ADMIN_POST_STRINGS.previewInvalidUsage[postUi]),
+                };
+              }
+              draftId = parsedArgument.draftId;
+            }
             return {
               type: 'admin_post_preview',
               chatId,
@@ -481,7 +550,9 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
               role: actor.role,
               uiLanguage: postUi,
               updateId: update.updateId,
+              ...(draftId !== undefined ? { draftId } : {}),
             };
+          }
           case 'post_status':
             return {
               type: 'admin_post_status',
@@ -501,10 +572,13 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         }
       }
       // Capture: plain (non-command) content from an AUTHORIZED admin in a
-      // PRIVATE chat. Groups/channels stay silent noop (no group feedback,
-      // matching the /language convention); unauthorized senders keep the
-      // legacy noop (no feedback); edited messages get an explicit
-      // rejection in private chats (an edit must NEVER enter the pipeline).
+      // PRIVATE chat is routed to the service, which FIRST checks the
+      // EXPLICIT capture session (R1.20-R1): with no open session every
+      // ordinary admin message stays an ordinary message — silent legacy
+      // behavior, no reply, no state. The session/shape/content decisions
+      // (edited rejection, media rejection, oversize, permissions, rich
+      // contract) all live in the service because the session gate must be
+      // consulted first — and the router NEVER queries D1.
       if (command === undefined) {
         if (update.chatType !== 'private') {
           return { type: 'noop', reason: 'post_not_private_chat' };
@@ -514,15 +588,25 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
           return { type: 'noop', reason: 'not_a_command' };
         }
         if (update.kind === 'edited_message') {
-          if (chatId === undefined) {
+          if (chatId === undefined || update.fromUserId === undefined) {
             return { type: 'noop', reason: 'unroutable_message' };
           }
+          // R1.20-R1: the edit-vs-capture decision is session-gated in the
+          // service — outside a session an edit stays SILENT (legacy), and
+          // inside one it gets the explicit rejection there.
           return {
-            type: 'send_message',
+            type: 'admin_post_capture',
             chatId,
-            text: escapeTelegramHtml(
-              ADMIN_POST_STRINGS.editedMessageRejected[uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE],
-            ),
+            telegramUserId: update.fromUserId,
+            role: actor.role,
+            uiLanguage: uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE,
+            updateId: update.updateId,
+            kind: 'edited_message',
+            text: update.text,
+            hasText: update.hasText === true,
+            richText: update.richText,
+            richCaptionPresent: update.richCaption !== undefined,
+            hasMediaAttachment: update.hasMediaAttachment === true,
           };
         }
         if (update.kind !== 'message') {
@@ -531,41 +615,16 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         if (chatId === undefined || update.fromUserId === undefined) {
           return { type: 'noop', reason: 'unroutable_message' };
         }
-        const postUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
-        // Explicit shape rejections BEFORE the service: oversized text is
-        // distinguishable (hasText with no projected text); media and
-        // contentless messages are rejected with stable replies. The
-        // rich-content CONTRACT checks happen in the service.
-        if (update.hasText !== true) {
-          if (update.hasMediaAttachment === true || update.richCaption !== undefined) {
-            return {
-              type: 'send_message',
-              chatId,
-              text: escapeTelegramHtml(ADMIN_POST_STRINGS.captureMediaRejected[postUi]),
-            };
-          }
-          return {
-            type: 'send_message',
-            chatId,
-            text: escapeTelegramHtml(ADMIN_POST_STRINGS.noTextContent[postUi]),
-          };
-        }
-        if (update.text === undefined) {
-          // hasText with no bounded text => beyond the 4096 bound.
-          return {
-            type: 'send_message',
-            chatId,
-            text: escapeTelegramHtml(ADMIN_POST_STRINGS.textTooLong[postUi]),
-          };
-        }
         return {
           type: 'admin_post_capture',
           chatId,
           telegramUserId: update.fromUserId,
           role: actor.role,
-          uiLanguage: postUi,
+          uiLanguage: uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE,
           updateId: update.updateId,
+          kind: 'message',
           text: update.text,
+          hasText: update.hasText === true,
           richText: update.richText,
           richCaptionPresent: update.richCaption !== undefined,
           hasMediaAttachment: update.hasMediaAttachment === true,

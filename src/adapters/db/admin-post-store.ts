@@ -276,6 +276,104 @@ export async function cancelOpenDraft(
 }
 
 // ---------------------------------------------------------------------------
+// Capture session (R1.20-R1) — the EXPLICIT registration session.
+//
+// Stored in the EXISTING blueprint `settings` table (ADR-0019) under the
+// dedicated `admin_post_capture:<telegram_user_id>` key namespace — no
+// schema change, strict separation from every other settings namespace
+// (same pattern as the admin UI language preference). The value is a small
+// validated JSON document; an unreadable row is treated as CLOSED (fail
+// closed — a corrupt row can never silently enable capture).
+//
+//   { "state": "open", "started_at_ms": <epoch ms>, "started_update_id": <n> }
+// ---------------------------------------------------------------------------
+
+export const ADMIN_POST_CAPTURE_SETTINGS_PREFIX = 'admin_post_capture:';
+
+export interface AdminPostCaptureSession {
+  readonly open: boolean;
+  readonly startedAtMs: number;
+}
+
+function captureSettingsKey(telegramUserId: number): string {
+  return `${ADMIN_POST_CAPTURE_SETTINGS_PREFIX}${requireUserId(telegramUserId)}`;
+}
+
+function parseCaptureSession(valueJson: string): AdminPostCaptureSession | null {
+  try {
+    const parsed: unknown = JSON.parse(valueJson);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (record['state'] !== 'open') {
+      return null;
+    }
+    const startedAtMs = record['started_at_ms'];
+    if (typeof startedAtMs !== 'number' || !Number.isSafeInteger(startedAtMs) || startedAtMs <= 0) {
+      return null;
+    }
+    return { open: true, startedAtMs };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Open (or re-open) the admin's capture session — ONE atomic upsert.
+ * Idempotent: a redelivered /post re-applies the same state.
+ */
+export async function openCaptureSession(
+  executor: DbExecutor,
+  input: {
+    readonly telegramUserId: number;
+    readonly startedAtMs: number;
+    readonly updateId: number;
+  },
+): Promise<void> {
+  const valueJson = JSON.stringify({
+    state: 'open',
+    started_at_ms: input.startedAtMs,
+    started_update_id: input.updateId,
+  });
+  await executor.run({
+    sql: `INSERT INTO settings (key, value_json, schema_version, updated_by, updated_at)
+          VALUES (?, ?, 1, NULL, ?)
+          ON CONFLICT(key) DO UPDATE SET
+            value_json = excluded.value_json,
+            updated_at = excluded.updated_at`,
+    params: [captureSettingsKey(input.telegramUserId), valueJson, input.startedAtMs],
+  });
+}
+
+/** The admin's capture session, or null when none is open (corrupt = closed). */
+export async function findOpenCaptureSession(
+  executor: DbExecutor,
+  telegramUserId: number,
+): Promise<AdminPostCaptureSession | null> {
+  const row = await executor.first<{ value_json: string }>({
+    sql: 'SELECT value_json FROM settings WHERE key = ?',
+    params: [captureSettingsKey(telegramUserId)],
+  });
+  if (row === null) {
+    return null;
+  }
+  const session = parseCaptureSession(row.value_json);
+  return session !== null && session.open ? session : null;
+}
+
+/** Close the admin's capture session (idempotent DELETE). */
+export async function closeCaptureSession(
+  executor: DbExecutor,
+  telegramUserId: number,
+): Promise<void> {
+  await executor.run({
+    sql: 'DELETE FROM settings WHERE key = ?',
+    params: [captureSettingsKey(telegramUserId)],
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Preview sessions
 // ---------------------------------------------------------------------------
 
@@ -421,6 +519,70 @@ export async function consumeApproval(
     params: [input.draftId, input.version, requireFingerprint(input.fingerprint)],
   });
   return meta.changes === 1 ? { kind: 'consumed' } : { kind: 'not_active' };
+}
+
+export type ApproveFencedOutcome =
+  | { readonly kind: 'approved' }
+  | { readonly kind: 'already_active' }
+  /** The draft head moved (or the draft closed) between the bind and the write. */
+  | { readonly kind: 'stale' };
+
+/**
+ * R1.20-R1 — record an approval FENCED BY THE DRAFT HEAD, atomically: one
+ * batch runs the head-fence UPDATE (matches only when the draft is open and
+ * `current_version` is still the version being approved) and the approval
+ * upsert together. This closes the approve-vs-capture race window: a
+ * capture that commits between the application-level bind and this write
+ * makes the fence match ZERO rows and the WHOLE batch rolls back — a stale
+ * active approval for an old version can never be left behind.
+ */
+export async function recordApprovalFenced(
+  executor: DbExecutor,
+  input: {
+    readonly draftId: string;
+    readonly version: number;
+    readonly fingerprint: string;
+    readonly telegramUserId: number;
+    readonly sessionId: string;
+    readonly nowMs: number;
+  },
+): Promise<ApproveFencedOutcome> {
+  const metas = await executor.batch([
+    {
+      sql: `UPDATE admin_post_drafts
+              SET updated_at_ms = updated_at_ms
+            WHERE id = ? AND status = 'open' AND current_version = ?`,
+      params: [input.draftId, input.version],
+    },
+    {
+      sql: `INSERT INTO admin_post_approvals
+              (draft_id, version, fingerprint, approved_by_user_id, session_id, state, approved_at_ms)
+            VALUES (?, ?, ?, ?, ?, 'active', ?)
+            ON CONFLICT(draft_id, version) DO UPDATE SET
+              fingerprint = excluded.fingerprint,
+              approved_by_user_id = excluded.approved_by_user_id,
+              session_id = excluded.session_id,
+              state = 'active',
+              approved_at_ms = excluded.approved_at_ms
+            WHERE admin_post_approvals.state != 'active'`,
+      params: [
+        input.draftId,
+        input.version,
+        requireFingerprint(input.fingerprint),
+        requireUserId(input.telegramUserId),
+        input.sessionId,
+        input.nowMs,
+      ],
+    },
+  ]);
+  const fenceMeta = metas[0];
+  if (fenceMeta === undefined || fenceMeta.changes !== 1) {
+    return { kind: 'stale' };
+  }
+  const upsertMeta = metas[1];
+  return upsertMeta !== undefined && upsertMeta.changes === 1
+    ? { kind: 'approved' }
+    : { kind: 'already_active' };
 }
 
 // ---------------------------------------------------------------------------
@@ -589,4 +751,161 @@ export async function supersedePublication(
     params: [input.nowMs, input.publicationId, input.nowMs],
   });
   return meta.changes === 1 ? { kind: 'superseded' } : { kind: 'not_resendable' };
+}
+
+// ---------------------------------------------------------------------------
+// R1.20-R1 — ATOMIC approval-consume + publication-create, and ATOMIC
+// supersede + replacement-create. Each pair runs as ONE atomic batch (D1
+// batches are implicit transactions) with the INSERT conditioned on the
+// guarded transition ACTUALLY having happened (the second statement's
+// subqueries see the first statement's intra-transaction effects). A crash
+// or a losing race therefore can never leave a half transition behind:
+//   - a consumed approval with NO publication is impossible from these
+//     functions (and the conditional insert doubles as the honest RECOVERY
+//     path for the historical crash state: a legitimately-consumed approval
+//     whose publication creation never happened recreates the publication
+//     for the SAME fingerprint — the consumed approval IS the proof);
+//   - a superseded publication with NO replacement is impossible (the
+//     insert happens only when the old row is already superseded inside
+//     the same transaction).
+// ---------------------------------------------------------------------------
+
+export type ConsumeAndPublishOutcome =
+  | { readonly kind: 'created'; readonly publicationId: string }
+  | { readonly kind: 'not_active' }
+  | { readonly kind: 'already_exists' };
+
+export async function consumeApprovalAndCreatePublication(
+  executor: DbExecutor,
+  input: {
+    readonly id: string;
+    readonly draftId: string;
+    readonly version: number;
+    readonly fingerprint: string;
+    readonly destination: string;
+    readonly attempt: number;
+    readonly nowMs: number;
+  },
+): Promise<ConsumeAndPublishOutcome> {
+  const fingerprint = requireFingerprint(input.fingerprint);
+  try {
+    const metas = await executor.batch([
+      {
+        sql: `UPDATE admin_post_approvals
+                SET state = 'consumed'
+              WHERE draft_id = ? AND version = ? AND fingerprint = ? AND state = 'active'`,
+        params: [input.draftId, input.version, fingerprint],
+      },
+      {
+        sql: `INSERT INTO admin_post_publications
+                (id, draft_id, version, fingerprint, destination, state, attempt, supersede_of,
+                 created_at_ms, updated_at_ms)
+              SELECT ?, ?, ?, ?, ?, 'queued', ?, NULL, ?, ?
+              WHERE EXISTS (
+                    SELECT 1 FROM admin_post_approvals
+                     WHERE draft_id = ? AND version = ? AND fingerprint = ?
+                       AND state = 'consumed')
+                AND NOT EXISTS (
+                    SELECT 1 FROM admin_post_publications
+                     WHERE draft_id = ? AND version = ? AND supersede_of IS NULL)`,
+        params: [
+          input.id,
+          input.draftId,
+          input.version,
+          fingerprint,
+          input.destination,
+          input.attempt,
+          input.nowMs,
+          input.nowMs,
+          input.draftId,
+          input.version,
+          fingerprint,
+          input.draftId,
+          input.version,
+        ],
+      },
+    ]);
+    const insertMeta = metas[1];
+    if (insertMeta !== undefined && insertMeta.changes === 1) {
+      return { kind: 'created', publicationId: input.id };
+    }
+    // Nothing was inserted: distinguish the honest outcomes — a concurrent
+    // winner's primary publication (the approval stays with the winner) vs
+    // a genuinely missing/invalidated approval.
+    const primary = await findPrimaryPublication(executor, input.draftId, input.version);
+    return primary !== null ? { kind: 'already_exists' } : { kind: 'not_active' };
+  } catch (error) {
+    if (isAppError(error) && error.code === 'db_constraint_violation') {
+      // A concurrent creator won the primary insert; the WHOLE batch (and
+      // our consume) rolled back — the winner's own consumption stands.
+      return { kind: 'already_exists' };
+    }
+    throw error;
+  }
+}
+
+export type SupersedeAndCreateOutcome =
+  | { readonly kind: 'created'; readonly publicationId: string }
+  | { readonly kind: 'not_resendable' };
+
+export async function supersedeAndCreatePublication(
+  executor: DbExecutor,
+  input: {
+    readonly id: string;
+    readonly draftId: string;
+    readonly version: number;
+    readonly fingerprint: string;
+    readonly destination: string;
+    readonly attempt: number;
+    readonly supersedeOf: string;
+    /**
+     * A batch-unique marker (e.g. a fresh random token): the guarded
+     * supersede stamps it on the row, and the conditional insert happens
+     * ONLY for the row carrying THIS batch's marker — a second confirm can
+     * never ride a PREVIOUS batch's supersede (the state alone would not
+     * prove that).
+     */
+    readonly supersedeMarker: string;
+    readonly nowMs: number;
+  },
+): Promise<SupersedeAndCreateOutcome> {
+  const fingerprint = requireFingerprint(input.fingerprint);
+  const metas = await executor.batch([
+    {
+      sql: `UPDATE admin_post_publications
+              SET state = 'superseded', claimed_by = ?, updated_at_ms = ?
+            WHERE id = ? AND (
+              state = 'failed_definitive'
+              OR state = 'uncertain'
+              OR (state = 'claimed' AND lease_expires_at_ms IS NOT NULL AND lease_expires_at_ms < ?)
+            )`,
+      params: [input.supersedeMarker, input.nowMs, input.supersedeOf, input.nowMs],
+    },
+    {
+      sql: `INSERT INTO admin_post_publications
+              (id, draft_id, version, fingerprint, destination, state, attempt, supersede_of,
+               created_at_ms, updated_at_ms)
+            SELECT ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?
+            WHERE EXISTS (
+                  SELECT 1 FROM admin_post_publications
+                   WHERE id = ? AND state = 'superseded' AND claimed_by = ?)`,
+      params: [
+        input.id,
+        input.draftId,
+        input.version,
+        fingerprint,
+        input.destination,
+        input.attempt,
+        input.supersedeOf,
+        input.nowMs,
+        input.nowMs,
+        input.supersedeOf,
+        input.supersedeMarker,
+      ],
+    },
+  ]);
+  const insertMeta = metas[1];
+  return insertMeta !== undefined && insertMeta.changes === 1
+    ? { kind: 'created', publicationId: input.id }
+    : { kind: 'not_resendable' };
 }

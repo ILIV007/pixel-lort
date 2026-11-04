@@ -106,11 +106,20 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
     );
 
     // ---- Scenario 3 (rejection): a media post with caption ---------------
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'fa',
+      updateId: 99000,
+    });
     const mediaRejected = await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'fa',
       updateId: 9001,
+      kind: 'message',
+      hasText: true,
       text: '',
       richText: undefined,
       richCaptionPresent: true,
@@ -123,11 +132,20 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
     );
 
     // ---- Scenario 1 (success path): persian rich post --------------------
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'fa',
+      updateId: 99001,
+    });
     const captured = await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'fa',
       updateId: 9002,
+      kind: 'message',
+      hasText: true,
       text: POST_TEXT,
       richText: { ok: true, kind: 'text', text: POST_TEXT, entities: ENTITIES },
       richCaptionPresent: false,
@@ -183,11 +201,20 @@ describe('demo: R1.20-R admin post pipeline (offline)', () => {
     );
 
     // ---- Scenario 6 (uncertain): timeout -> honest UNKNOWN, no auto-resend
+    // R1.20-R1: the capture requires the explicit session start.
+    await service.startSession({
+      telegramUserId: OWNER_ID,
+      role: 'owner',
+      uiLanguage: 'fa',
+      updateId: 99002,
+    });
     await service.capture({
       telegramUserId: OWNER_ID,
       role: 'owner',
       uiLanguage: 'fa',
       updateId: 9004,
+      kind: 'message',
+      hasText: true,
       text: 'پست دوم برای نمایش نتیجهٔ نامشخص',
       richText: undefined,
       richCaptionPresent: false,

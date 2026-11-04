@@ -10,6 +10,30 @@ import type { AdminUiLanguage } from './ui-language';
 type Localized = Readonly<Record<AdminUiLanguage, string>>;
 
 export const ADMIN_POST_STRINGS = {
+  sessionStarted: {
+    en: 'Capture session OPEN. Send the post TEXT now — every plain text message you send becomes a new draft version until you use /post_cancel.',
+    fa: 'نشست ثبت باز شد. اکنون متن پست را بفرستید — هر پیام متنی سادهٔ شما تا استفاده از /post_cancel به یک نسخهٔ جدید پیش‌نویس تبدیل می‌شود.',
+  } satisfies Localized,
+  sessionAlreadyOpen: {
+    en: 'The capture session is ALREADY open — keep sending the post text, or use /post_cancel to stop capturing.',
+    fa: 'نشست ثبت از قبل باز است — به ارسال متن پست ادامه دهید، یا برای توقف ثبت از /post_cancel استفاده کنید.',
+  } satisfies Localized,
+  capturePermissionDenied: {
+    en: 'REJECTED: your role does not hold the draft creation permission. Nothing was saved.',
+    fa: 'رد شد: نقش شما مجوز ایجاد پیش‌نویس ندارد. چیزی ذخیره نشد.',
+  } satisfies Localized,
+  previewInvalidUsage: {
+    en: 'Invalid usage. Use /post_preview (your own open draft) or /post_preview <draftId>.',
+    fa: 'استفادهٔ نامعتبر. از /post_preview (پیش‌نویس باز خودتان) یا /post_preview <شناسهٔ پیش‌نویس> استفاده کنید.',
+  } satisfies Localized,
+  previewPermissionDenied: {
+    en: 'REJECTED: your role does not hold the draft view permission.',
+    fa: 'رد شد: نقش شما مجوز مشاهدهٔ پیش‌نویس ندارد.',
+  } satisfies Localized,
+  draftNotFound: {
+    en: 'REJECTED: no OPEN draft with that id exists.',
+    fa: 'رد شد: پیش‌نویس بازی با آن شناسه وجود ندارد.',
+  } satisfies Localized,
   captureSaved: (version: number): Localized => ({
     en: `Post captured as version ${version}. Send updated text to create the next version; use /post_preview for a faithful preview.`,
     fa: `پست به‌عنوان نسخهٔ ${version} ذخیره شد. برای نسخهٔ بعدی متن جدید بفرستید؛ برای پیش‌نمایش وفادار از /post_preview استفاده کنید.`,
@@ -55,16 +79,16 @@ export const ADMIN_POST_STRINGS = {
     fa: 'پیام‌های ویرایش‌شده هرگز ثبت یا اعمال نمی‌شوند. پیام تازه بفرستید.',
   } satisfies Localized,
   noOpenDraft: {
-    en: 'You have no open draft. Send the post text first.',
-    fa: 'پیش‌نویس بازی ندارید. ابتدا متن پست را بفرستید.',
+    en: 'You have no open draft. Use /post to start a capture session, then send the post text.',
+    fa: 'پیش‌نویس بازی ندارید. با /post نشست ثبت را آغاز کنید، سپس متن پست را بفرستید.',
   } satisfies Localized,
   cancelDone: {
-    en: 'Open draft cancelled. Your next text message starts a new draft.',
-    fa: 'پیش‌نویس باز لغو شد. پیام متنی بعدی شما پیش‌نویس جدیدی آغاز می‌کند.',
+    en: 'Open draft cancelled and the capture session CLOSED. Your next texts are ordinary messages again; use /post to start a new draft.',
+    fa: 'پیش‌نویس باز لغو و نشست ثبت بسته شد. پیام‌های بعدی شما دوباره پیام عادی‌اند؛ برای پیش‌نویس جدید از /post استفاده کنید.',
   } satisfies Localized,
   cancelNone: {
-    en: 'Nothing to cancel — you have no open draft.',
-    fa: 'چیزی برای لغو نیست — پیش‌نویس بازی ندارید.',
+    en: 'Nothing to cancel — you have no open draft (any capture session is closed too).',
+    fa: 'چیزی برای لغو نیست — پیش‌نویس بازی ندارید (نشست ثبت هم بسته است).',
   } satisfies Localized,
   storedContentCorrupt: {
     en: 'The stored content failed its integrity check and was NOT used. Nothing was sent.',
@@ -78,6 +102,14 @@ export const ADMIN_POST_STRINGS = {
     en: `Current version: ${version}`,
     fa: `نسخهٔ فعلی: ${version}`,
   }),
+  statusSessionOpen: {
+    en: 'Capture session: OPEN (plain texts become draft versions; /post_cancel stops it)',
+    fa: 'نشست ثبت: باز (متن‌های ساده نسخهٔ پیش‌نویس می‌شوند؛ /post_cancel آن را می‌بندد)',
+  } satisfies Localized,
+  statusSessionClosed: {
+    en: 'Capture session: closed (/post starts one)',
+    fa: 'نشست ثبت: بسته (/post آن را آغاز می‌کند)',
+  } satisfies Localized,
   statusApprovalActive: {
     en: 'Approval: ACTIVE',
     fa: 'تأیید: فعال',

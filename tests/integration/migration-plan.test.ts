@@ -71,11 +71,13 @@ describe('migration plan validation (pure — no database access)', () => {
       '0001_initial_schema',
       '0002_telegram_update_lifecycle',
       '0003_job_dlq_delivery',
+      '0004_source_poll_ownership',
       '0005_admin_post_pipeline',
     ]);
     expect(REAL_V2.version).toBe(2);
     expect(MIGRATIONS[2]!.version).toBe(3);
     expect(MIGRATIONS[3]!.version).toBe(4);
+    expect(MIGRATIONS[4]!.version).toBe(5);
     expect(() => validateMigrationPlan(MIGRATIONS)).not.toThrow();
     expect(() => validateMigrationPlan(PLAN_V1_SYNTHETIC_V2)).not.toThrow();
   });
@@ -199,20 +201,21 @@ describe('applyMigrations — incremental, future-safe semantics', () => {
     expect(again.applied).toEqual([]);
     expect(again.finalVersion).toBe(2);
     // The synthetic plan stops at version 2, so the REAL plan upgrades the
-    // database incrementally by applying ONLY the pending 0003 + 0005
-    // (R1.20-R: the append-only default plan continues to version 4).
+    // database incrementally by applying ONLY the pending 0003 + 0004 + 0005
+    // (R1.20-R1: the LINEAR default plan continues to version 5).
     expect(andAgain.observedVersion).toBe(2);
     expect(andAgain.applied.map((migration) => migration.id)).toEqual([
       '0003_job_dlq_delivery',
+      '0004_source_poll_ownership',
       '0005_admin_post_pipeline',
     ]);
-    expect(andAgain.finalVersion).toBe(4);
+    expect(andAgain.finalVersion).toBe(5);
 
     // No duplicate probe rows: the version-2 statements did not run again.
     const count = await db.prepare(`SELECT COUNT(*) AS n FROM migration_v2_probe`).first<{
       n: number;
     }>();
     expect(count?.n).toBe(1);
-    expect(await appliedSchemaVersion()).toBe(4);
+    expect(await appliedSchemaVersion()).toBe(5);
   });
 });

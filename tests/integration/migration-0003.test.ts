@@ -75,12 +75,12 @@ beforeEach(async () => {
 });
 
 describe('migration 0003 (jobs DLQ-delivery reconciliation)', () => {
-  it('upgrades a populated schema-v2 database through 0003 (and the appended 0005 candidate)', async () => {
-    // R1.20-R: the DEFAULT plan now continues to version 4 through the
-    // LOCAL-ONLY 0005 admin-post candidate, so the populated v2 database
-    // lands at 4 with the LAST applied id recorded. The 0003 column and
-    // index contracts below are unchanged.
-    expect(await appliedSchemaVersion()).toBe(4);
+  it('upgrades a populated schema-v2 database through 0003 (and the appended 0004+0005 candidates)', async () => {
+    // R1.20-R1: the DEFAULT plan is the LINEAR chain to version 5 (0004 ->
+    // 4, 0005 -> 5), so the populated v2 database lands at 5 with the LAST
+    // applied id recorded. The 0003 column and index contracts below are
+    // unchanged.
+    expect(await appliedSchemaVersion()).toBe(5);
     const id = await executor.first<{ value: string }>({
       sql: `SELECT value FROM schema_metadata WHERE key = 'migration_id'`,
     });
@@ -119,8 +119,8 @@ describe('migration 0003 (jobs DLQ-delivery reconciliation)', () => {
 
   it('is idempotent (re-applying the full plan is a no-op)', async () => {
     await applyMigrations(db);
-    // R1.20-R: the full default plan lands at version 4 (0005 appended).
-    expect(await appliedSchemaVersion()).toBe(4);
+    // R1.20-R1: the full LINEAR default plan lands at version 5.
+    expect(await appliedSchemaVersion()).toBe(5);
     const rows = await executor.first<{ n: number }>({
       sql: `SELECT COUNT(*) AS n FROM jobs`,
     });

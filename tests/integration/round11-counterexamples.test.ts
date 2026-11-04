@@ -51,17 +51,18 @@ it('the documented item guard permits inserts after source ownership is lost', a
 
 it('an unknown applied version is NOT healthy for the application expecting the shipped schema', async () => {
   const db = createDbExecutor(env.DB);
-  // R1.20-R: the shipped applied schema is now 4 (the admin-post candidate);
-  // the health gate must report healthy for the matching expectation.
-  expect((await checkSchemaHealth(db, 4)).ok).toBe(true);
-  await env.DB.prepare("UPDATE schema_metadata SET value='5' WHERE key='schema_version'").run();
-  expect(await checkSchemaHealth(db, 4)).toMatchObject({
+  // R1.20-R1: the shipped LINEAR chain lands at schema 5 (0004 -> 4,
+  // 0005 -> 5); the health gate must report healthy for the matching
+  // expectation and reject an unknown version fail-closed.
+  expect((await checkSchemaHealth(db, 5)).ok).toBe(true);
+  await env.DB.prepare("UPDATE schema_metadata SET value='6' WHERE key='schema_version'").run();
+  expect(await checkSchemaHealth(db, 5)).toMatchObject({
     ok: false,
     reason: 'schema_version_mismatch',
-    observedSchemaVersion: 5,
+    observedSchemaVersion: 6,
   });
   // Restore so later tests in this file observe the shipped version.
-  await env.DB.prepare("UPDATE schema_metadata SET value='4' WHERE key='schema_version'").run();
+  await env.DB.prepare("UPDATE schema_metadata SET value='5' WHERE key='schema_version'").run();
 });
 
 it('adding the partial unique index fails if legacy outstanding duplicates exist', async () => {
