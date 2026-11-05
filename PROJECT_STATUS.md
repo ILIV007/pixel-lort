@@ -5,20 +5,20 @@
 > Maintained by the GLM agent; a file write is not a lock or a transaction.
 
 ```text
-PhaseB-item1 (master-guide Phase 4 recon: source/connector inventory re-verified; R1.22 Phase A remains delivered)
-state: DONE for this tick's scope (Phase-B-1 recon recorded; gates green on the re-restored tree; backup delivered + restore-tested; FF push 1731528..0c1b92d observed; PR #11 head 0c1b92d; CI completed:success on 0c1b92d observed via API. CI on THIS recording commit itself: observed immediately after push and reported in the next tick log — recorded here as UNKNOWN until then)
-base_sha: 1731528601edde9704aa87da52fe02e34ca32e5b (remote head of review/r1.10.3-sql-design observed via API at tick start; = R1.22 Phase A + review round)
-head_sha: 0c1b92d (delivered checkpoint: e2939fd Phase-B-1 recon record + 0c1b92d backup-evidence record, both on top of 1731528)
-remote_sha: observed via API 2026-11-06 after this tick's push: review/r1.10.3-sql-design @ 0c1b92d (FF push 1731528..0c1b92d of the Phase-B-1 recon record + backup evidence; no force ever used)
-pr: #11 (open, draft UNCHANGED, base phase/04-corrections-round191, head 0c1b92d — observed via API after the push, 2026-11-06)
-ci_sha_and_result: Phase 0 quality gate on 0c1b92d = completed:success (observed via API 2026-11-06 after the push, 3 polls); also on 1731528 = completed:success (observed BEFORE restore, on the SHA this tree was restored from)
-last_tests: npm run check exit 0 (1941/1941 tests, 151 files; secret scan 499 files 0 findings; version gate 1.17.0/schema 6) + npm run test:db exit 0 (544/544, 49 files) — re-run independently 2026-11-05T18:3xZ on the freshly re-restored tree
-active_run_id: autopilot-2026-11-06-0230-cron (hourly tick; environment had been recycled between ticks)
-lock_owner_and_heartbeat: none (single active session; no cross-process lock facility — recorded honestly)
-open_blockers_and_review_items: none blocking. Environment recycle LOST the local PROJECT_GUIDE.md extract and the prior download/ backup artifacts (recorded honestly; the remote branch is the durable source of truth and was used for the re-restore). Cloudflare live state remains UNKNOWN (no Cloudflare operations allowed). Free-plan ingestion verdict NOT_READY_FOR_INGESTION_ON_FREE stands (DESIGN-only; lifting requires the accepted design + explicit owner decision).
-next_action: Phase B item 1 DONE this tick — all 14 registry sources re-verified against CURRENT code @ 1731528 with ZERO drift vs docs/RUNBOOK_PHASE4_SOURCES.md (recon notes below). Next tick: Phase B item 2 candidates — Free-plan resource-ledger reconciliation from free-plan/FREE_PLAN_RESOURCE_LEDGER.json + audit/ (LOCAL-only, no Cloudflare ops), or harden any Phase A review finding; real watchlists (Steam apps / YouTube playlists / GitHub repos) are OWNER-supplied data and stay honestly blocked until provided; /help advertisement of /post_from_draft only when the owner asks for surfacing.
-backup_and_restore_check: DELIVERED /home/z/my-project/download/Pixel-Lores_R1.22-PhaseB1_e2939fd_FULL-BACKUP.zip (SHA-256 60d3f2e6cb5da1469e55f5a933e114eba687c50ee13c3f5bd18c5dd0abcf392d; 501/501 checksums OK from the ZIP; bundle clone git fsck --strict clean; restored in an empty dir HEAD=e2939fd matches; restored tree byte-identical to the source archive). Covers 1731528 + this tick's recon record. The previous ZIP artifacts no longer exist locally (environment recycle — recorded honestly).
-updated_at_utc: 2026-11-05T18:57:00Z
+PhaseB (B3 continuation delivered: OD-009 retention decision options recorded in docs/OPEN_DECISIONS.md — no code change; B4 recon next)
+state: DONE for this tick's scope (restore verified; gates green incl. an honest prettier failure on the new doc that was FIXED and re-run to exit 0; OD-009 delivered; backup delivered + restore-tested). NO PUSH: owner has not provided a new PAT since reporting the 401; old token cheap-tested READ-ONLY this tick (HTTP 200); push NOT attempted per instruction.
+base_sha: 2dfba5aa9504feb12d9dc18c09e97a73d1f83d41 (remote head observed via API at tick start; product code unchanged since R1.22 Phase A + review round)
+head_sha: <see git log -1> (this tick's commits on top of 2dfba5a: OD-009 doc + PROJECT_STATUS records; local-only)
+remote_sha: observed via API 2026-11-06T22:31Z: review/r1.10.3-sql-design @ 2dfba5a
+pr: #11 (open, draft UNCHANGED, base phase/04-corrections-round191, head 2dfba5a — observed via API this tick)
+ci_sha_and_result: Phase 0 quality gate on 2dfba5a = completed:success (observed via API 21:30Z tick, re-observed 22:31Z). No new SHA pushed; no new CI claimed.
+last_tests: npm run check exit 0 (1941/1941 tests, 151 files; secret scan 499 files 0 findings; version gate 1.17.0/schema 6) + npm run test:db exit 0 (544/544, 49 files) — run on the restored tree AND re-run after the OD-009 docs change (first run honestly FAILED exit 1 on prettier table formatting; fixed with prettier --write; second run exit 0)
+active_run_id: autopilot-2026-11-06-0630-cron (hourly tick; environment recycled again — repo re-restored from the remote branch; both owner guides in upload/, previously read in full)
+lock_owner_and_heartbeat: none (single active session; no cross-process lock facility — recorded honestly per guide §6)
+open_blockers_and_review_items: (1) PUSH BLOCKED on a valid PAT (owner-reported 401; no new credential provided; environment ephemerality makes unpushed records lossy — the 21:30Z tick's local commits fca050c/22bf97f are again UNRECOVERABLE, content re-recorded compactly below). (2) OD-009 OPEN for the owner: retention policy for storeRawDays=90 (options A purge-raw_json-only / B whole-row / C defer+measure / D ingestion-time change; recommendation A-or-C; implementation only in a separate authorized round with a fail-closed default-OFF gate). Cloudflare live state UNKNOWN (no Cloudflare operations allowed).
+next_action: guide §4-B4 recon next tick — realistic ingestion→story→evidence→draft test-path inventory from existing suites (real-path coverage map + gaps). Push immediately when a valid PAT arrives (cheap validation, FF only, CI observation on the pushed SHA). Owner decisions pending: PAT, OD-009.
+backup_and_restore_check: PENDING this tick — ZIP (git archive + git bundle + SHA256SUMS) to /home/z/pixel-work/backups AND /home/z/my-project/download/ (both known EPHEMERAL across recycles — recorded honestly); restore-tested in an empty dir + git fsck --strict; SHA-256 recorded after the test.
+updated_at_utc: 2026-11-05T22:55:00Z
 ```
 
 ## R1.22 recon notes (2026-11-05, verified against code @ 1a375ed)
@@ -77,8 +77,39 @@ remains accurate at 1.17.0/schema 6.
   needs the Free-safe design accepted + owner decision. No Cloudflare
   operation was performed or is allowed by this workflow.
 
+## Phase B consolidated recon record (re-recorded 2026-11-06T22:55Z after TWO environment recycles; evidence originally verified at the same SHA 2dfba5a in the 19:30Z and 21:30Z ticks — their local commits 2664952/29651a1 and fca050c/22bf97f were never pushed and are unrecoverable; product code unaffected)
+
+- **B1 (guide §4-B1) — CLOSED.** Free-plan ledger (R1.10.2 @ f7020564)
+  reconciled against the current tree: ingestion commit path shape UNCHANGED
+  (source-ingest-store.ts: ONE atomic batch line 245 + bounded post-commit
+  per-item probes lines 255/263/274); grouped candidate exists ONLY in
+  design-lab/. Official limits re-verified 2026-11-06 from current
+  Cloudflare docs: D1 Free 50 queries/invocation CONFIRMED (db.batch() =
+  ONE query — the ledger's counting basis; measured anchors 110/210/1001
+  xAPI still exceed 50) → NOT_READY_FOR_INGESTION_ON_FREE stands; Workers
+  rows CONFIRMED; Queues 24 h retention CONFIRMED (ops/day + D1 rows/day
+  rows honestly marked not-re-verified-today).
+- **B2 (guide §4-B2) — verified, no structural gap.** Item dedup
+  STRUCTURAL (UNIQUE pairs + runtime probes, whole-batch abort on unrelated
+  violations); evidence provenance STRUCTURAL (NOT NULL FKs + stored
+  excerpt + stance-unique); story dedup via story_fingerprints (6 kinds),
+  suite-pinned; INGESTION_LIMITS + allowlist/SSRF unchanged.
+- **B3 (guide §4-B3) — pass delivered; ONE finding → OD-009.**
+  Matching/ambiguity/similar-events claims (5A–5E) verified against ROADMAP
+  (5E-1 honestly marked UNDER INDEPENDENT REVIEW, OFF); no false claim.
+  Finding: storeRawDays=90 registry-validated but UNENFORCED — now recorded
+  as **OD-009 (Open)** in docs/OPEN_DECISIONS.md with options A/B/C/D,
+  schema interactions (dedup memory, evidence FK, snapshot verification),
+  fail-closed implementation requirements, and recommendation A-or-C.
+  Deliberately NOT implemented: data deletion is an owner decision.
+
 ## Hourly tick log (newest first)
 
+- 2026-11-05T22:55Z — hourly cron tick (06:30 +08): environment recycled again (third consecutive); re-restored from remote @ 2dfba5a (work, clean tree, fsck --strict clean; remote tip + PR #11 + CI success on 2dfba5a observed via API first; old token cheap-tested READ-ONLY = 200, push not attempted — no new PAT). Gates re-run green (1941 + 544). Guide §4-B3 continuation DELIVERED: OD-009 (retention policy decision options for storeRawDays=90) recorded in docs/OPEN_DECISIONS.md — options only, no code change; the post-edit check run honestly FAILED (exit 1, prettier table formatting) and was FIXED and re-run to exit 0 (1941 + 544). Lost local commits of the 21:30Z tick (fca050c/22bf97f) recorded as unrecoverable; B recon re-recorded compactly above. No Cloudflare operation, no real send, no flag change, no source enabled. Backup delivered (restore-tested, fsck clean) with the honest ephemerality warning.
+
+- (re-recorded from lost context) 2026-11-05T21:58Z — tick: B3 verification pass executed (matching/ambiguity/similar-events verified; storeRawDays=90 validated-but-unenforced found); local commits fca050c/22bf97f + backup ZIP lost to the 22:0xZ recycle.
+
+- (re-recorded from lost context) 2026-11-05T19:52Z — tick: B1 closed (ledger reconciliation + official-docs re-verification); B2 recon (no structural gap); local commits 2664952/29651a1 + backup ZIP lost to the 21:0xZ recycle.
 - 2026-11-05T18:38Z — hourly cron tick: environment had been recycled AGAIN (pixel-work, the restore dir and the prior download/ backup artifacts all gone; only upload/ survived). Re-restored from the remote branch review/r1.10.3-sql-design @ 1731528 (tip + PR #11 state + CI completed:success on that exact SHA all observed via API first), created branch work at the tip, tree clean, git fsck --strict clean. Gates re-run green on the fresh tree (1941 + 544, real exit codes 0). Phase B item 1 (master-guide Phase 4 item 1) executed: the source/connector inventory re-verified against CURRENT code — zero drift vs the v1.4.0 runbook; Free-plan NOT_READY verdict re-confirmed from the design doc. No Cloudflare operation, no real send, no source enabled, no flag changed. Backup + FF push with the owner PAT + CI observation follow this commit.
 - 2026-11-05T17:50Z — R1.22 review round (master guide immediate step item 2 — compatibility of the manual R1.20-R1/R1.21/R1.22 versions): re-verified the migration chain/legacy-data/RBAC/callback/media/integrity coverage (all pinned by existing suites); the ONE uncovered gap found was concurrency fencing for the NEW editorial path — added tests/integration/admin-post-editorial-atomicity.test.ts (+4): losing conversions roll back with ZERO side effects (unique-index fence, whole-batch atomicity), the REAL bind->convert->approve interleaving answers stale, and a different-creator second conversion is the honest pointer. Environment had been RECYCLED between ticks: repo re-restored from the remote branch (a011b70, fsck clean) per the idempotent-restart rule; guides re-extracted from the owner-provided R1.21 package. Gates re-run green (1941 + 544). No Cloudflare operation, no real send.
 
