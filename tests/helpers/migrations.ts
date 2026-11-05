@@ -3,6 +3,7 @@ import migration0002 from '../../migrations/0002_telegram_update_lifecycle.sql?r
 import migration0003 from '../../migrations/0003_job_dlq_delivery.sql?raw';
 import migration0004Candidate from '../../migrations/0004_source_poll_ownership.sql?raw';
 import migration0005 from '../../migrations/0005_admin_post_pipeline.sql?raw';
+import migration0006 from '../../migrations/0006_admin_post_editorial_source.sql?raw';
 import migration0002Synthetic from '../fixtures/migration-0002-synthetic.sql?raw';
 
 /**
@@ -55,15 +56,19 @@ export interface MigrationDescriptor {
  * (AGENTS.md §6: applied migrations are never edited or reordered; newer
  * schema changes append `0006_*.sql` and newer).
  *
- * R1.20-R1 LINEAR PATH: the list is ONE strictly ascending chain —
+ * R1.22 LINEAR PATH: the list is ONE strictly ascending chain —
  *   0001 (v1) -> 0002 (v2) -> 0003 (v3, the APPLIED accepted history)
  *   -> 0004_source_poll_ownership (v4, the R09 ownership candidate)
  *   -> 0005_admin_post_pipeline (v5, the admin post candidate ON TOP of the
- *      ownership migration).
+ *      ownership migration)
+ *   -> 0006_admin_post_editorial_source (v6, the R1.22 editorial→post
+ *      provenance: nullable source_update_id + the per-version editorial
+ *      link + the partial unique conversion index, ON TOP of the admin post
+ *      pipeline).
  * The order here is exactly the order real Wrangler applies the files
  * (lexical filename order, one atomic batch per file), so a database that
- * walked the whole chain reports schema 5 with BOTH capabilities present.
- * Both candidates remain LOCAL-ONLY until the owner separately authorizes
+ * walked the whole chain reports schema 6 with ALL capabilities present.
+ * All candidates remain LOCAL-ONLY until the owner separately authorizes
  * remote application.
  *
  * TEST-ONLY synthetic descriptors (see
@@ -76,6 +81,7 @@ export const MIGRATIONS: readonly MigrationDescriptor[] = [
   { id: '0003_job_dlq_delivery', version: 3, sql: migration0003 },
   { id: '0004_source_poll_ownership', version: 4, sql: migration0004Candidate },
   { id: '0005_admin_post_pipeline', version: 5, sql: migration0005 },
+  { id: '0006_admin_post_editorial_source', version: 6, sql: migration0006 },
 ];
 
 /**

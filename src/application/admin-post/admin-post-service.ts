@@ -46,6 +46,7 @@
  */
 import type { DbExecutor } from '../../adapters/db/db-executor';
 import {
+  captureEditorialVersion,
   captureVersion,
   cancelOpenDraft,
   claimPublication,
@@ -56,6 +57,7 @@ import {
   findOpenDraftByCreator,
   findPreviewSessionBySourceUpdate,
   findPrimaryPublication,
+  findVersionByEditorialSource,
   findVersionBySourceUpdate,
   finishPublication,
   getApproval,
@@ -68,6 +70,7 @@ import {
   supersedeAndCreatePublication,
   type AdminPostPublicationRow,
 } from '../../adapters/db/admin-post-store';
+import { createEditorialReviewStore } from '../../adapters/db/editorial-review-store';
 import { consumeActionToken, issueActionToken } from '../../adapters/telegram/action-tokens';
 import {
   composeTelegramHtml,
@@ -95,6 +98,10 @@ import {
   serializePostContentDocument,
   type PostContentDocument,
 } from '../../domain/admin-post/post-content';
+import {
+  renderEditorialPostText,
+  type EditorialPostRenderFailureReason,
+} from '../../domain/admin-post/editorial-post-render';
 import { fingerprintOfSerializedEnvelope, randomToken } from '../../domain/admin-post/fingerprint';
 import { AppError } from '../../shared/errors/app-error';
 import type { Clock } from '../../shared/time/clock';
@@ -228,6 +235,19 @@ export interface AdminPostService {
     readonly telegramUserId: number;
     readonly role: AdminRole;
     readonly uiLanguage: AdminUiLanguage;
+  }): Promise<AdminPostExecutionResult>;
+  /**
+   * R1.22 Phase A: convert ONE stored READY editorial draft into a new
+   * admin post version (deterministic render, durable provenance, no
+   * fabrication). The result enters the EXISTING preview/approve/publish
+   * flow unchanged — no bypass path exists.
+   */
+  createFromEditorial(input: {
+    readonly telegramUserId: number;
+    readonly role: AdminRole;
+    readonly uiLanguage: AdminUiLanguage;
+    readonly updateId: number;
+    readonly editorialDraftId: string;
   }): Promise<AdminPostExecutionResult>;
   handleCallback(input: {
     readonly telegramUserId: number;
@@ -364,6 +384,22 @@ function isDefinitiveSendFailure(error: unknown): boolean {
     return (error as { retryable?: unknown }).retryable === false;
   }
   return false; // unknown throw shapes stay UNCERTAIN (fail-safe)
+}
+
+/**
+ * R1.22: map a render failure to the honest reply family — envelope-rule
+ * failures (overflow, content rules) mean "cannot be prepared as-is, and
+ * nothing was truncated"; document-shape failures mean "the stored document
+ * is unreadable or unsupported".
+ */
+function isEnvelopeRenderFailure(reason: EditorialPostRenderFailureReason): boolean {
+  const documentStates: readonly EditorialPostRenderFailureReason[] = [
+    'malformed_json',
+    'unsupported_version',
+    'malformed_document',
+    'empty_headline',
+  ];
+  return !documentStates.includes(reason);
 }
 
 export function createAdminPostService(deps: {
@@ -1151,6 +1187,100 @@ export function createAdminPostService(deps: {
       });
       logger.info('admin_post.cancel', { outcome: outcome.kind });
       return reply(ui, outcome.kind === 'cancelled' ? S.cancelDone : S.cancelNone);
+    },
+
+    async createFromEditorial(input) {
+      const ui = input.uiLanguage;
+      // Defense in depth: the router already denied callers whose role lacks
+      // the permission, but the SERVICE re-checks (fail closed) before any
+      // read or write — a role revoked between routing and execution can
+      // never derive post content.
+      if (!roleHasPermission(input.role, 'draft.create')) {
+        logger.warn('admin_post.editorial_bridge.denied', { reason: 'missing_permission' });
+        return reply(ui, S.capturePermissionDenied);
+      }
+
+      // The editorial draft is read through the SAME production byte-guarded
+      // reader the /drafts surface uses — no parallel editorial access path.
+      const editorialStore = createEditorialReviewStore(executor);
+      const row = await editorialStore.findDraftDetail(input.editorialDraftId);
+      if (row === null) {
+        return reply(ui, S.editorialNotFound);
+      }
+      if (row.status !== 'ready') {
+        // Only a READY editorial draft (the pipeline's durable "stored draft"
+        // state) can be prepared; anything else is an honest typed refusal.
+        return reply(ui, S.editorialNotReady);
+      }
+      if (row.documentJson === null) {
+        // The SQL byte guard kept the oversized document from transferring.
+        return reply(ui, S.editorialDocumentTooLarge);
+      }
+
+      // Deterministic render of the STORED document — no recomputation from
+      // mutable source rows, no fabrication, no silent truncation.
+      const render = renderEditorialPostText(row.documentJson);
+      if (!render.ok) {
+        logger.warn('admin_post.editorial_bridge.rejected', {
+          reason: render.reason satisfies EditorialPostRenderFailureReason,
+        });
+        return reply(
+          ui,
+          isEnvelopeRenderFailure(render.reason)
+            ? S.editorialRenderFailed
+            : S.editorialDocumentMalformed,
+        );
+      }
+      const documentOutcome = createPostContentDocument({ media: 'none', text: render.envelope });
+      if (!documentOutcome.ok) {
+        logger.warn('admin_post.editorial_bridge.rejected', { reason: documentOutcome.reason });
+        return reply(ui, S.editorialRenderFailed);
+      }
+      const serialized = await serializeAndFingerprintPostContent(documentOutcome.document);
+      if (!serialized.ok) {
+        return reply(ui, S.editorialRenderFailed);
+      }
+
+      // Bridge idempotency: at most ONE derived version per editorial draft
+      // version (the migration-0006 partial UNIQUE index is the hard fence).
+      // A second conversion — even by a different admin — is an honest
+      // pointer to the existing post, never a duplicate of the news.
+      const derived = await findVersionByEditorialSource(executor, row.id, row.version);
+      if (derived !== null) {
+        logger.info('admin_post.editorial_bridge.already_derived', { version: derived.version });
+        return reply(ui, S.editorialAlreadyDerived(derived.draft_id, derived.version));
+      }
+
+      const existing = await findOpenDraftByCreator(executor, input.telegramUserId);
+      const nowMs = clock.now();
+      const outcome = await captureEditorialVersion(executor, {
+        draftId: randomToken(),
+        existingDraftId: existing?.id,
+        envelopeJson: serialized.json,
+        fingerprint: serialized.fingerprint,
+        editorialDraftId: row.id,
+        editorialDraftVersion: row.version,
+        telegramUserId: input.telegramUserId,
+        nowMs,
+      });
+      if (outcome.kind === 'limit_reached') {
+        return reply(ui, S.captureVersionLimit);
+      }
+      logger.info('admin_post.editorial_bridge', {
+        outcome: outcome.kind,
+        version: outcome.version,
+      });
+      const base = localize(ui, S.editorialConverted(outcome.draftId, outcome.version, row.id));
+      return {
+        kind: 'reply',
+        text: escapeTelegramHtml(
+          outcome.kind === 'version_added'
+            ? // A content update on an existing draft — the approvals of the
+              // older versions were invalidated by the same atomic batch.
+              `${base}\n\n${localize(ui, S.editorialApprovalsInvalidated)}`
+            : base,
+        ),
+      };
     },
 
     async handleCallback(input) {

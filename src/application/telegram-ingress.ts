@@ -336,6 +336,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
       | Extract<TelegramAction, { readonly type: 'admin_post_preview' }>
       | Extract<TelegramAction, { readonly type: 'admin_post_status' }>
       | Extract<TelegramAction, { readonly type: 'admin_post_cancel' }>
+      | Extract<TelegramAction, { readonly type: 'admin_post_from_editorial' }>
       | Extract<TelegramAction, { readonly type: 'admin_post_callback' }>,
   ): Promise<void> {
     if (adminPost === undefined) {
@@ -404,6 +405,14 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
             telegramUserId: action.telegramUserId,
             role: action.role,
             uiLanguage: action.uiLanguage,
+          });
+        case 'admin_post_from_editorial':
+          return adminPost.createFromEditorial({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+            updateId: action.updateId,
+            editorialDraftId: action.editorialDraftId,
           });
       }
     })();
@@ -493,6 +502,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
       case 'admin_post_preview':
       case 'admin_post_status':
       case 'admin_post_cancel':
+      case 'admin_post_from_editorial':
       case 'admin_post_callback':
         await executeAdminPost(action);
         return;

@@ -73,11 +73,13 @@ describe('migration plan validation (pure — no database access)', () => {
       '0003_job_dlq_delivery',
       '0004_source_poll_ownership',
       '0005_admin_post_pipeline',
+      '0006_admin_post_editorial_source',
     ]);
     expect(REAL_V2.version).toBe(2);
     expect(MIGRATIONS[2]!.version).toBe(3);
     expect(MIGRATIONS[3]!.version).toBe(4);
     expect(MIGRATIONS[4]!.version).toBe(5);
+    expect(MIGRATIONS[5]!.version).toBe(6);
     expect(() => validateMigrationPlan(MIGRATIONS)).not.toThrow();
     expect(() => validateMigrationPlan(PLAN_V1_SYNTHETIC_V2)).not.toThrow();
   });
@@ -208,14 +210,15 @@ describe('applyMigrations — incremental, future-safe semantics', () => {
       '0003_job_dlq_delivery',
       '0004_source_poll_ownership',
       '0005_admin_post_pipeline',
+      '0006_admin_post_editorial_source',
     ]);
-    expect(andAgain.finalVersion).toBe(5);
+    expect(andAgain.finalVersion).toBe(6);
 
     // No duplicate probe rows: the version-2 statements did not run again.
     const count = await db.prepare(`SELECT COUNT(*) AS n FROM migration_v2_probe`).first<{
       n: number;
     }>();
     expect(count?.n).toBe(1);
-    expect(await appliedSchemaVersion()).toBe(5);
+    expect(await appliedSchemaVersion()).toBe(6);
   });
 });

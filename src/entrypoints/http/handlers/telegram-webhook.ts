@@ -282,6 +282,9 @@ export async function handleTelegramWebhook(
       // ignored (fail closed). Wiring arrives with Phase 2B.
       reviewEnabled,
       adminPostEnabled,
+      // R1.22 Phase A: the editorial→post bridge gate (fail-closed, default
+      // false) — gates ONLY the /post_from_draft conversion command.
+      editorialToPostEnabled: adminPostFlags.config.editorialToPostEnabled,
     }),
     // R1.18: the read-only review service is wired ONLY while the gate is
     // ON — the SAME production factory the offline demo shares.

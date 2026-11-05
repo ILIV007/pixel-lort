@@ -134,7 +134,7 @@ if (typeof appVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(appVersion)) {
 // the owner authorizes the remote migration.
 // ---------------------------------------------------------------------------
 
-const EXPECTED_SCHEMA_VERSION = '5';
+const EXPECTED_SCHEMA_VERSION = '6';
 
 expectEveryMatch(
   'src/shared/config/phase1a.ts',

@@ -96,6 +96,7 @@ const EXPECTED_INDEXES: readonly string[] = [
   'idx_story_entities_entity',
   'idx_tg_updates_lifecycle',
   'idx_tg_updates_received',
+  'idx_admin_post_versions_editorial',
 ];
 
 async function namedTables(): Promise<string[]> {
@@ -129,15 +130,15 @@ beforeEach(async () => {
 });
 
 describe('migration application', () => {
-  it('applies every migration as an atomic batch and reports metadata (schema v5, linear chain)', async () => {
+  it('applies every migration as an atomic batch and reports metadata (schema v6, linear chain)', async () => {
     expect(await namedTables()).toEqual([...EXPECTED_TABLES].sort());
 
     const metadata = await db
       .prepare(`SELECT key, value FROM schema_metadata ORDER BY key`)
       .all<{ key: string; value: string }>();
     const byKey = new Map(metadata.results.map((row) => [row.key, row.value]));
-    expect(byKey.get('schema_version')).toBe('5');
-    expect(byKey.get('migration_id')).toBe('0005_admin_post_pipeline');
+    expect(byKey.get('schema_version')).toBe('6');
+    expect(byKey.get('migration_id')).toBe('0006_admin_post_editorial_source');
     expect(byKey.get('applied_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -169,9 +170,9 @@ describe('schema contracts', () => {
     expect(tables).toEqual([...EXPECTED_TABLES].sort());
   });
 
-  it('creates exactly the 37 expected indexes (29 approved + lifecycle + DLQ + ownership + 5 admin-post)', async () => {
+  it('creates exactly the 38 expected indexes (29 approved + lifecycle + DLQ + ownership + 5 admin-post + 1 editorial provenance)', async () => {
     const indexes = await namedIndexes();
-    expect(indexes).toHaveLength(37);
+    expect(indexes).toHaveLength(38);
     expect(indexes).toEqual([...EXPECTED_INDEXES].sort());
   });
 

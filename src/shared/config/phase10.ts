@@ -1,7 +1,8 @@
 /**
  * R1.20-R configuration surface — the admin post pipeline slice.
  *
- * TWO INDEPENDENT, fail-closed, NON-SECRET feature flags:
+ * TWO INDEPENDENT, fail-closed, NON-SECRET feature flags PLUS the R1.22
+ * editorial-bridge gate (all three independent, all default false):
  * - `ADMIN_POST_ENABLED` ('true' | 'false', default 'false') gates the whole
  *   admin-authored post surface: plain-text capture from authorized admins in
  *   private chats, /post_preview / /post_status / /post_cancel, and the
@@ -16,6 +17,14 @@
  *   publication row or Bot API call with an explicit honest reply. Enabling
  *   the capture/approve pipeline never enables sending. This implements the
  *   round contract: live publication ships disabled by default.
+ * - `EDITORIAL_TO_POST_ENABLED` ('true' | 'false', default 'false'; R1.22
+ *   Phase A) gates ONLY the /post_from_draft conversion command — deriving
+ *   an admin post version from a stored READY editorial draft. It is
+ *   INDEPENDENT of the other two flags and can never turn anything on by
+ *   itself: while ADMIN_POST_ENABLED is OFF the whole admin post surface
+ *   (including this command) is inert, and the live-publish gate always
+ *   separately gates the send. While OFF the command keeps its exact
+ *   legacy unknown-command noop semantics.
  *
  * Format validation runs whenever a value is PRESENT, regardless of the flag
  * (a present-but-invalid value is never silently coerced — no truthy-string
@@ -49,12 +58,24 @@ export const PHASE_10_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
       'Admin post LIVE publication gate (non-secret; R1.20-R). While false an approved post can never be sent to the real channel — the publish action stops before any publication row or Bot API call. Ships false; independent of ADMIN_POST_ENABLED.',
     phase: 10,
   },
+  {
+    name: 'EDITORIAL_TO_POST_ENABLED',
+    type: 'enum',
+    required: false,
+    secret: false,
+    allowed: [...ADMIN_POST_FLAG_VALUES],
+    default: 'false',
+    description:
+      'Editorial→post bridge gate (non-secret; R1.22 Phase A). Gates ONLY the /post_from_draft conversion of a stored READY editorial draft into an admin post version (durable per-version provenance, no fabrication). Ships false; independent of ADMIN_POST_ENABLED and ADMIN_POST_LIVE_PUBLISH_ENABLED — it can never enable the capture surface or any send by itself.',
+    phase: 10,
+  },
 ]);
 
 /** Validated admin-post flag state (values only; no secrets involved). */
 export interface AdminPostConfig {
   readonly adminPostEnabled: boolean;
   readonly livePublishEnabled: boolean;
+  readonly editorialToPostEnabled: boolean;
 }
 
 /**
@@ -73,6 +94,8 @@ export function parseAdminPostConfig(env: Readonly<Record<string, unknown>>): {
       adminPostEnabled: result.ok === true && result.config.ADMIN_POST_ENABLED === 'true',
       livePublishEnabled:
         result.ok === true && result.config.ADMIN_POST_LIVE_PUBLISH_ENABLED === 'true',
+      editorialToPostEnabled:
+        result.ok === true && result.config.EDITORIAL_TO_POST_ENABLED === 'true',
     },
     result,
   };

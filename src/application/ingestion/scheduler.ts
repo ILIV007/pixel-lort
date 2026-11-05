@@ -121,7 +121,9 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
     return { kind: 'capability_unresolved', reason: capability.reason };
   }
   const ownershipEnabled =
-    capability.kind === 'known_v4_ownership' || capability.kind === 'known_v5_admin_post';
+    capability.kind === 'known_v4_ownership' ||
+    capability.kind === 'known_v5_admin_post' ||
+    capability.kind === 'known_v6_editorial_post';
 
   // Catalog completeness probe (R08): which registry sources are missing
   // a `sources` row or a `source_state` row — even when the table is NOT

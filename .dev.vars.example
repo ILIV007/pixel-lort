@@ -8,7 +8,7 @@
 # --- Non-secret (local overrides) ----------------------------------------------
 # ENVIRONMENT=development
 # LOG_LEVEL=debug
-# APP_VERSION=1.16.0
+# APP_VERSION=1.17.0
 # Phase 2A Telegram ingress flag (non-secret). Turn on locally ONLY together
 # with the three Phase 2 secrets below (fake local fixtures are fine).
 # TELEGRAM_INGRESS_ENABLED=false
@@ -38,6 +38,9 @@
 # R1.20-R admin post pipeline gates (independent, fail-closed; ship OFF):
 # ADMIN_POST_ENABLED=false
 # ADMIN_POST_LIVE_PUBLISH_ENABLED=false
+# R1.22 Phase A editorial→post bridge gate (independent, fail-closed; ships
+# OFF): gates ONLY /post_from_draft.
+# EDITORIAL_TO_POST_ENABLED=false
 
 # --- Secrets (names only; leave empty unless your phase requires them) ----------
 # Phase 2 formats (ADR-0024):

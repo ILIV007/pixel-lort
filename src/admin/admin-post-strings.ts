@@ -262,4 +262,42 @@ export const ADMIN_POST_STRINGS = {
     en: 'The send may have succeeded but its confirmation could not be recorded. Check /post_status.',
     fa: 'ارسال شاید موفق بوده اما تأیید آن ثبت نشد. /post_status را بررسی کنید.',
   } satisfies Localized,
+
+  // ---- R1.22 Phase A: the /post_from_draft editorial bridge -------------
+  editorialInvalidUsage: {
+    en: 'Invalid usage. Use /post_from_draft <editorialDraftId> with the id from /drafts.',
+    fa: 'استفادهٔ نامعتبر. از /post_from_draft <شناسهٔ پیش‌نویس خبری> با شناسه‌ای که از /drafts می‌گیرید استفاده کنید.',
+  } satisfies Localized,
+  editorialNotFound: {
+    en: 'REJECTED: no editorial draft with that id exists.',
+    fa: 'رد شد: پیش‌نویس خبری با آن شناسه وجود ندارد.',
+  } satisfies Localized,
+  editorialNotReady: {
+    en: 'REJECTED: that editorial draft is not in the READY state, so it cannot be prepared as a post.',
+    fa: 'رد شد: آن پیش‌نویس خبری در وضعیت آماده (READY) نیست، بنابراین نمی‌تواند به پست تبدیل شود.',
+  } satisfies Localized,
+  editorialDocumentTooLarge: {
+    en: 'REJECTED: the editorial document exceeds the transfer budget and cannot be prepared as a post.',
+    fa: 'رد شد: سند پیش‌نویس خبری از سقف انتقال بزرگ‌تر است و نمی‌تواند به پست تبدیل شود.',
+  } satisfies Localized,
+  editorialDocumentMalformed: {
+    en: 'REJECTED: the stored editorial document is unreadable or unsupported — nothing was prepared.',
+    fa: 'رد شد: سند ذخیره‌شدهٔ پیش‌نویس خبری خوانا یا پشتیبانی‌شده نیست — چیزی آماده نشد.',
+  } satisfies Localized,
+  editorialRenderFailed: {
+    en: 'REJECTED: the editorial text is beyond the post length limit or fails the content rules — nothing was saved. The draft was NOT truncated.',
+    fa: 'رد شد: متن پیش‌نویس خبری از سقف طول پست بیشتر است یا قواعد محتوا را نقض می‌کند — چیزی ذخیره نشد. پیش‌نویس کوتاه نشد.',
+  } satisfies Localized,
+  editorialAlreadyDerived: (draftId: string, version: number): Localized => ({
+    en: `This editorial draft was already prepared as post version ${version} of draft ${draftId}. Use /post_preview ${draftId}.`,
+    fa: `این پیش‌نویس خبری قبلاً به‌عنوان نسخهٔ ${version} پیش‌نویس پست ${draftId} آماده شده است. از /post_preview ${draftId} استفاده کنید.`,
+  }),
+  editorialConverted: (draftId: string, version: number, editorialDraftId: string): Localized => ({
+    en: `Editorial draft prepared as version ${version}. Post draft id: ${draftId} (from editorial draft ${editorialDraftId}, unverified status preserved) — share this id with a reviewer for /post_preview <draftId>.`,
+    fa: `پیش‌نویس خبری به‌عنوان نسخهٔ ${version} آماده شد. شناسهٔ پیش‌نویس پست: ${draftId} (از پیش‌نویس خبری ${editorialDraftId}، وضعیت تأییدنشده حفظ شده) — این شناسه را برای /post_preview <شناسه> در اختیار بررسی‌کننده بگذارید.`,
+  }),
+  editorialApprovalsInvalidated: {
+    en: 'Previous approvals for older versions of this draft are now INVALID — a fresh preview and approval are required.',
+    fa: 'تأییدهای نسخه‌های قدیمی‌تر این پیش‌نویس دیگر معتبر نیستند — پیش‌نمایش و تأیید تازه لازم است.',
+  } satisfies Localized,
 } as const;

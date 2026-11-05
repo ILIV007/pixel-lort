@@ -85,7 +85,13 @@ export function isInitialAdminCommand(command: string): command is InitialAdminC
   return (INITIAL_ADMIN_COMMANDS as readonly string[]).includes(command);
 }
 
-export const ADMIN_POST_COMMANDS = ['post', 'post_preview', 'post_status', 'post_cancel'] as const;
+export const ADMIN_POST_COMMANDS = [
+  'post',
+  'post_preview',
+  'post_status',
+  'post_cancel',
+  'post_from_draft',
+] as const;
 
 function isAdminPostCommand(command: string): boolean {
   return (ADMIN_POST_COMMANDS as readonly string[]).includes(command);
@@ -253,6 +259,25 @@ export type TelegramAction =
     }
   | {
       /**
+       * R1.22 Phase A: convert ONE stored READY editorial draft into a new
+       * admin post version through the bridge (durable per-version
+       * provenance, deterministic render, no fabrication). The router has
+       * already gated: the editorial-bridge flag ON + authorized + private
+       * chat + fresh message + the `draft.create` permission + a validated
+       * whole-token argument. The service re-checks everything (fail
+       * closed) and owns ALL content/store decisions.
+       */
+      readonly type: 'admin_post_from_editorial';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+      readonly updateId: number;
+      /** The validated opaque EDITORIAL draft id (from /drafts). */
+      readonly editorialDraftId: string;
+    }
+  | {
+      /**
        * R1.20-R: resolve an `a:<token>` callback through the admin-post
        * service (approve / publish / confirm-republish). The token is
        * consumed exactly once, bound to ONE user, and re-validated against
@@ -290,6 +315,14 @@ export interface CommandRouteContext {
    * `not_a_command` noop and callback queries keep `callback_not_supported`.
    */
   readonly adminPostEnabled?: boolean;
+  /**
+   * R1.22 Phase A: whether the editorial→post bridge command is enabled
+   * (the `EDITORIAL_TO_POST_ENABLED` fail-closed flag, parsed by the
+   * caller). Default/absent = DISABLED: `/post_from_draft` keeps the exact
+   * unknown-command noop semantics. It gates ONLY that command — it never
+   * widens capture, preview, approval, or any send behavior.
+   */
+  readonly editorialToPostEnabled?: boolean;
 }
 
 export interface CommandRouter {
@@ -413,6 +446,9 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
   const reviewEnabled = context.reviewEnabled === true;
   // R1.20-R: the admin post gate is fail-closed — absent/false both DISABLE.
   const adminPostEnabled = context.adminPostEnabled === true;
+  // R1.22 Phase A: the editorial→post bridge gate is fail-closed —
+  // absent/false both DISABLE the /post_from_draft command only.
+  const editorialToPostEnabled = context.editorialToPostEnabled === true;
 
   function respond(
     command: InitialAdminCommand,
@@ -516,6 +552,58 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         }
         const postUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
         switch (command) {
+          case 'post_from_draft': {
+            // R1.22 Phase A — the editorial→post bridge. Gated FIRST by its
+            // OWN fail-closed flag: while OFF the command is an unknown
+            // command (the exact legacy noop) even though the admin post
+            // surface around it is active. It never widens any other
+            // behavior.
+            if (!editorialToPostEnabled) {
+              return { type: 'noop', reason: 'command_not_allowlisted' };
+            }
+            // The conversion CREATES an admin post draft version — the same
+            // `draft.create` permission as the capture start (pure gate, no
+            // D1; the service re-checks fail-closed).
+            if (!roleHasPermission(actor.role, 'draft.create')) {
+              return {
+                type: 'denied',
+                chatId,
+                reason: 'insufficient_permission',
+                text: escapeTelegramHtml(ADMIN_POST_STRINGS.capturePermissionDenied[postUi]),
+              };
+            }
+            // Whole-token argument grammar, validated BEFORE any service or
+            // store could exist (the same discipline as /post_preview).
+            const remainder = commandRemainder(update.text);
+            if (remainder.kind === 'malformed') {
+              return {
+                type: 'send_message',
+                chatId,
+                text: escapeTelegramHtml(ADMIN_POST_STRINGS.editorialInvalidUsage[postUi]),
+              };
+            }
+            const parsedArgument = parseDraftsArgument(
+              remainder.kind === 'remainder' ? remainder.text : undefined,
+            );
+            if (parsedArgument.kind !== 'detail') {
+              // `/post_from_draft` with NO argument has no documented
+              // meaning — there is no implicit draft to convert.
+              return {
+                type: 'send_message',
+                chatId,
+                text: escapeTelegramHtml(ADMIN_POST_STRINGS.editorialInvalidUsage[postUi]),
+              };
+            }
+            return {
+              type: 'admin_post_from_editorial',
+              chatId,
+              telegramUserId: update.fromUserId,
+              role: actor.role,
+              uiLanguage: postUi,
+              updateId: update.updateId,
+              editorialDraftId: parsedArgument.draftId,
+            };
+          }
           case 'post': {
             // R1.20-R1: the EXPLICIT capture-session start. A pure
             // permission gate (no D1): roles without `draft.create` get the

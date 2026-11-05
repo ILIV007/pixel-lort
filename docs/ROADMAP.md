@@ -1167,3 +1167,36 @@ design; see the Phase 1B section above.)_
       integration media, integration role-flow-UI, integration
       send-integrity) added to `test:db`; full `npm run check` green; all
       R1.19.1/R1.20-R1 regression suites stay green.
+
+### R1.22 Phase A — the editorial→post bridge (version 1.17.0, schema 6)
+
+- [x] `/post_from_draft <editorialDraftId>`: ONE stored READY editorial
+      draft converts into a NEW admin post version through the EXISTING
+      preview/approve/publication flow — no bypass, no real send. The
+      render is DETERMINISTIC and HONEST: headline (bold entity) + summary + model claims + the fixed unverified note + source attribution;
+      empty sections stay absent (nothing invented); over-limit
+      compositions fail TYPED (never truncated); a stored claim that is not
+      exactly `unverified` fails the conversion (the unverified status is
+      structural, never laundered); the raw source excerpt stays in the
+      editorial draft (the channel carries the editorial OUTPUT).
+- [x] Migration 0006 (schema 5 → 6, LOCAL-ONLY candidate, append-only):
+      `admin_post_versions` rebuilt with a nullable `source_update_id` +
+      `editorial_draft_id`/`editorial_draft_version` + an EXACTLY-ONE-origin
+      CHECK (a fabricated update id is refused by the database) + a partial
+      UNIQUE index admitting at most ONE derived version per editorial
+      draft version — the bridge is idempotent (a second conversion answers
+      with an honest pointer, never a duplicate). Legacy rows are copied
+      byte-identically with NULL provenance; upgrade tested from a
+      populated schema-5 database in its own isolated suite.
+- [x] Existing-draft conversion bumps the version and invalidates older
+      approvals in the SAME atomic batch (the manual-capture invariant).
+- [x] Gates: `EDITORIAL_TO_POST_ENABLED` independent fail-closed default
+      OFF; the conversion needs `draft.create` in a private chat (re-checked
+      in the service); preview/approval/publication stay the exact
+      R1.20-R1/R1.21 flows with version/fingerprint bindings and the
+      live-publish gate.
+- [x] Tests: unit render suite (8), migration-0006 suite (6), the REAL-path
+      bridge suite (5: full flow + live publish + existing-draft
+      invalidation + typed failures + flag-off/group noop) — all over the
+      REAL webhook/D1/Bot API client with ids and tokens taken ONLY from
+      real bot replies; `test:db` and `npm run check` re-run green.

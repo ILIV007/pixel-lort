@@ -36,9 +36,9 @@ describe('GET /version via SELF', () => {
       'environment',
       'schemaVersion',
     ]);
-    expect(body['applicationVersion']).toBe('1.16.0');
+    expect(body['applicationVersion']).toBe('1.17.0');
     expect(body['commit']).toBe('local-dev');
-    expect(body['schemaVersion']).toBe(5);
+    expect(body['schemaVersion']).toBe(6);
     expect(body['environment']).toBe('development');
   });
 
@@ -137,8 +137,8 @@ describe('GET /health/ready — Phase 1A schema health (DB binding present)', ()
     // its CREATE/ALTER statements.
     await env.DB.prepare(
       `INSERT INTO schema_metadata (key, value, updated_at_ms) VALUES
-         ('schema_version', '5', 1),
-         ('migration_id', '0005_admin_post_pipeline', 1),
+         ('schema_version', '6', 1),
+         ('migration_id', '0006_admin_post_editorial_source', 1),
          ('applied_at', '1970-01-01T00:00:00.000Z', 1)`,
     ).run();
   });
@@ -159,7 +159,7 @@ describe('GET /health/ready — Phase 1A schema health (DB binding present)', ()
     // treat migrations as pending again (shared file storage). R1.20-R1: the
     // applied LINEAR chain lands at version 5 (0004 -> 4, 0005 -> 5).
     await env.DB.prepare(
-      `UPDATE schema_metadata SET value = '5' WHERE key = 'schema_version'`,
+      `UPDATE schema_metadata SET value = '6' WHERE key = 'schema_version'`,
     ).run();
   });
 });

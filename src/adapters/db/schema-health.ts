@@ -44,6 +44,15 @@ export const OWNERSHIP_SCHEMA_VERSION = 4;
  */
 export const ADMIN_POST_SCHEMA_VERSION = 5;
 
+/**
+ * R1.22 Phase A — the schema version of the LINEAR path's final candidate
+ * state: migration candidate 0006 (editorial→post provenance) applied ON
+ * TOP of 0005. Version 6 therefore MEANS "ownership present AND admin post
+ * present AND the per-version editorial provenance present". Capability
+ * marker only — never a health expectation.
+ */
+export const EDITORIAL_POST_SCHEMA_VERSION = 6;
+
 export const SCHEMA_METADATA = {
   table: SCHEMA_METADATA_TABLE,
   versionKey: 'schema_version',
@@ -137,7 +146,7 @@ export type SchemaCapabilityUnresolvedReason =
   | 'schema_capability_metadata_missing'
   /** A value that is not a positive safe integer (corrupt/oversized). */
   | 'schema_capability_metadata_invalid'
-  /** A well-formed integer that is NOT an exactly-known version (≠3, ≠4, ≠5). */
+  /** A well-formed integer that is NOT an exactly-known version (≠3, ≠4, ≠5, ≠6). */
   | 'schema_capability_version_unsupported'
   /**
    * The recorded migration_id does not identify a known shape for the
@@ -154,6 +163,12 @@ export const SCHEMA_V4_OWNERSHIP_MIGRATION_ID = '0004_source_poll_ownership';
  * version-5 linear shape — the version number itself distinguishes them.
  */
 export const SCHEMA_ADMIN_POST_MIGRATION_ID = '0005_admin_post_pipeline';
+/**
+ * R1.22 Phase A — identifies the version-6 linear shape (the editorial→post
+ * provenance rebuild of admin_post_versions on top of the admin post
+ * pipeline).
+ */
+export const SCHEMA_EDITORIAL_POST_MIGRATION_ID = '0006_admin_post_editorial_source';
 
 /** The distinct, typed capability states (R19-01 — no boolean merge). */
 export type SchemaCapability =
@@ -190,6 +205,18 @@ export type SchemaCapability =
       readonly appliedSchemaVersion: 5;
     }
   | {
+      /**
+       * R1.22 Phase A: the LINEAR final candidate state — 0006 applied on
+       * top of 0005. ALL capabilities are present: ownership (0004), the
+       * admin post pipeline (0005) AND the per-version editorial provenance
+       * with the nullable source_update_id (0006). Every ingestion path
+       * treats this state exactly like the ownership mode; the admin post
+       * pipeline AND the editorial bridge are available.
+       */
+      readonly kind: 'known_v6_editorial_post';
+      readonly appliedSchemaVersion: 6;
+    }
+  | {
       readonly kind: 'unresolved';
       readonly reason: SchemaCapabilityUnresolvedReason;
     };
@@ -219,12 +246,13 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
   if (parsed === 3) {
     return { kind: 'known_v3_legacy', appliedSchemaVersion: 3 };
   }
-  if (parsed === 4 || parsed === 5) {
+  if (parsed === 4 || parsed === 5 || parsed === 6) {
     // The migration_id distinguishes the shapes a version number alone can
     // never prove: at version 4 the ownership column exists ONLY under the
     // 0004 id; at version 5 the linear chain requires the 0005 id (and
-    // implies 0004's changes). Anything else is UNRESOLVED — no invented
-    // valid shapes.
+    // implies 0004's changes); at version 6 the linear chain requires the
+    // 0006 id (and implies 0004+0005's changes). Anything else is
+    // UNRESOLVED — no invented valid shapes.
     let idRow: { value: string } | null;
     try {
       idRow = await executor.first<{ value: string }>({
@@ -246,8 +274,14 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
       }
       return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
     }
-    if (idRow.value === SCHEMA_ADMIN_POST_MIGRATION_ID) {
-      return { kind: 'known_v5_admin_post', appliedSchemaVersion: 5 };
+    if (parsed === 5) {
+      if (idRow.value === SCHEMA_ADMIN_POST_MIGRATION_ID) {
+        return { kind: 'known_v5_admin_post', appliedSchemaVersion: 5 };
+      }
+      return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
+    }
+    if (idRow.value === SCHEMA_EDITORIAL_POST_MIGRATION_ID) {
+      return { kind: 'known_v6_editorial_post', appliedSchemaVersion: 6 };
     }
     return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
   }

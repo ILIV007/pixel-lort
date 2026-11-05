@@ -224,7 +224,9 @@ export function createSourcePollHandler(
         return { kind: 'retry', reasonCode: 'ingestion_capability_unresolved' };
       }
       const ownershipEnabled =
-        capability.kind === 'known_v4_ownership' || capability.kind === 'known_v5_admin_post';
+        capability.kind === 'known_v4_ownership' ||
+        capability.kind === 'known_v5_admin_post' ||
+        capability.kind === 'known_v6_editorial_post';
       let ownedHoldUntilMs: number | null = null;
       if (ownershipEnabled) {
         const acquisition = await acquirePollOwnership(options.executor, {

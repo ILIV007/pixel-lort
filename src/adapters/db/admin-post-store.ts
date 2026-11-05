@@ -248,6 +248,175 @@ export async function captureVersion(
   return { kind: 'version_added', draftId: draft.id, version: nextVersion };
 }
 
+/**
+ * R1.22 Phase A — the editorial→post bridge store surface. The provenance
+ * row type is SEPARATE from AdminPostVersionRow on purpose: the existing
+ * version reads stay byte-identical, and the editorial columns are only
+ * ever projected by the bridge's own lookup.
+ */
+export interface AdminPostEditorialVersionRow {
+  readonly draft_id: string;
+  readonly version: number;
+}
+
+function requireEditorialDraftId(value: string): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 128) {
+    throw new Error('admin post store rejected: invalid editorial draft id');
+  }
+  return value;
+}
+
+function requireEditorialDraftVersion(value: number): number {
+  if (!isPositiveSafeInteger(value)) {
+    throw new Error('admin post store rejected: invalid editorial draft version');
+  }
+  return value;
+}
+
+/**
+ * The bridge idempotency lookup: at most ONE admin post version may exist
+ * per editorial draft version (the migration-0006 partial UNIQUE index is
+ * the hard fence; this lookup turns a second conversion into a typed,
+ * honest pointer reply instead of a storage error).
+ */
+export async function findVersionByEditorialSource(
+  executor: DbExecutor,
+  editorialDraftId: string,
+  editorialDraftVersion: number,
+): Promise<AdminPostEditorialVersionRow | null> {
+  return executor.first<AdminPostEditorialVersionRow>({
+    sql: `SELECT draft_id, version
+          FROM admin_post_versions
+          WHERE editorial_draft_id = ? AND editorial_draft_version = ?
+          ORDER BY created_at_ms DESC
+          LIMIT 1`,
+    params: [
+      requireEditorialDraftId(editorialDraftId),
+      requireEditorialDraftVersion(editorialDraftVersion),
+    ],
+  });
+}
+
+export type CaptureEditorialOutcome =
+  | { readonly kind: 'created'; readonly draftId: string; readonly version: number }
+  | { readonly kind: 'version_added'; readonly draftId: string; readonly version: number }
+  | { readonly kind: 'limit_reached'; readonly draftId: string; readonly version: number };
+
+/**
+ * Capture ONE editorial-derived version ATOMICALLY — the exact R1.20-R1
+ * capture invariants with the editorial origin instead of a Telegram update
+ * id (writing any update id here would be fabrication; the migration-0006
+ * CHECK admits exactly one origin per version):
+ * - NEW draft: draft insert + version 1 insert in one batch.
+ * - EXISTING open draft: version insert + FENCED head update + invalidation
+ *   of every still-active approval for OLDER versions in one batch — the
+ *   editorial content update can never leave a stale active approval behind
+ *   (the "edit invalidates the old approval" contract, exercised by the
+ *   bridge exactly like a manual capture).
+ * A concurrent conversion of the same editorial draft version loses the
+ * partial UNIQUE index race as ONE honest storage failure (the batch rolls
+ * back completely); the caller surfaces it retryable.
+ */
+export async function captureEditorialVersion(
+  executor: DbExecutor,
+  input: {
+    readonly draftId: string;
+    readonly existingDraftId: string | undefined;
+    readonly envelopeJson: string;
+    readonly fingerprint: string;
+    readonly editorialDraftId: string;
+    readonly editorialDraftVersion: number;
+    readonly telegramUserId: number;
+    readonly nowMs: number;
+  },
+): Promise<CaptureEditorialOutcome> {
+  const userId = requireUserId(input.telegramUserId);
+  const fingerprint = requireFingerprint(input.fingerprint);
+  const editorialDraftId = requireEditorialDraftId(input.editorialDraftId);
+  const editorialDraftVersion = requireEditorialDraftVersion(input.editorialDraftVersion);
+  if (input.existingDraftId === undefined) {
+    try {
+      await executor.batch([
+        {
+          sql: `INSERT INTO admin_post_drafts
+                  (id, created_by_user_id, status, current_version, created_at_ms, updated_at_ms)
+                VALUES (?, ?, 'open', 1, ?, ?)`,
+          params: [input.draftId, userId, input.nowMs, input.nowMs],
+        },
+        {
+          sql: `INSERT INTO admin_post_versions
+                  (draft_id, version, envelope_json, fingerprint, source_update_id,
+                   created_by_user_id, created_at_ms, editorial_draft_id, editorial_draft_version)
+                VALUES (?, 1, ?, ?, NULL, ?, ?, ?, ?)`,
+          params: [
+            input.draftId,
+            input.envelopeJson,
+            fingerprint,
+            userId,
+            input.nowMs,
+            editorialDraftId,
+            editorialDraftVersion,
+          ],
+        },
+      ]);
+      return { kind: 'created', draftId: input.draftId, version: 1 };
+    } catch (error) {
+      if (isAppError(error) && error.code === 'db_constraint_violation') {
+        throw toDbAppError(new Error('admin post draft id collision'));
+      }
+      throw error;
+    }
+  }
+
+  const draft = await getDraft(executor, input.existingDraftId);
+  if (draft === null || draft.status !== 'open') {
+    throw toDbAppError(new Error('admin post open draft vanished'));
+  }
+  const nextVersion = draft.current_version + 1;
+  if (nextVersion > ADMIN_POST_MAX_VERSIONS) {
+    return {
+      kind: 'limit_reached',
+      draftId: draft.id,
+      version: draft.current_version,
+    };
+  }
+  const metas = await executor.batch([
+    {
+      sql: `INSERT INTO admin_post_versions
+              (draft_id, version, envelope_json, fingerprint, source_update_id,
+               created_by_user_id, created_at_ms, editorial_draft_id, editorial_draft_version)
+            VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+      params: [
+        draft.id,
+        nextVersion,
+        input.envelopeJson,
+        fingerprint,
+        userId,
+        input.nowMs,
+        editorialDraftId,
+        editorialDraftVersion,
+      ],
+    },
+    {
+      sql: `UPDATE admin_post_drafts
+              SET current_version = ?, updated_at_ms = ?
+            WHERE id = ? AND status = 'open' AND current_version = ?`,
+      params: [nextVersion, input.nowMs, draft.id, draft.current_version],
+    },
+    {
+      sql: `UPDATE admin_post_approvals
+              SET state = 'invalidated'
+            WHERE draft_id = ? AND version < ? AND state = 'active'`,
+      params: [draft.id, nextVersion],
+    },
+  ]);
+  const headMeta = metas[1];
+  if (headMeta === undefined || headMeta.changes !== 1) {
+    throw toDbAppError(new Error('admin post editorial capture lost the head race'));
+  }
+  return { kind: 'version_added', draftId: draft.id, version: nextVersion };
+}
+
 export type CancelOutcome = { readonly kind: 'cancelled' } | { readonly kind: 'not_open' };
 
 /** Cancel the creator's open draft and invalidate its active approvals. */
