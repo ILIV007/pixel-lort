@@ -5,20 +5,20 @@
 > Maintained by the GLM agent; a file write is not a lock or a transaction.
 
 ```text
-phase_id: PhaseA-R1.22 (M1–M5 implemented, gates green)
-state: RUNNING (Phase A delivered: pushed + CI green; next tick continues Phase A residual/B)
+PhaseA-R1.22 (delivered + review round: bridge fencing hardened)
+state: RUNNING (review round committed, gates green; push + CI + backup pending this tick)
 base_sha: 6d76503c3e92dc7efe1454a04831bcb71779af91 (pre-push remote head of review/r1.10.3-sql-design)
-head_sha: ab489d7 (R1.22 Phase A feature commit on top of 25d965d)
+head_sha: 5a436bd (R1.22 review-round suite on top of a011b70; environment was recycled mid-flight and the repo was RE-RESTORED from the remote review/r1.10.3-sql-design @ a011b70 with git fsck clean)
 remote_sha: observed ... -> 25d965d -> d5a3162 (FF push 25d965d..d5a3162 on 2026-11-05, no force)
 pr: #11 (open, draft UNCHANGED, base phase/04-corrections-round191, head d5a3162 observed via API after push)
-ci_sha_and_result: Phase 0 quality gate on d5a3162 = completed:success (observed via API 2026-11-05; CI is read-only, no deploy steps)
-last_tests: npm run check exit 0 (1937/1937 tests, 150 files; prettier/eslint/tsc clean; secret scanner selftest 10/10; scan 492 files 0 findings; version gate 1.17.0/schema 6; dry-run build 786.74 KiB) + npm run test:db exit 0 (544/544, 49 files) — re-run independently on 2026-11-05 after the R1.22 Phase A implementation
+ci_sha_and_result: Phase 0 quality gate on a011b70 = completed:success (observed 2026-11-05); CI for 5a436bd pending this tick's push
+last_tests: npm run check exit 0 (1941/1941 tests, 151 files; secret scan 498 files 0 findings; version gate 1.17.0/schema 6) + npm run test:db exit 0 (544/544, 49 files) — re-run independently on 2026-11-06 after the review-round suite (+4 bridge fencing tests)
 active_run_id: autopilot-2026-11-05-initial (manual round, not a cron tick)
 lock_owner_and_heartbeat: none (single active session in this environment; no cross-process lock facility — recorded honestly)
 open_blockers_and_review_items: none blocking. Notes: origin/main (e0cf7a5) is the old Phase 3 mainline (v1.3.1) and does NOT contain this line of work; target branch for this workflow stays review/r1.10.3-sql-design per PROJECT_GUIDE §7. Cloudflare live state remains UNKNOWN (no Cloudflare operations allowed).
 next_action: R1.22 Phase A is DELIVERED (implemented, gates green, pushed, CI success on the same SHA, backup delivered). Next tick per PROJECT_GUIDE §4: review the R1.22 bridge against the residual guide risks (race/replay/duplicate paths already covered by suites; consider /help advertisement of the new command ONLY when the owner asks for surfacing), then continue to Phase B item 1 (connector inventory + Free-plan constraints) or harden Phase A gaps found by review — no new capability flags, no real sends.
 backup_and_restore_check: DELIVERED /home/z/my-project/download/Pixel-Lores_R1.22-PhaseA_d5a3162_FULL-BACKUP.zip (SHA-256 50da33b5fbf38707bb65c181217039f0bb6ac47c85f3ab87052bb27c9c69b5d0; 500/500 checksums OK from ZIP; bundle verify OK; restored in empty dir HEAD=d5a3162; git fsck clean; tree clean). This commit's own status-line correction is bookkeeping-only relative to that artifact and is covered by the next checkpoint backup.
-updated_at_utc: 2026-11-05T16:25:00Z
+updated_at_utc: 2026-11-05T17:50:00Z
 ```
 
 ## R1.22 recon notes (2026-11-05, verified against code @ 1a375ed)
@@ -30,6 +30,8 @@ updated_at_utc: 2026-11-05T16:25:00Z
 - Publication path unchanged: approval binding, fingerprint re-derivation before every send, uncertain/failed states and human-confirmed re-send all stay exactly as R1.21 built them.
 
 ## Hourly tick log (newest first)
+
+- 2026-11-05T17:50Z — R1.22 review round (master guide immediate step item 2 — compatibility of the manual R1.20-R1/R1.21/R1.22 versions): re-verified the migration chain/legacy-data/RBAC/callback/media/integrity coverage (all pinned by existing suites); the ONE uncovered gap found was concurrency fencing for the NEW editorial path — added tests/integration/admin-post-editorial-atomicity.test.ts (+4): losing conversions roll back with ZERO side effects (unique-index fence, whole-batch atomicity), the REAL bind->convert->approve interleaving answers stale, and a different-creator second conversion is the honest pointer. Environment had been RECYCLED between ticks: repo re-restored from the remote branch (a011b70, fsck clean) per the idempotent-restart rule; guides re-extracted from the owner-provided R1.21 package. Gates re-run green (1941 + 544). No Cloudflare operation, no real send.
 
 - 2026-11-05T16:25Z — R1.22 Phase A DELIVERED: FF push 25d965d..d5a3162 to review/r1.10.3-sql-design (PR #11 head updated, Draft state untouched); CI "Phase 0 quality gate" on d5a3162 observed completed:success via API; backup ZIP Pixel-Lores_R1.22-PhaseA_d5a3162_FULL-BACKUP.zip delivered with full restore+fsck evidence (500/500, SHA-256 above). No Cloudflare operation, no real send, token never persisted.
 
