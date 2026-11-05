@@ -5,23 +5,32 @@
 > Maintained by the GLM agent; a file write is not a lock or a transaction.
 
 ```text
-phase_id: PhaseA-R1.22 (R1.21 delivered + pushed)
+phase_id: PhaseA-R1.22 (recon done, implementation next)
 state: RUNNING
 base_sha: 6d76503c3e92dc7efe1454a04831bcb71779af91 (pre-push remote head of review/r1.10.3-sql-design)
-head_sha: 752667f936e60c36b34f540a8ddf11733a588587 (fd04f7f R1.21 + PROJECT_STATUS.md commit)
-remote_sha: 752667f936e60c36b34f540a8ddf11733a588587 (pushed fast-forward 6d76503..752667f on 2026-11-05, no force)
+head_sha: 1a375edec1f5b5528b881adee249c2a35f58395a (R1.21 + PROJECT_STATUS bookkeeping; CI success observed on this SHA)
+remote_sha: observed 6d76503 -> 752667f -> 85cbb59 -> 1a375ed (all fast-forward, no force, 2026-11-05)
 pr: #11 (open, draft UNCHANGED, base phase/04-corrections-round191, head 752667f observed via API after push)
 ci_sha_and_result: Phase 0 quality gate on 752667f = completed:success (observed via API 2026-11-05; CI is read-only, no deploy steps)
 last_tests: npm run check exit 0 (1917/1917 tests, 147 files; prettier/eslint/tsc clean; secret scanner selftest 10/10; scan 491 files 0 findings; version gate 1.16.0/schema 5; dry-run build 766.76 KiB) + npm run test:db exit 0 (538/538, 48 files) — re-run independently in this environment on 2026-11-05, not trusted from R1.21 report
 active_run_id: autopilot-2026-11-05-initial (manual round, not a cron tick)
 lock_owner_and_heartbeat: none (single active session in this environment; no cross-process lock facility — recorded honestly)
 open_blockers_and_review_items: none blocking. Notes: origin/main (e0cf7a5) is the old Phase 3 mainline (v1.3.1) and does NOT contain this line of work; target branch for this workflow stays review/r1.10.3-sql-design per PROJECT_GUIDE §7. Cloudflare live state remains UNKNOWN (no Cloudflare operations allowed).
-next_action: Phase A (R1.22) recon then implementation — wire real source item → editorial.prepare_draft job → story/evidence → draft → /drafts listing → Persian render/review with unverified state → preview/approval exact-version binding (RBAC, private chat) → existing publication path; integration test: source fixture → real job with artificial AI/network → draft → admin Telegram → fake channel request. No real sends, no Cloudflare operations.
+next_action: R1.22 implementation micro-phases in order — (M1) RED tests: conversion command contract (permission draft.create, private chat, unknown/too-large/not-ready editorial drafts rejected explicitly, NO silent truncation at post text limits); (M2) migration 0006 append-only: admin_post_versions.origin_kind TEXT NOT NULL DEFAULT 'capture', editorial_draft_id TEXT NULL, editorial_draft_version INTEGER NULL, schema 5→6, upgrade test from 0005 state + rollback path, all flags default OFF; (M3) /post_from_draft <editorialDraftId> editor command: read ready editorial draft via existing typed readers, deterministic Persian text projection, create admin post draft version 1 as text-only PostContentDocument (source_update_id = the command's own update id), provenance columns stored, then the EXISTING preview/approve/publish flow unchanged; (M4) integration test: source fixture → editorial job with artificial AI/network → draft → /post_from_draft → /post_preview → approve → fake channel request; regression suites admin-post-media/role-flow/send-integrity must stay green; (M5) docs: ADMIN_POST.md usage+limits, ADR, ROADMAP, version bump per repo convention.
 backup_and_restore_check: DELIVERED /home/z/my-project/download/Pixel-Lores_R1.21-Delivered_85cbb59_FULL-BACKUP.zip (SHA-256 b9f34b06458c0b340732b0db7d7aa1b34d2e954a2e92ef9cc24706f7d27d5fcf; 494/494 checksums OK from ZIP; bundle verify OK; restored in empty dir HEAD=85cbb59; git fsck clean; tree clean). This commit's own status-line correction is bookkeeping-only relative to that artifact and is covered by the next checkpoint backup. Input R1.21 package also re-verified (494/494 OK, restore HEAD=fd04f7f, fsck clean).
-updated_at_utc: 2026-11-05T15:05:00Z
+updated_at_utc: 2026-11-05T15:20:00Z
 ```
+
+## R1.22 recon notes (2026-11-05, verified against code @ 1a375ed)
+
+- Two separate draft families exist: editorial drafts (`drafts` table, full document_json with Persian body, story/evidence/reports; read-only via `/drafts`, R1.18 ADR-0046) and admin post drafts (`admin_post_drafts`/`admin_post_versions` migration 0005; capture→preview→approve→publish, R1.20-R1/R1.21). No bridge exists today — that is the R1.22 Phase A gap.
+- `admin_post_versions.source_update_id` is NOT NULL: for a converted version the converting COMMAND's own Telegram update id is the honest source (no schema change needed for that field). Provenance to the editorial draft (id+version) requires migration 0006 (append-only ADD COLUMNs, schema 5→6, default NULL for legacy rows, origin_kind default 'capture').
+- Post content identity: PostContentDocument (text envelope | media+caption), fingerprint covers everything; conversion produces a TEXT-ONLY document; media conversion stays out of scope (editorial drafts carry no file_id). Text limits enforced by RICH_TEXT_LIMITS — over-limit editorial body = explicit typed failure, never truncation.
+- Editorial draft projection must go through the EXISTING strict typed readers (`readPostContentDocument`-style discipline; draft-review-view's defensive document projection) — a malformed/too-large/unready editorial draft is an explicit honest failure, never a fabricated post.
+- Publication path unchanged: approval binding, fingerprint re-derivation before every send, uncertain/failed states and human-confirmed re-send all stay exactly as R1.21 built them.
 
 ## Hourly tick log (newest first)
 
+- 2026-11-05T15:20Z — R1.22 recon completed (notes above); CI on final pushed SHA 1a375ed observed completed:success; PR #11 open/draft @ 1a375ed. Next tick: start M1 (RED tests).
 - 2026-11-05T15:05Z — R1.21 DELIVERED: FF push 6d76503..752667f to review/r1.10.3-sql-design (PR #11 head updated, Draft state untouched); CI "Phase 0 quality gate" on 752667f observed completed:success via API; backup ZIP delivered with full restore+fsck evidence (SHA-256 above). Beginning Phase A (R1.22) recon.
 - 2026-11-05T14:55Z — initial round (manual): pre-checks done (guides read, R1.21 bundle restored to /home/z/pixel-work on branch `work`, HEAD fd04f7f verified, fsck clean, clean tree, 491 tracked files). PAT validated via API (push permission confirmed on ILIV007/pixel-lort). Gates re-run green (1917 + 538). Hourly cron registered in the platform (top of each hour, Asia/Tehran). Next: FF push + CI observation + backup, then Phase A (R1.22) recon.
