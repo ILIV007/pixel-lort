@@ -6,19 +6,19 @@
 
 ```text
 PhaseB-item1 (master-guide Phase 4 recon: source/connector inventory re-verified; R1.22 Phase A remains delivered)
-state: RUNNING (Phase-B-1 recon DONE and recorded; gates green on the re-restored tree; backup + FF push + CI observation happen later in this same tick)
+state: DONE for this tick's scope (Phase-B-1 recon recorded; gates green on the re-restored tree; backup delivered + restore-tested; FF push 1731528..0c1b92d observed; PR #11 head 0c1b92d; CI completed:success on 0c1b92d observed via API. CI on THIS recording commit itself: observed immediately after push and reported in the next tick log — recorded here as UNKNOWN until then)
 base_sha: 1731528601edde9704aa87da52fe02e34ca32e5b (remote head of review/r1.10.3-sql-design observed via API at tick start; = R1.22 Phase A + review round)
-head_sha: 1731528 (last delivered checkpoint; this tick appends a PROJECT_STATUS recon-record commit on top — see git log -1)
-remote_sha: observed via API 2026-11-06: review/r1.10.3-sql-design @ 1731528 (the R1.22 review round 5a436bd + its status record, both FF-pushed by the previous tick; no force ever used)
-pr: #11 (open, draft UNCHANGED, base phase/04-corrections-round191, head 1731528 — all observed via API 2026-11-06)
-ci_sha_and_result: Phase 0 quality gate on 1731528 = completed:success (observed via API 2026-11-06 BEFORE restore, on the same SHA this tree was restored from)
+head_sha: 0c1b92d (delivered checkpoint: e2939fd Phase-B-1 recon record + 0c1b92d backup-evidence record, both on top of 1731528)
+remote_sha: observed via API 2026-11-06 after this tick's push: review/r1.10.3-sql-design @ 0c1b92d (FF push 1731528..0c1b92d of the Phase-B-1 recon record + backup evidence; no force ever used)
+pr: #11 (open, draft UNCHANGED, base phase/04-corrections-round191, head 0c1b92d — observed via API after the push, 2026-11-06)
+ci_sha_and_result: Phase 0 quality gate on 0c1b92d = completed:success (observed via API 2026-11-06 after the push, 3 polls); also on 1731528 = completed:success (observed BEFORE restore, on the SHA this tree was restored from)
 last_tests: npm run check exit 0 (1941/1941 tests, 151 files; secret scan 499 files 0 findings; version gate 1.17.0/schema 6) + npm run test:db exit 0 (544/544, 49 files) — re-run independently 2026-11-05T18:3xZ on the freshly re-restored tree
 active_run_id: autopilot-2026-11-06-0230-cron (hourly tick; environment had been recycled between ticks)
 lock_owner_and_heartbeat: none (single active session; no cross-process lock facility — recorded honestly)
 open_blockers_and_review_items: none blocking. Environment recycle LOST the local PROJECT_GUIDE.md extract and the prior download/ backup artifacts (recorded honestly; the remote branch is the durable source of truth and was used for the re-restore). Cloudflare live state remains UNKNOWN (no Cloudflare operations allowed). Free-plan ingestion verdict NOT_READY_FOR_INGESTION_ON_FREE stands (DESIGN-only; lifting requires the accepted design + explicit owner decision).
 next_action: Phase B item 1 DONE this tick — all 14 registry sources re-verified against CURRENT code @ 1731528 with ZERO drift vs docs/RUNBOOK_PHASE4_SOURCES.md (recon notes below). Next tick: Phase B item 2 candidates — Free-plan resource-ledger reconciliation from free-plan/FREE_PLAN_RESOURCE_LEDGER.json + audit/ (LOCAL-only, no Cloudflare ops), or harden any Phase A review finding; real watchlists (Steam apps / YouTube playlists / GitHub repos) are OWNER-supplied data and stay honestly blocked until provided; /help advertisement of /post_from_draft only when the owner asks for surfacing.
 backup_and_restore_check: DELIVERED /home/z/my-project/download/Pixel-Lores_R1.22-PhaseB1_e2939fd_FULL-BACKUP.zip (SHA-256 60d3f2e6cb5da1469e55f5a933e114eba687c50ee13c3f5bd18c5dd0abcf392d; 501/501 checksums OK from the ZIP; bundle clone git fsck --strict clean; restored in an empty dir HEAD=e2939fd matches; restored tree byte-identical to the source archive). Covers 1731528 + this tick's recon record. The previous ZIP artifacts no longer exist locally (environment recycle — recorded honestly).
-updated_at_utc: 2026-11-05T18:38:52Z
+updated_at_utc: 2026-11-05T18:57:00Z
 ```
 
 ## R1.22 recon notes (2026-11-05, verified against code @ 1a375ed)
