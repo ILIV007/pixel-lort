@@ -5,20 +5,20 @@
 > Maintained by the GLM agent; a file write is not a lock or a transaction.
 
 ```text
-PhaseA-R1.22 (delivered + review round: bridge fencing hardened)
-state: RUNNING (review round committed, gates green; push + CI + backup pending this tick)
-base_sha: 6d76503c3e92dc7efe1454a04831bcb71779af91 (pre-push remote head of review/r1.10.3-sql-design)
-head_sha: 5a436bd (R1.22 review-round suite on top of a011b70; environment was recycled mid-flight and the repo was RE-RESTORED from the remote review/r1.10.3-sql-design @ a011b70 with git fsck clean)
-remote_sha: observed ... -> 25d965d -> d5a3162 (FF push 25d965d..d5a3162 on 2026-11-05, no force)
-pr: #11 (open, draft UNCHANGED, base phase/04-corrections-round191, head d5a3162 observed via API after push)
-ci_sha_and_result: Phase 0 quality gate on a011b70 = completed:success (observed 2026-11-05); CI for 5a436bd pending this tick's push
-last_tests: npm run check exit 0 (1941/1941 tests, 151 files; secret scan 498 files 0 findings; version gate 1.17.0/schema 6) + npm run test:db exit 0 (544/544, 49 files) — re-run independently on 2026-11-06 after the review-round suite (+4 bridge fencing tests)
-active_run_id: autopilot-2026-11-05-initial (manual round, not a cron tick)
-lock_owner_and_heartbeat: none (single active session in this environment; no cross-process lock facility — recorded honestly)
-open_blockers_and_review_items: none blocking. Notes: origin/main (e0cf7a5) is the old Phase 3 mainline (v1.3.1) and does NOT contain this line of work; target branch for this workflow stays review/r1.10.3-sql-design per PROJECT_GUIDE §7. Cloudflare live state remains UNKNOWN (no Cloudflare operations allowed).
-next_action: R1.22 Phase A is DELIVERED (implemented, gates green, pushed, CI success on the same SHA, backup delivered). Next tick per PROJECT_GUIDE §4: review the R1.22 bridge against the residual guide risks (race/replay/duplicate paths already covered by suites; consider /help advertisement of the new command ONLY when the owner asks for surfacing), then continue to Phase B item 1 (connector inventory + Free-plan constraints) or harden Phase A gaps found by review — no new capability flags, no real sends.
-backup_and_restore_check: DELIVERED /home/z/my-project/download/Pixel-Lores_R1.22-PhaseA_d5a3162_FULL-BACKUP.zip (SHA-256 50da33b5fbf38707bb65c181217039f0bb6ac47c85f3ab87052bb27c9c69b5d0; 500/500 checksums OK from ZIP; bundle verify OK; restored in empty dir HEAD=d5a3162; git fsck clean; tree clean). This commit's own status-line correction is bookkeeping-only relative to that artifact and is covered by the next checkpoint backup.
-updated_at_utc: 2026-11-05T17:50:00Z
+PhaseB-item1 (master-guide Phase 4 recon: source/connector inventory re-verified; R1.22 Phase A remains delivered)
+state: RUNNING (Phase-B-1 recon DONE and recorded; gates green on the re-restored tree; backup + FF push + CI observation happen later in this same tick)
+base_sha: 1731528601edde9704aa87da52fe02e34ca32e5b (remote head of review/r1.10.3-sql-design observed via API at tick start; = R1.22 Phase A + review round)
+head_sha: 1731528 (last delivered checkpoint; this tick appends a PROJECT_STATUS recon-record commit on top — see git log -1)
+remote_sha: observed via API 2026-11-06: review/r1.10.3-sql-design @ 1731528 (the R1.22 review round 5a436bd + its status record, both FF-pushed by the previous tick; no force ever used)
+pr: #11 (open, draft UNCHANGED, base phase/04-corrections-round191, head 1731528 — all observed via API 2026-11-06)
+ci_sha_and_result: Phase 0 quality gate on 1731528 = completed:success (observed via API 2026-11-06 BEFORE restore, on the same SHA this tree was restored from)
+last_tests: npm run check exit 0 (1941/1941 tests, 151 files; secret scan 499 files 0 findings; version gate 1.17.0/schema 6) + npm run test:db exit 0 (544/544, 49 files) — re-run independently 2026-11-05T18:3xZ on the freshly re-restored tree
+active_run_id: autopilot-2026-11-06-0230-cron (hourly tick; environment had been recycled between ticks)
+lock_owner_and_heartbeat: none (single active session; no cross-process lock facility — recorded honestly)
+open_blockers_and_review_items: none blocking. Environment recycle LOST the local PROJECT_GUIDE.md extract and the prior download/ backup artifacts (recorded honestly; the remote branch is the durable source of truth and was used for the re-restore). Cloudflare live state remains UNKNOWN (no Cloudflare operations allowed). Free-plan ingestion verdict NOT_READY_FOR_INGESTION_ON_FREE stands (DESIGN-only; lifting requires the accepted design + explicit owner decision).
+next_action: Phase B item 1 DONE this tick — all 14 registry sources re-verified against CURRENT code @ 1731528 with ZERO drift vs docs/RUNBOOK_PHASE4_SOURCES.md (recon notes below). Next tick: Phase B item 2 candidates — Free-plan resource-ledger reconciliation from free-plan/FREE_PLAN_RESOURCE_LEDGER.json + audit/ (LOCAL-only, no Cloudflare ops), or harden any Phase A review finding; real watchlists (Steam apps / YouTube playlists / GitHub repos) are OWNER-supplied data and stay honestly blocked until provided; /help advertisement of /post_from_draft only when the owner asks for surfacing.
+backup_and_restore_check: PENDING this tick — a fresh checkpoint ZIP (git archive + git bundle + SHA256SUMS, restore-tested in an empty dir + git fsck) will be delivered to /home/z/my-project/download/ later in this tick covering 1731528 + this recon record; the previous ZIP artifacts no longer exist locally (environment recycle).
+updated_at_utc: 2026-11-05T18:38:52Z
 ```
 
 ## R1.22 recon notes (2026-11-05, verified against code @ 1a375ed)
@@ -29,8 +29,57 @@ updated_at_utc: 2026-11-05T17:50:00Z
 - Editorial draft projection must go through the EXISTING strict typed readers (`readPostContentDocument`-style discipline; draft-review-view's defensive document projection) — a malformed/too-large/unready editorial draft is an explicit honest failure, never a fabricated post.
 - Publication path unchanged: approval binding, fingerprint re-derivation before every send, uncertain/failed states and human-confirmed re-send all stay exactly as R1.21 built them.
 
+## Phase B item 1 recon — source/connector inventory re-verified (2026-11-06, code @ 1731528, v1.17.0/schema 6)
+
+Method: every claim below was re-derived from CURRENT code and the
+byte-identical registry JSON this tick — the v1.4.0-era runbook was NOT
+trusted blindly. Result: ZERO drift; the RUNBOOK_PHASE4_SOURCES.md matrix
+remains accurate at 1.17.0/schema 6.
+
+- Catalog: `docs/blueprint/v1/pixel_source_registry_v1.json` = 14 sources,
+  imported VERBATIM and Zod-validated fail-safe (any invalid record disables
+  the whole pass — `src/domain/source/source-registry.ts`).
+- Implemented connectors, exactly 5, explicit construction, no fake handlers
+  (`src/connectors/registry.ts`): `rss`, `steam-news`, `youtube-playlists`,
+  `reddit-oauth`, `github-releases`. Catalog-only, never scheduled:
+  `bluesky-public`, `igdb`.
+- Gate: `SOURCE_INGESTION_ENABLED` default `'false'` fail-closed
+  (`src/shared/config/phase4.ts`); per-source `sources.enabled` is a separate
+  owner control; NO source is enabled in the delivered tree (local or preview
+  claim unchanged — live Cloudflare state stays UNKNOWN by policy).
+- Per-source status (all 14 verified against readiness code, not the doc):
+  - implemented + configured, DISABLED (7 RSS sources, endpoints present in
+    the registry): playstation_blog, xbox_wire, ign_games, eurogamer_news,
+    moddb_news, moddb_headlines, itch_discovery — first activation candidates
+    remain playstation_blog + xbox_wire per the runbook.
+  - implemented, BLOCKED `watchlist_empty`: steam_news_watchlist (registry
+    config carries knobs but NO `apps` — `steam-news.ts:103`),
+    github_release_watchlist (`repositories: []` — `github-releases.ts:72`;
+    `GITHUB_TOKEN` optional), youtube_official_watchlist (no `playlists` in
+    registry config + `YOUTUBE_API_KEY` missing — `youtube-playlists.ts`).
+  - implemented, BLOCKED `credentials_missing`: reddit_crack_signals,
+    reddit_leak_signals (`REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET` —
+    `reddit-oauth.ts:99`; the subreddits ARE in the registry:
+    CrackWatch, GamingLeaksAndRumours).
+  - catalog-only (`connector_not_implemented`): bluesky_watchlist,
+    igdb_metadata.
+- Free-plan: the standing verdict `NOT_READY_FOR_INGESTION_ON_FREE` for the
+  advertised full-poll profile is re-confirmed
+  (`free-plan/FREE_SAFE_EXECUTION_DESIGN.md` v3, R1.10.4.1: measured
+  100 new items = 110 execution-API-call attempts / 211 statements vs the
+  documented Free row "Queries per Worker invocation … 50"). The Free-safe
+  design is DESIGN REVIEW / lab evidence ONLY — nothing implemented, and no
+  later round lifted it; lifting requires the accepted design + an explicit
+  owner decision (docs/ROADMAP.md Phase 4 header).
+- Honest blockers for real ingestion: watchlists are OWNER-supplied data
+  (the project must not invent app IDs, playlist IDs or repositories);
+  credentials are Cloudflare secrets only; any activation additionally
+  needs the Free-safe design accepted + owner decision. No Cloudflare
+  operation was performed or is allowed by this workflow.
+
 ## Hourly tick log (newest first)
 
+- 2026-11-05T18:38Z — hourly cron tick: environment had been recycled AGAIN (pixel-work, the restore dir and the prior download/ backup artifacts all gone; only upload/ survived). Re-restored from the remote branch review/r1.10.3-sql-design @ 1731528 (tip + PR #11 state + CI completed:success on that exact SHA all observed via API first), created branch work at the tip, tree clean, git fsck --strict clean. Gates re-run green on the fresh tree (1941 + 544, real exit codes 0). Phase B item 1 (master-guide Phase 4 item 1) executed: the source/connector inventory re-verified against CURRENT code — zero drift vs the v1.4.0 runbook; Free-plan NOT_READY verdict re-confirmed from the design doc. No Cloudflare operation, no real send, no source enabled, no flag changed. Backup + FF push with the owner PAT + CI observation follow this commit.
 - 2026-11-05T17:50Z — R1.22 review round (master guide immediate step item 2 — compatibility of the manual R1.20-R1/R1.21/R1.22 versions): re-verified the migration chain/legacy-data/RBAC/callback/media/integrity coverage (all pinned by existing suites); the ONE uncovered gap found was concurrency fencing for the NEW editorial path — added tests/integration/admin-post-editorial-atomicity.test.ts (+4): losing conversions roll back with ZERO side effects (unique-index fence, whole-batch atomicity), the REAL bind->convert->approve interleaving answers stale, and a different-creator second conversion is the honest pointer. Environment had been RECYCLED between ticks: repo re-restored from the remote branch (a011b70, fsck clean) per the idempotent-restart rule; guides re-extracted from the owner-provided R1.21 package. Gates re-run green (1941 + 544). No Cloudflare operation, no real send.
 
 - 2026-11-05T16:25Z — R1.22 Phase A DELIVERED: FF push 25d965d..d5a3162 to review/r1.10.3-sql-design (PR #11 head updated, Draft state untouched); CI "Phase 0 quality gate" on d5a3162 observed completed:success via API; backup ZIP Pixel-Lores_R1.22-PhaseA_d5a3162_FULL-BACKUP.zip delivered with full restore+fsck evidence (500/500, SHA-256 above). No Cloudflare operation, no real send, token never persisted.
