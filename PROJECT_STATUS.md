@@ -6,7 +6,7 @@
 
 ```text
 PhaseB (V2 AUTOPILOT adopted: guide PIXEL_CONTINUATION_AND_PHASES_04_TO_13_FA.md + correction 01_CRON_AND_DURABLE_CHECKPOINTS_FA.md; issue #12 fix independently verified and EXTENDED; owner provided a fresh limited PAT in chat this tick)
-state: DONE for this checkpoint (V2 package verified 509/509 SHA256SUMS; bundle restored to a fresh dir, fsck --full clean, chain 2dfba5a -> 174c8d6 -> 9a72de2 ancestor-verified; #12 RED on 174c8d6 = 4 failed incl. orphan-version commit, GREEN on 9a72de2+extension = 9/9 with reviewer tests byte-identical; zod GHSA-mrhx-c7xc-m3w5 exposure assessed - every untrusted network boundary is byte-capped via safe-http readStreamBounded before parse/validate, so no unbounded collection reaches zod; zod@4 upgrade recorded as a separate gated dependency migration, npm audit fix --force NOT run; gates green)
+state: DONE for this checkpoint (pushed 2dfba5a->31eee34 FF, CI success observed on 31eee34; V2 package verified 509/509 SHA256SUMS; bundle restored to a fresh dir, fsck --full clean, chain 2dfba5a -> 174c8d6 -> 9a72de2 ancestor-verified; #12 RED on 174c8d6 = 4 failed incl. orphan-version commit, GREEN on 9a72de2+extension = 9/9 with reviewer tests byte-identical; zod GHSA-mrhx-c7xc-m3w5 exposure assessed - every untrusted network boundary is byte-capped via safe-http readStreamBounded before parse/validate, so no unbounded collection reaches zod; zod@4 upgrade recorded as a separate gated dependency migration, npm audit fix --force NOT run; gates green)
 phase / subphase: issue-#12 close-out -> next per V2 guide section 3.6 = B4 recheck, then Phase 4.2-4.4 continuous
 active owner / lock mechanism / fencing generation / heartbeat / proof: none (single active session; no cross-process lock facility on this platform - recorded honestly per V2 guide section 4)
 base_sha: 2dfba5aa9504feb12d9dc18c09e97a73d1f83d41 (remote review/r1.10.3-sql-design tip observed via API this tick; PR #11 open draft, head 2dfba5a, base phase/04-corrections-round191)
@@ -18,7 +18,7 @@ ci_sha_and_result: Phase 0 quality gate on 2dfba5a = completed:success (previous
 checks executed + exit codes + counts: npm run check exit 0 (151 files / 1946 tests = 1941 baseline + 2 reviewer race tests + 3 independent-review regressions; secret scan 0 findings; version gate 1.17.0/schema 6) + npm run test:db exit 0 (49 files / 544 tests)
 open bugs and severity: issue #12 race = FIXED+fenced (verified RED/GREEN) - independent verification only, Posidon acceptance still required; zod GHSA = mitigated upstream (bounded boundaries), upgrade planned separately; OD-009 OPEN (owner decision, no purge); Cloudflare live state UNKNOWN (no Cloudflare operations allowed)
 backup: PENDING this tick - ZIP (git archive + bundle + SHA256SUMS) to /home/z/pixel-work/backups AND /home/z/my-project/download/, restore-tested in a fresh dir + git fsck, SHA-256 recorded in the tick report after the test
-next EXACT action: (1) backup ZIP + restore test; (2) re-verify remote tip = 2dfba5a + PR draft state; (3) FF push the verified chain with the owner PAT (inline env credential helper only, token never in files/logs/commits); (4) observe CI on the pushed tip SHA; (5) consolidate the TWO existing parallel hourly cron triggers into ONE with the V2 dynamic-contract message (replace, not parallel; report IDs); (6) B4 recheck per V2 section 3.6
+next EXACT action: (1) commit + push this B4 docs record (FF only); (2) observe CI on the new tip; (3) fresh backup ZIP; (4) next ticks per V2 guide section 6: Phase 4.2 (input security re-verify) and 4.3 (Free-safe local harness measurement) are the next IMPLEMENTATION candidates — all live/activation gates stay owner/Posidon
 updated_at_utc: 2026-11-06T17:02:11Z (set by updater)
 ```
 
@@ -104,8 +104,44 @@ remains accurate at 1.17.0/schema 6.
   fail-closed implementation requirements, and recommendation A-or-C.
   Deliberately NOT implemented: data deletion is an owner decision.
 
+## Phase B4 recon record — real-path inventory (2026-11-06, code @ pushed chain 2df..31eee34, V2 guide section 3.6)
+
+- **Ingestion leg (gate OFF):** cron -> scheduleDueSources -> jobs engine ->
+  poll-handler -> safe-http (HTTPS-only, 10 s deadline, 2 MiB streamed byte
+  cap) -> 5 connectors -> atomic commit (ONE batch + bounded probes).
+  Suites: source-poll-pipeline (full pipeline + gate-off), ingestion-budget,
+  ingestion-gate, connector families, round17/18 budget authority.
+- **Ingestion -> editorial TRIGGER LINK: ABSENT IN PRODUCTION (verified,
+  deliberate).** Registered job types are exactly TWO (sources.fetch_poll,
+  editorial.prepare_draft); `enqueueEditorialPrepareDraft` has NO production
+  caller (tests only); the poll handler does NOT enqueue prepare_draft.
+  Matches ROADMAP: Phase 5 is "PARTIAL in a bounded way" — the vertical
+  slice starts FROM an existing source_item; the full engine is explicitly
+  future. NOT a code defect. Wiring this link requires (a) the Free-safe
+  design ACCEPTED + (b) an explicit owner activation decision — owner/
+  Posidon territory, unchanged by this recon.
+- **Editorial leg (gate OFF):** prepare_draft handler = item -> snapshot
+  hash verify -> story (+6 fingerprint kinds) -> bounded candidate discovery
+  (<=9-row probes) -> conservative assessment -> exact-content reuse ->
+  aliases/mentions -> bounded event-relations -> evidence -> Persian ready
+  draft. Suites: editorial-source-to-draft (7 scenarios incl. replay,
+  concurrent owner, mid-commit failure, stale lease, gates, malformed AI),
+  story-candidates (+demo), candidate-assessment-persistence,
+  exact-content-reuse (+ R1.15.1/.2), entity-mentions, event-relations,
+  evidence-guard-persistence.
+- **Review/publish leg:** admin-review-* (R1.18 read-only), admin-post-media
+  / role-flow-ui / send-integrity (R1.20/R1.21: capture->preview->approve->
+  fingerprint re-derivation), R1.22 bridge /post_from_draft (flag OFF;
+  atomicity suite incl. this round's independent-review extension).
+- **Honest gaps (ROADMAP-unchecked, not new findings):** story MERGING /
+  semantic matching; AI adjudication at scale beyond 5E-1. A single
+  cron-driven ALL-legs live test remains IMPOSSIBLE until the trigger link
+  is decided + Free gate lifts — local per-leg suites with REAL D1 are the
+  deepest existing evidence.
+
 ## Hourly tick log (newest first)
 
+- 2026-11-06T17:11:46Z — V2 tick continued (post-push): CI "Phase 0 quality gate" on 31eee34 observed completed:success via API; PR #11 head now 31eee34 (open draft, untouched). Issue #12 comment attempt = HTTP 403 (PAT lacks issue-write scope — NOT retried per discipline; evidence lives in PROJECT_STATUS + commits + chat report). B4 recheck DELIVERED (section above): per-leg real-D1 inventory complete; the ONLY missing link is the deliberate ingestion->prepare_draft auto-enqueue (ROADMAP-bounded future; needs accepted Free-safe design + owner decision). No code change this continuation (docs-only). Gates for the docs commit: see last_tests.
 - V2 AUTOPILOT tick (owner message + package Pixel-Lores_AUTOPILOT_V2_PHASE4-13_9a72de2): guide set replaced (00_PROMPT_FOR_GLM_V2 + 01_CRON correction + PIXEL_CONTINUATION_AND_PHASES_04_TO_13; REFERENCE_PREVIOUS_MASTER_GUIDE read as historical only). Environment recycled (pixel-work gone) -> restored from the PACKAGE per V2 section 3 (not from guesses): SHA256SUMS 509/509 OK, bundle cloned fresh, git fsck --full clean, chain 2dfba5a->174c8d6->9a72de2 ancestor-verified, branch work at 9a72de2. Issue #12 closed INDEPENDENTLY: reviewer fence (guarded INSERT ... SELECT WHERE EXISTS + changes() gates) reviewed; RED on 174c8d6 (4 failed: both cancel-before-batch paths commit an orphan version; approvals partial-state assertions fire), GREEN on 9a72de2 9/9 after +3 GLM regression tests (approval-state == cancel-only control fixture, head untouched, success path intact; reviewer tests byte-identical). zod GHSA-mrhx-c7xc-m3w5 (high, <4.6.6, installed 3.25.76 = latest 3.x): exposure assessed - all untrusted network input byte-capped upstream (safe-http readStreamBounded fail-closed, MAX_ITEMS_PER_FEED=100, telegram 1MB, AI 1MB) -> no unbounded collection reaches zod; compatible remediation = keep boundary caps + plan zod@4 as a separate gated migration; npm audit fix --force NOT run. Gates: npm run check exit 0 (151 files / 1946 tests), npm run test:db exit 0 (49 / 544). NEW owner PAT validated cheaply via API (repo/branch/PR/issue = 200). Push/CI/cron-consolidation follow this commit per the pre-push checks.
 
 - 2026-11-05T22:55Z — hourly cron tick (06:30 +08): environment recycled again (third consecutive); re-restored from remote @ 2dfba5a (work, clean tree, fsck --strict clean; remote tip + PR #11 + CI success on 2dfba5a observed via API first; old token cheap-tested READ-ONLY = 200, push not attempted — no new PAT). Gates re-run green (1941 + 544). Guide §4-B3 continuation DELIVERED: OD-009 (retention policy decision options for storeRawDays=90) recorded in docs/OPEN_DECISIONS.md — options only, no code change; the post-edit check run honestly FAILED (exit 1, prettier table formatting) and was FIXED and re-run to exit 0 (1941 + 544). Lost local commits of the 21:30Z tick (fca050c/22bf97f) recorded as unrecoverable; B recon re-recorded compactly above. No Cloudflare operation, no real send, no flag change, no source enabled. Backup delivered (restore-tested, fsck clean) with the honest ephemerality warning.
