@@ -4,6 +4,7 @@ import { applyMigrations } from '../helpers/migrations';
 import { createDbExecutor, type DbExecutor } from '../../src/adapters/db/db-executor';
 import {
   captureEditorialVersion,
+  cancelOpenDraft,
   findVersionByEditorialSource,
   getApproval,
   getDraft,
@@ -354,5 +355,70 @@ describe('R1.22 review — the editorial conversion invalidates approvals like a
     // Exactly ONE derived version exists.
     const pointer = await findVersionByEditorialSource(executor, EDITORIAL_DRAFT_ID, 1);
     expect(pointer?.draft_id).toBe(winnerDraftId);
+  });
+});
+
+describe('independent review: cancelled-draft interleaving', () => {
+  it('does not commit an editorial version if the draft is cancelled before the batch', async () => {
+    await seedEditorialDraft(executor);
+    const seeded = await seedCapturedOpenDraft(executor, EDITOR_A);
+    const serialized = await textEnvelope('editorial version');
+    const racing: DbExecutor = {
+      ...executor,
+      batch: async (statements) => {
+        const cancelled = await cancelOpenDraft(executor, {
+          draftId: seeded.draftId,
+          telegramUserId: EDITOR_A,
+          nowMs: START + 1,
+        });
+        expect(cancelled.kind).toBe('cancelled');
+        return executor.batch(statements);
+      },
+    };
+    await expect(
+      captureEditorialVersion(racing, {
+        draftId: randomToken(),
+        existingDraftId: seeded.draftId,
+        envelopeJson: serialized.json,
+        fingerprint: serialized.fingerprint,
+        editorialDraftId: EDITORIAL_DRAFT_ID,
+        editorialDraftVersion: 1,
+        telegramUserId: EDITOR_A,
+        nowMs: START + 1,
+      }),
+    ).rejects.toThrow();
+    expect(await getVersion(executor, seeded.draftId, 2)).toBeNull();
+    expect(await findVersionByEditorialSource(executor, EDITORIAL_DRAFT_ID, 1)).toBeNull();
+  });
+});
+
+describe('independent review: cancelled manual capture interleaving', () => {
+  it('does not commit a manual version if cancelled before the batch', async () => {
+    const seeded = await seedCapturedOpenDraft(executor, EDITOR_A);
+    const serialized = await textEnvelope('next manual version');
+    const racing: DbExecutor = {
+      ...executor,
+      batch: async (statements) => {
+        const cancelled = await cancelOpenDraft(executor, {
+          draftId: seeded.draftId,
+          telegramUserId: EDITOR_A,
+          nowMs: START + 1,
+        });
+        expect(cancelled.kind).toBe('cancelled');
+        return executor.batch(statements);
+      },
+    };
+    await expect(
+      captureVersion(racing, {
+        draftId: randomToken(),
+        existingDraftId: seeded.draftId,
+        envelopeJson: serialized.json,
+        fingerprint: serialized.fingerprint,
+        sourceUpdateId: 12,
+        telegramUserId: EDITOR_A,
+        nowMs: START + 1,
+      }),
+    ).rejects.toThrow();
+    expect(await getVersion(executor, seeded.draftId, 2)).toBeNull();
   });
 });

@@ -195,8 +195,8 @@ export async function captureVersion(
   }
 
   // Existing open draft: read the head, then write the next version fenced
-  // by the observed head (a concurrent version bump makes our UPDATE match
-  // zero rows and the whole batch rolls back).
+  // by the observed head. A stale draft makes the guarded INSERT a no-op;
+  // changes() propagates that decision to the head and approval updates.
   const draft = await getDraft(executor, input.existingDraftId);
   if (draft === null || draft.status !== 'open') {
     throw toDbAppError(new Error('admin post open draft vanished'));
@@ -213,7 +213,9 @@ export async function captureVersion(
     {
       sql: `INSERT INTO admin_post_versions
               (draft_id, version, envelope_json, fingerprint, source_update_id, created_by_user_id, created_at_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            SELECT ?, ?, ?, ?, ?, ?, ?
+            WHERE EXISTS (SELECT 1 FROM admin_post_drafts
+              WHERE id = ? AND status = 'open' AND current_version = ? AND created_by_user_id = ?)`,
       params: [
         draft.id,
         nextVersion,
@@ -222,26 +224,29 @@ export async function captureVersion(
         input.sourceUpdateId,
         userId,
         input.nowMs,
+        draft.id,
+        draft.current_version,
+        userId,
       ],
     },
     {
       sql: `UPDATE admin_post_drafts
               SET current_version = ?, updated_at_ms = ?
-            WHERE id = ? AND status = 'open' AND current_version = ?`,
+            WHERE id = ? AND status = 'open' AND current_version = ? AND changes() = 1`,
       params: [nextVersion, input.nowMs, draft.id, draft.current_version],
     },
     {
       sql: `UPDATE admin_post_approvals
               SET state = 'invalidated'
-            WHERE draft_id = ? AND version < ? AND state = 'active'`,
+            WHERE draft_id = ? AND version < ? AND state = 'active' AND changes() = 1`,
       params: [draft.id, nextVersion],
     },
   ]);
   const headMeta = metas[1];
   if (headMeta === undefined || headMeta.changes !== 1) {
     // The fence rejected the head update: a concurrent capture moved the
-    // draft forward first. The batch above is atomic, so our version insert
-    // rolled back — surface a retryable storage failure (Telegram
+    // draft forward first. No version or approval mutation was committed;
+    // surface a retryable storage failure (Telegram
     // redelivers, and the duplicate-source-update guard resolves it).
     throw toDbAppError(new Error('admin post capture lost the head race'));
   }
@@ -385,7 +390,9 @@ export async function captureEditorialVersion(
       sql: `INSERT INTO admin_post_versions
               (draft_id, version, envelope_json, fingerprint, source_update_id,
                created_by_user_id, created_at_ms, editorial_draft_id, editorial_draft_version)
-            VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+            SELECT ?, ?, ?, ?, NULL, ?, ?, ?, ?
+            WHERE EXISTS (SELECT 1 FROM admin_post_drafts
+              WHERE id = ? AND status = 'open' AND current_version = ? AND created_by_user_id = ?)`,
       params: [
         draft.id,
         nextVersion,
@@ -395,18 +402,21 @@ export async function captureEditorialVersion(
         input.nowMs,
         editorialDraftId,
         editorialDraftVersion,
+        draft.id,
+        draft.current_version,
+        userId,
       ],
     },
     {
       sql: `UPDATE admin_post_drafts
               SET current_version = ?, updated_at_ms = ?
-            WHERE id = ? AND status = 'open' AND current_version = ?`,
+            WHERE id = ? AND status = 'open' AND current_version = ? AND changes() = 1`,
       params: [nextVersion, input.nowMs, draft.id, draft.current_version],
     },
     {
       sql: `UPDATE admin_post_approvals
               SET state = 'invalidated'
-            WHERE draft_id = ? AND version < ? AND state = 'active'`,
+            WHERE draft_id = ? AND version < ? AND state = 'active' AND changes() = 1`,
       params: [draft.id, nextVersion],
     },
   ]);
