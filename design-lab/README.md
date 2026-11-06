@@ -118,23 +118,36 @@ not interfere.
 
 CONDITIONAL measured scenario (RELABELED R1.10.3.1 — NOT a universal
 bound): FIRST profile with the fixtures' ~2 KiB URL shape, 100 items, 2
-redirect hops, owned candidate = **17 xAPI / 33 STMT lab-measured**;
-+1 API/1 STMT queue-envelope residual (reconciled against the accepted
-T-13 trace) → 18 xAPI / 34 STMT — inside the ≤40/≤40 target ONLY for that
-URL shape.
+redirect hops, owned candidate = **18 xAPI / 34 STMT lab-measured** (the
+2026-11-06-bound extraction measures directly what the 6ad138c-era JSON
+recorded as 17/33 + a "+1 queue-envelope residual" reconciliation; see the
+fidelity note below) — inside the ≤40/≤40 target ONLY for that URL shape.
 
 UNCHANGED supported RSS envelope: the accepted normalizer enforces NO
 canonical-URL length cap (L-14 pins 45,023-byte canonical URLs for
 5000-char CJK paths; the raw-CJK RSS XML stays < 2 MiB). Under the
 conservative combined-byte policy such polls need 2 rows/statement →
-**50 INSERT statements ALONE** (C-15 owned: 15 xAPI / 66 STMT; C-16
-legacy: 14 xAPI / 65 STMT) → **NOT_READY against BOTH ≤40 targets for the
+**50 INSERT statements ALONE** (C-15 owned: 16 xAPI / 67 STMT; C-16
+legacy: 15 xAPI / 66 STMT) → **NOT_READY against BOTH ≤40 targets for the
 unchanged envelope**. Correctness is unchanged (all rows land, fences
 intact, every audited statement ≤ budget). The durable continuation
 design (measurement gate + pre-committed policy rule + multi-window
 alternative) is in FREE_SAFE_EXECUTION_DESIGN.md §9.4. Rejected
 conditions: if any measured or derived total exceeded the target, the
 verdict is NOT_READY with the explicit blocker — never "fit".
+
+## Extraction fidelity (2026-11-06 re-extraction, tree 7b12016)
+
+The bound run log (`logs/lab-run-with-workload.log`, documented command
+above) re-extracts ALL 16 ledger rows with **+1 execution-API call and
++1 statement on every row** versus the 6ad138c-era JSON: the R1.20-R1 /
+R1.22 capability hardening resolves the shape with TWO metadata reads
+(schema version + migration id) at applied version ≥ 4, and the previous
+JSON carried pre-hardening numbers. Fidelity proof: the re-extracted
+**C-10 owned BASELINE = 110 xAPI / 211 STMT — EXACTLY the accepted T-13
+trace** (sealed provenance), which the earlier extraction under-counted by
+that same read. All FIRST-profile ≤40/≤40 assertions still hold (C-02:
+16/30); the C-15/C-16 STMT-failure NOT_READY conclusion is UNCHANGED.
 
 ## Honesty labels (mandatory)
 
