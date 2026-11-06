@@ -15,13 +15,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 8,
-      "executionApiCallsCompleted": 8,
+      "executionApiCallAttempts": 9,
+      "executionApiCallsCompleted": 9,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 9,
-      "statementsCompleted": 9,
+      "statementsAttempted": 10,
+      "statementsCompleted": 10,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 9,
+      "metaRecordsAvailable": 10,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -56,8 +56,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -101,13 +101,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 14,
-      "executionApiCallsCompleted": 14,
+      "executionApiCallAttempts": 15,
+      "executionApiCallsCompleted": 15,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 27,
-      "statementsCompleted": 27,
+      "statementsAttempted": 28,
+      "statementsCompleted": 28,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 27,
+      "metaRecordsAvailable": 28,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -142,8 +142,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -187,13 +187,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 14,
-      "executionApiCallsCompleted": 14,
+      "executionApiCallAttempts": 15,
+      "executionApiCallsCompleted": 15,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 27,
-      "statementsCompleted": 27,
+      "statementsAttempted": 28,
+      "statementsCompleted": 28,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 27,
+      "metaRecordsAvailable": 28,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -228,8 +228,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -273,13 +273,13 @@
       "hops": 3,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 16,
-      "executionApiCallsCompleted": 16,
+      "executionApiCallAttempts": 17,
+      "executionApiCallsCompleted": 17,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 31,
-      "statementsCompleted": 31,
+      "statementsAttempted": 32,
+      "statementsCompleted": 32,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 31,
+      "metaRecordsAvailable": 32,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -314,8 +314,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -359,13 +359,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 14,
-      "executionApiCallsCompleted": 14,
+      "executionApiCallAttempts": 15,
+      "executionApiCallsCompleted": 15,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 65,
-      "statementsCompleted": 65,
+      "statementsAttempted": 66,
+      "statementsCompleted": 66,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 65,
+      "metaRecordsAvailable": 66,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -400,8 +400,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -445,13 +445,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 9,
-      "executionApiCallsCompleted": 9,
+      "executionApiCallAttempts": 10,
+      "executionApiCallsCompleted": 10,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 10,
-      "statementsCompleted": 10,
+      "statementsAttempted": 11,
+      "statementsCompleted": 11,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 10,
+      "metaRecordsAvailable": 11,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -486,8 +486,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -537,13 +537,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 15,
-      "executionApiCallsCompleted": 15,
+      "executionApiCallAttempts": 16,
+      "executionApiCallsCompleted": 16,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 29,
-      "statementsCompleted": 29,
+      "statementsAttempted": 30,
+      "statementsCompleted": 30,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 29,
+      "metaRecordsAvailable": 30,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -578,8 +578,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -629,13 +629,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 15,
-      "executionApiCallsCompleted": 15,
+      "executionApiCallAttempts": 16,
+      "executionApiCallsCompleted": 16,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 29,
-      "statementsCompleted": 29,
+      "statementsAttempted": 30,
+      "statementsCompleted": 30,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 29,
+      "metaRecordsAvailable": 30,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -670,8 +670,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -721,13 +721,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 15,
-      "executionApiCallsCompleted": 15,
+      "executionApiCallAttempts": 16,
+      "executionApiCallsCompleted": 16,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 29,
-      "statementsCompleted": 29,
+      "statementsAttempted": 30,
+      "statementsCompleted": 30,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 29,
+      "metaRecordsAvailable": 30,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -762,8 +762,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -813,13 +813,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 15,
-      "executionApiCallsCompleted": 15,
+      "executionApiCallAttempts": 16,
+      "executionApiCallsCompleted": 16,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 29,
-      "statementsCompleted": 29,
+      "statementsAttempted": 30,
+      "statementsCompleted": 30,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 29,
+      "metaRecordsAvailable": 30,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -854,8 +854,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -905,13 +905,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 15,
-      "executionApiCallsCompleted": 15,
+      "executionApiCallAttempts": 16,
+      "executionApiCallsCompleted": 16,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 29,
-      "statementsCompleted": 29,
+      "statementsAttempted": 30,
+      "statementsCompleted": 30,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 29,
+      "metaRecordsAvailable": 30,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -946,8 +946,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -997,13 +997,13 @@
       "hops": 3,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 17,
-      "executionApiCallsCompleted": 17,
+      "executionApiCallAttempts": 18,
+      "executionApiCallsCompleted": 18,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 33,
-      "statementsCompleted": 33,
+      "statementsAttempted": 34,
+      "statementsCompleted": 34,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 33,
+      "metaRecordsAvailable": 34,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -1038,8 +1038,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -1089,13 +1089,13 @@
       "hops": 1,
       "dailyRequestBudget": 0,
       "authority": "denied",
-      "executionApiCallAttempts": 10,
-      "executionApiCallsCompleted": 10,
+      "executionApiCallAttempts": 11,
+      "executionApiCallsCompleted": 11,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 11,
-      "statementsCompleted": 11,
+      "statementsAttempted": 12,
+      "statementsCompleted": 12,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 11,
+      "metaRecordsAvailable": 12,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -1130,8 +1130,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -1181,13 +1181,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "failure",
-      "executionApiCallAttempts": 6,
-      "executionApiCallsCompleted": 6,
+      "executionApiCallAttempts": 7,
+      "executionApiCallsCompleted": 7,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 6,
-      "statementsCompleted": 6,
+      "statementsAttempted": 7,
+      "statementsCompleted": 7,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 6,
+      "metaRecordsAvailable": 7,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -1222,8 +1222,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -1259,13 +1259,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 109,
-      "executionApiCallsCompleted": 109,
+      "executionApiCallAttempts": 110,
+      "executionApiCallsCompleted": 110,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 210,
-      "statementsCompleted": 210,
+      "statementsAttempted": 211,
+      "statementsCompleted": 211,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 210,
+      "metaRecordsAvailable": 211,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -1300,8 +1300,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {
@@ -1351,13 +1351,13 @@
       "hops": 1,
       "dailyRequestBudget": 100,
       "authority": "granted",
-      "executionApiCallAttempts": 15,
-      "executionApiCallsCompleted": 15,
+      "executionApiCallAttempts": 16,
+      "executionApiCallsCompleted": 16,
       "executionApiCallsFailed": 0,
-      "statementsAttempted": 66,
-      "statementsCompleted": 66,
+      "statementsAttempted": 67,
+      "statementsCompleted": 67,
       "statementsNotConfirmedCompleted": 0,
-      "metaRecordsAvailable": 66,
+      "metaRecordsAvailable": 67,
       "metaRecordsUnavailable": 0,
       "statementKinds": {
         "engineClaimReads": 1,
@@ -1392,8 +1392,8 @@
         },
         {
           "stage": "capability",
-          "api": 1,
-          "stmt": 1,
+          "api": 2,
+          "stmt": 2,
           "note": "accepted resolveSchemaCapability"
         },
         {

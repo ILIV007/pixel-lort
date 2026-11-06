@@ -66,8 +66,29 @@ conclusion, no Free-fit declaration beyond the LOCAL ≤40/≤40 target row.
   parses those lines). One documented eslint exception, confined here.
 - `cost-ledger.json` — the extracted ledger (exactly what the bound log
   produced; regenerate with the extractor below). 16 rows.
-- `extract-ledger.mjs` — parses a raw run log's `LABLEDGER[…]` lines into
-  the JSON.
+- `poll-workload.test.ts` — **Phase 4.3 STEP 2**: 7 workload scenarios
+  driving the REAL end-to-end poll pipeline (scheduleDueSources -> durable
+  job -> dispatchDueJobs -> engine claim -> per-hop authorization ->
+  scripted network fake -> REAL RSS connector classification/normalize ->
+  accepted ownership-fenced commit -> job terminal) on the applied LINEAR
+  schema-6 state, instrumented by the SAME v3 D1 instrument. Scenarios:
+  **W-01** 1 new item / 1 hop, **W-02** 100 new items (connector cap),
+  **W-03** 304 conditional-GET second poll (validators + cursor preserved,
+  zero new items), **W-04** same-origin 301 redirect (2 authorized hops),
+  **W-05** HTTP 500 provider failure (adaptive ladder, zero items),
+  **W-06** 100 items at the max documented shape (URL ≈2 KiB + 512-char
+  caps through the REAL normalizer), **W-07** all 7 RSS sources (8 feed
+  URLs) in ONE pass with an OVERLAPPING second scheduler pass absorbed
+  (0 new jobs — the atomic window hold) and SEQUENTIAL envelope
+  consumption (labeled: NOT cloud concurrency evidence). Emits
+  `LABWORKLOAD[...]` rows (stage deltas: schedule/dispatch/consume; xAPI =
+  execution-API call attempts; rows = LOCAL meta deltas when available);
+  `wallMsLocal` is LOCAL WALL TIME, NOT cloud CPU. Extracted to
+  `poll-workload.json` by the same extractor.
+- `poll-workload.json` — the extracted workload rows (7 rows from the
+  bound run; regenerate with the extractor below).
+- `extract-ledger.mjs` — parses a raw run log's `LABLEDGER[…]` and
+  `LABWORKLOAD[…]` lines into the two JSON files.
 - `vitest.config.lab.mjs` — pool-workers config (same disposable workerd
   D1 as the audit tools; SEPARATE counts).
 
@@ -82,13 +103,16 @@ cp -a <package-root>/audit-tools ./audit-tools   # candidate-classification is s
 npx vitest run --config design-lab/vitest.config.lab.mjs --maxWorkers=1 \
   > /absolute/raw-lab-run.log 2>&1
 node design-lab/extract-ledger.mjs /absolute/raw-lab-run.log \
-  design-lab/cost-ledger.json
+  design-lab/cost-ledger.json design-lab/poll-workload.json
 ```
 
-Expected: **2 files passed, 30 tests passed, exit 0**; 16 ledger rows.
-Schema-3 scenarios are declared FIRST in the ledger file (the shared test
-D1 cannot un-apply 0004); schema-4 scenarios apply the accepted test-only
-0004 candidate plan afterwards — exactly like the trace suite does.
+Expected: **3 files passed, 37 tests passed, exit 0**; 16 ledger rows and
+7 workload rows. Schema-3 scenarios are declared FIRST in the ledger file
+(the shared test D1 cannot un-apply 0004); schema-4 scenarios apply the
+accepted test-only 0004 candidate plan afterwards — exactly like the trace
+suite does. The workload suite applies the FULL linear plan (schema 6).
+Each lab test file runs with per-file isolated storage, so the plans do
+not interfere.
 
 ## Measured headline (see free-plan/FREE_SAFE_EXECUTION_DESIGN.md §4/§9)
 
