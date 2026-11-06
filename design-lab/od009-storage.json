@@ -1,0 +1,209 @@
+{
+  "class": "DESIGN-LAB OD-009 non-destructive storage measurement — LOCAL workerd proxy payload bytes; extrapolation rows are ARITHMETIC, NOT cloud storage forecasts; OD-009 stays an OPEN owner decision",
+  "instrument": "SQLite BLOB byte lengths of stored TEXT payload components + PRAGMA page info when available",
+  "decisionNote": "OD-009 (docs/OPEN_DECISIONS.md) remains OPEN: no deletion performed, proposed, or scheduled; these measurements arm the owner decision (Option C: measure first)",
+  "rows": [
+    {
+      "id": "S-01",
+      "scenario": "one REAL poll cycle, 1 source, 100 max-shape items (URL ~2KiB + title/excerpt 512 caps); per-component stored payload bytes measured on committed rows",
+      "items": 100,
+      "componentBytes": {
+        "n": 100,
+        "url_bytes": 204190,
+        "title_bytes": 51200,
+        "excerpt_bytes": 51200,
+        "raw_bytes": 71290,
+        "hash_bytes": 6400,
+        "ext_bytes": 1090,
+        "author_bytes": 0,
+        "id_bytes": 2594
+      },
+      "derived": {
+        "payloadBytes": 387964,
+        "payloadPerItem": 3880,
+        "wholeRowEstimatePerItem": 3928,
+        "rawSharePct": 18.38
+      },
+      "dbPages": {
+        "available": false,
+        "page_size": null,
+        "page_count": null,
+        "totalBytes": null
+      },
+      "units": "bytes = SQLite BLOB byte lengths of stored TEXT payload components (measured); wholeRowEstimate = payloadPerItem + NOMINAL_ROW_OVERHEAD_BYTES (nominal constant, not measured); dbPages available ONLY when PRAGMA page_count/page_size works in this pool",
+      "honesty": "DESIGN-LAB, LOCAL workerd proxy on disposable SQLite-backed D1; payload bytes are LOCAL measurements, page/index/WAL overhead excluded unless dbPages.available; extrapolation rows are ARITHMETIC on local bytes - NOT cloud storage forecasts, NO cloud quota conclusion; OD-009 stays an OPEN owner decision (no deletion performed, proposed, or scheduled); Free readiness stays NOT_READY until owner/Posidon end-to-end evidence"
+    },
+    {
+      "id": "S-02",
+      "scenario": "7 RSS sources x 20 max-shape items each (per-source dedup keys), per-row byte consistency check against S-01",
+      "items": 140,
+      "componentBytes": {
+        "n": 140,
+        "url_bytes": 285810,
+        "title_bytes": 71680,
+        "excerpt_bytes": 71680,
+        "raw_bytes": 99930,
+        "hash_bytes": 8960,
+        "ext_bytes": 1470,
+        "author_bytes": 0,
+        "id_bytes": 3280
+      },
+      "derived": {
+        "payloadBytes": 542810,
+        "payloadPerItem": 3877,
+        "wholeRowEstimatePerItem": 3925,
+        "rawSharePct": 18.41
+      },
+      "dbPages": {
+        "available": false,
+        "page_size": null,
+        "page_count": null,
+        "totalBytes": null
+      },
+      "units": "bytes = SQLite BLOB byte lengths of stored TEXT payload components (measured); wholeRowEstimate = payloadPerItem + NOMINAL_ROW_OVERHEAD_BYTES (nominal constant, not measured); dbPages available ONLY when PRAGMA page_count/page_size works in this pool",
+      "honesty": "DESIGN-LAB, LOCAL workerd proxy on disposable SQLite-backed D1; payload bytes are LOCAL measurements, page/index/WAL overhead excluded unless dbPages.available; extrapolation rows are ARITHMETIC on local bytes - NOT cloud storage forecasts, NO cloud quota conclusion; OD-009 stays an OPEN owner decision (no deletion performed, proposed, or scheduled); Free readiness stays NOT_READY until owner/Posidon end-to-end evidence"
+    },
+    {
+      "id": "S-03",
+      "scenario": "extrapolation: EMBEDDED registry worst-case arrivals (min(dailyRequestBudget, polls/day x cap)) x LOCAL measured max-shape row bytes",
+      "items": 2910,
+      "componentBytes": {
+        "n": 100,
+        "url_bytes": 204190,
+        "title_bytes": 51200,
+        "excerpt_bytes": 51200,
+        "raw_bytes": 71290,
+        "hash_bytes": 6400,
+        "ext_bytes": 1090,
+        "author_bytes": 0,
+        "id_bytes": 2594
+      },
+      "derived": {
+        "payloadBytes": 387964,
+        "payloadPerItem": 3880,
+        "wholeRowEstimatePerItem": 3928,
+        "rawSharePct": 18.38
+      },
+      "dbPages": {
+        "available": false,
+        "page_size": null,
+        "page_count": null,
+        "totalBytes": null
+      },
+      "extrapolation": {
+        "sources": [
+          {
+            "id": "playstation_blog",
+            "connector": "rss",
+            "pollsPerDay": 288,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 300
+          },
+          {
+            "id": "xbox_wire",
+            "connector": "rss",
+            "pollsPerDay": 288,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 300
+          },
+          {
+            "id": "steam_news_watchlist",
+            "connector": "steam-news",
+            "pollsPerDay": 144,
+            "capPerPoll": 250,
+            "worstItemsPerDay": 500
+          },
+          {
+            "id": "youtube_official_watchlist",
+            "connector": "youtube-playlists",
+            "pollsPerDay": 144,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 250
+          },
+          {
+            "id": "ign_games",
+            "connector": "rss",
+            "pollsPerDay": 96,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 150
+          },
+          {
+            "id": "eurogamer_news",
+            "connector": "rss",
+            "pollsPerDay": 96,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 150
+          },
+          {
+            "id": "reddit_crack_signals",
+            "connector": "reddit-oauth",
+            "pollsPerDay": 144,
+            "capPerPoll": 500,
+            "worstItemsPerDay": 200
+          },
+          {
+            "id": "reddit_leak_signals",
+            "connector": "reddit-oauth",
+            "pollsPerDay": 144,
+            "capPerPoll": 500,
+            "worstItemsPerDay": 200
+          },
+          {
+            "id": "bluesky_watchlist",
+            "connector": "bluesky-public",
+            "pollsPerDay": 144,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 250
+          },
+          {
+            "id": "github_release_watchlist",
+            "connector": "github-releases",
+            "pollsPerDay": 96,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 300
+          },
+          {
+            "id": "moddb_news",
+            "connector": "rss",
+            "pollsPerDay": 48,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 80
+          },
+          {
+            "id": "moddb_headlines",
+            "connector": "rss",
+            "pollsPerDay": 48,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 80
+          },
+          {
+            "id": "itch_discovery",
+            "connector": "rss",
+            "pollsPerDay": 24,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 50
+          },
+          {
+            "id": "igdb_metadata",
+            "connector": "igdb",
+            "pollsPerDay": 1,
+            "capPerPoll": 100,
+            "worstItemsPerDay": 100
+          }
+        ],
+        "worstCaseItemsPerDay": 2910,
+        "dailyRequestBudgetCeiling": 3310,
+        "capBasis": "rss cap = INGESTION_LIMITS.maxItemsPerFeed; steam-news = 25x10 and reddit-oauth = 10x50 from connector config schema bounds; DEFAULT 100 for connectors without a verified per-poll cap (conservative, may understate igdb)",
+        "documentedFreeCapBytes": 524288000,
+        "wholeRowEstimateBytesPerDay": 11429432.4,
+        "daysToCap500MB": 46,
+        "steadyState90dBytes": 1028648916,
+        "optionA_steadyState90dAfterRawPurgeBytes": 841940406,
+        "optionAReliefPct": 18.15,
+        "nominalRowOverheadBytes": 48
+      },
+      "units": "bytes = SQLite BLOB byte lengths of stored TEXT payload components (measured); wholeRowEstimate = payloadPerItem + NOMINAL_ROW_OVERHEAD_BYTES (nominal constant, not measured); dbPages available ONLY when PRAGMA page_count/page_size works in this pool",
+      "honesty": "DESIGN-LAB, LOCAL workerd proxy on disposable SQLite-backed D1; payload bytes are LOCAL measurements, page/index/WAL overhead excluded unless dbPages.available; extrapolation rows are ARITHMETIC on local bytes - NOT cloud storage forecasts, NO cloud quota conclusion; OD-009 stays an OPEN owner decision (no deletion performed, proposed, or scheduled); Free readiness stays NOT_READY until owner/Posidon end-to-end evidence"
+    }
+  ]
+}

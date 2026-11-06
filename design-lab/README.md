@@ -87,8 +87,32 @@ conclusion, no Free-fit declaration beyond the LOCAL ≤40/≤40 target row.
   `poll-workload.json` by the same extractor.
 - `poll-workload.json` — the extracted workload rows (7 rows from the
   bound run; regenerate with the extractor below).
-- `extract-ledger.mjs` — parses a raw run log's `LABLEDGER[…]` and
-  `LABWORKLOAD[…]` lines into the two JSON files.
+- `od009-storage.test.ts` — **Review→5 / OD-009 (OPEN decision)**:
+  NON-DESTRUCTIVE storage measurement on the REAL pipeline (no deletion
+  performed, proposed, or scheduled — OD-009 stays the owner's decision).
+  **S-01** 100 max-shape items, per-component PAYLOAD bytes via SQLite
+  BLOB byte lengths (URL 2042 B / title 512 / excerpt 512 / raw_json
+  ≈713 B / hash 64 / ids+ext ≈37 B per item ⇒ ≈3 880 B payload,
+  ≈3 928 B whole-row estimate incl. the labeled nominal 48 B overhead;
+  raw_json share ≈18.4%); **S-02** 7 sources × 20 items, per-row
+  consistency (<3% drift); **S-03** extrapolation ARITHMETIC from the
+  embedded registry (min(dailyRequestBudget, polls/day × cap)):
+  worst-case 2 910 items/day (budget ceiling 3 310) ⇒ ≈46 days to the
+  documented 500 MB Free cap at MAX shape; 90-day steady state ≈981 MB,
+  Option-A raw purge ≈803 MB (≈18.1% relief — raw_json is only ≈713 B at
+  max shape, so purging it alone does NOT reach a steady state under the
+  cap at worst-case arrivals). PRAGMA page info unavailable in this pool
+  (recorded `available:false`, never guessed). These are LOCAL proxy
+  measurements and labeled arithmetic — NOT cloud storage actuals; the
+  real worst case depends on actual feed arrival rates (far below the
+  registry caps) which only owner/Posidon cloud evidence can measure.
+  Emits `LABSTORAGE[...]` rows; extracted to `od009-storage.json`.
+- `od009-storage.json` — the extracted storage rows (3 rows from the
+  bound run; regenerate with the extractor below).
+- `extract-ledger.mjs` — parses a raw run log's `LABLEDGER[…]`,
+  `LABWORKLOAD[…]` and `LABSTORAGE[…]` lines into the JSON files; pass
+  the literal `-` as an output path to SKIP that output (byte-stable
+  re-extraction of a single surface).
 - `vitest.config.lab.mjs` — pool-workers config (same disposable workerd
   D1 as the audit tools; SEPARATE counts).
 
@@ -103,11 +127,12 @@ cp -a <package-root>/audit-tools ./audit-tools   # candidate-classification is s
 npx vitest run --config design-lab/vitest.config.lab.mjs --maxWorkers=1 \
   > /absolute/raw-lab-run.log 2>&1
 node design-lab/extract-ledger.mjs /absolute/raw-lab-run.log \
-  design-lab/cost-ledger.json design-lab/poll-workload.json
+  design-lab/cost-ledger.json design-lab/poll-workload.json \
+  design-lab/od009-storage.json
 ```
 
-Expected: **3 files passed, 37 tests passed, exit 0**; 16 ledger rows and
-7 workload rows. Schema-3 scenarios are declared FIRST in the ledger file
+Expected: **4 files passed, 40 tests passed, exit 0**; 16 ledger rows,
+7 workload rows and 3 storage rows. Schema-3 scenarios are declared FIRST in the ledger file
 (the shared test D1 cannot un-apply 0004); schema-4 scenarios apply the
 accepted test-only 0004 candidate plan afterwards — exactly like the trace
 suite does. The workload suite applies the FULL linear plan (schema 6).
