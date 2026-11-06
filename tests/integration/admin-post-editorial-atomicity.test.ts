@@ -422,3 +422,160 @@ describe('independent review: cancelled manual capture interleaving', () => {
     expect(await getVersion(executor, seeded.draftId, 2)).toBeNull();
   });
 });
+
+// GLM independent-review round (issue #12 acceptance): the two reviewer
+// tests above prove NO version commits for a cancelled draft. These three
+// prove the REST of the acceptance contract: zero approval mutation and
+// zero partial state for a stale/cancelled draft (head untouched; the
+// final approval state is EXACTLY what cancelOpenDraft alone produces —
+// verified against a cancel-only control fixture), plus the fenced
+// SUCCESS path staying intact.
+describe('independent review: cancelled capture mutates NO approvals and NO head', () => {
+  it('a cancelled MANUAL capture: no v2, head stays 1, approvals end EXACTLY as the cancel alone leaves them', async () => {
+    // CONTROL: the same fixture with the cancel ONLY — no racing capture —
+    // records what cancelOpenDraft itself does to approvals (it invalidates
+    // active ones by design). The racing capture must add ZERO mutations
+    // beyond that effect.
+    const control = await seedCapturedOpenDraft(executor, EDITOR_A);
+    await executor.run({
+      sql: `INSERT INTO admin_post_approvals
+              (draft_id, version, fingerprint, approved_by_user_id, session_id, state, approved_at_ms)
+            VALUES (?, 1, ?, ?, ?, 'active', ?)`,
+      params: [control.draftId, control.fingerprint, EDITOR_A, randomToken(), START],
+    });
+    const cancelOnly = await cancelOpenDraft(executor, {
+      draftId: control.draftId,
+      telegramUserId: EDITOR_A,
+      nowMs: START + 1,
+    });
+    expect(cancelOnly.kind).toBe('cancelled');
+    const controlApproval = await getApproval(executor, control.draftId, 1);
+
+    // RACING: identical fixture, the cancel wins between the pre-read and
+    // the capture batch.
+    const seeded = await seedCapturedOpenDraft(executor, EDITOR_A);
+    await executor.run({
+      sql: `INSERT INTO admin_post_approvals
+              (draft_id, version, fingerprint, approved_by_user_id, session_id, state, approved_at_ms)
+            VALUES (?, 1, ?, ?, ?, 'active', ?)`,
+      params: [seeded.draftId, seeded.fingerprint, EDITOR_A, randomToken(), START],
+    });
+    const serialized = await textEnvelope('نسخهٔ لغوشدهٔ دستی');
+    const racing: DbExecutor = {
+      ...executor,
+      batch: async (statements) => {
+        const cancelled = await cancelOpenDraft(executor, {
+          draftId: seeded.draftId,
+          telegramUserId: EDITOR_A,
+          nowMs: START + 1,
+        });
+        expect(cancelled.kind).toBe('cancelled');
+        return executor.batch(statements);
+      },
+    };
+    await expect(
+      captureVersion(racing, {
+        draftId: randomToken(),
+        existingDraftId: seeded.draftId,
+        envelopeJson: serialized.json,
+        fingerprint: serialized.fingerprint,
+        sourceUpdateId: 13,
+        telegramUserId: EDITOR_A,
+        nowMs: START + 1,
+      }),
+    ).rejects.toThrow();
+    expect(await getVersion(executor, seeded.draftId, 2)).toBeNull();
+    const draft = await getDraft(executor, seeded.draftId);
+    expect(draft?.current_version).toBe(1);
+    // Zero mutations BEYOND the cancel's own effect — same final approval
+    // state and untouched fingerprint (the capture never rewrote anything).
+    const approval = await getApproval(executor, seeded.draftId, 1);
+    expect(approval?.state).toBe(controlApproval?.state);
+    expect(approval?.fingerprint).toBe(controlApproval?.fingerprint);
+  });
+
+  it('a cancelled EDITORIAL conversion: no v2, no mapping, head stays 1, approvals end EXACTLY as the cancel alone leaves them', async () => {
+    // CONTROL: cancel ONLY, no racing conversion.
+    await seedEditorialDraft(executor);
+    const control = await seedCapturedOpenDraft(executor, EDITOR_A);
+    await executor.run({
+      sql: `INSERT INTO admin_post_approvals
+              (draft_id, version, fingerprint, approved_by_user_id, session_id, state, approved_at_ms)
+            VALUES (?, 1, ?, ?, ?, 'active', ?)`,
+      params: [control.draftId, control.fingerprint, EDITOR_A, randomToken(), START],
+    });
+    const cancelOnly = await cancelOpenDraft(executor, {
+      draftId: control.draftId,
+      telegramUserId: EDITOR_A,
+      nowMs: START + 1,
+    });
+    expect(cancelOnly.kind).toBe('cancelled');
+    const controlApproval = await getApproval(executor, control.draftId, 1);
+
+    // RACING: identical fixture, the cancel wins before the batch.
+    const seeded = await seedCapturedOpenDraft(executor, EDITOR_A);
+    await executor.run({
+      sql: `INSERT INTO admin_post_approvals
+              (draft_id, version, fingerprint, approved_by_user_id, session_id, state, approved_at_ms)
+            VALUES (?, 1, ?, ?, ?, 'active', ?)`,
+      params: [seeded.draftId, seeded.fingerprint, EDITOR_A, randomToken(), START],
+    });
+    const serialized = await textEnvelope('نسخهٔ لغوشدهٔ ادیتوریال');
+    const racing: DbExecutor = {
+      ...executor,
+      batch: async (statements) => {
+        const cancelled = await cancelOpenDraft(executor, {
+          draftId: seeded.draftId,
+          telegramUserId: EDITOR_A,
+          nowMs: START + 1,
+        });
+        expect(cancelled.kind).toBe('cancelled');
+        return executor.batch(statements);
+      },
+    };
+    await expect(
+      captureEditorialVersion(racing, {
+        draftId: randomToken(),
+        existingDraftId: seeded.draftId,
+        envelopeJson: serialized.json,
+        fingerprint: serialized.fingerprint,
+        editorialDraftId: EDITORIAL_DRAFT_ID,
+        editorialDraftVersion: 1,
+        telegramUserId: EDITOR_A,
+        nowMs: START + 1,
+      }),
+    ).rejects.toThrow();
+    expect(await getVersion(executor, seeded.draftId, 2)).toBeNull();
+    expect(await findVersionByEditorialSource(executor, EDITORIAL_DRAFT_ID, 1)).toBeNull();
+    const draft = await getDraft(executor, seeded.draftId);
+    expect(draft?.current_version).toBe(1);
+    const approval = await getApproval(executor, seeded.draftId, 1);
+    expect(approval?.state).toBe(controlApproval?.state);
+    expect(approval?.fingerprint).toBe(controlApproval?.fingerprint);
+  });
+
+  it('the fenced SUCCESS path is intact: v2 commits, head bumps to 2, the v1 approval is invalidated', async () => {
+    const seeded = await seedCapturedOpenDraft(executor, EDITOR_A);
+    await executor.run({
+      sql: `INSERT INTO admin_post_approvals
+              (draft_id, version, fingerprint, approved_by_user_id, session_id, state, approved_at_ms)
+            VALUES (?, 1, ?, ?, ?, 'active', ?)`,
+      params: [seeded.draftId, seeded.fingerprint, EDITOR_A, randomToken(), START],
+    });
+    const v2 = await textEnvelope('نسخهٔ دوم سالم');
+    const capture = await captureVersion(executor, {
+      draftId: randomToken(),
+      existingDraftId: seeded.draftId,
+      envelopeJson: v2.json,
+      fingerprint: v2.fingerprint,
+      sourceUpdateId: 14,
+      telegramUserId: EDITOR_A,
+      nowMs: START + 2,
+    });
+    expect(capture.kind).toBe('version_added');
+    expect(await getVersion(executor, seeded.draftId, 2)).not.toBeNull();
+    const draft = await getDraft(executor, seeded.draftId);
+    expect(draft?.current_version).toBe(2);
+    expect((await getApproval(executor, seeded.draftId, 1))?.state).toBe('invalidated');
+  });
+});
