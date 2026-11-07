@@ -46,6 +46,8 @@
 import { AppError, type AppErrorCode } from '../../../shared/errors/app-error';
 import { parseWorkerConfig } from '../../../shared/config/phase0';
 import { parseTelegramPhase2Config } from '../../../shared/config/phase2';
+import { parseAdminReviewConfig } from '../../../shared/config/phase9';
+import { parseAdminPostConfig } from '../../../shared/config/phase10';
 import { timingSafeEqualStrings } from '../../../shared/security/timing-safe';
 import {
   BoundedReadError,
@@ -55,6 +57,8 @@ import {
 } from '../../../shared/http/bounded-reader';
 import type { WorkerEnv } from '../../../shared/types/env';
 import { createTelegramIngress } from '../../../application/telegram-ingress';
+import { createEditorialReviewService } from '../../../application/editorial/draft-review-view';
+import { createAdminPostService } from '../../../application/admin-post/admin-post-service';
 import { createAuthorizationService } from '../../../admin/authorization';
 import { createCommandRouter } from '../../../admin/command-router';
 import { createDbExecutor } from '../../../adapters/db/db-executor';
@@ -218,6 +222,52 @@ export async function handleTelegramWebhook(
   }
   const executor = createDbExecutor(env.DB);
 
+  // R1.18 (ADR-0046): the read-only review gate is parsed fail-closed —
+  // absent/false AND any invalid-present value both DISABLE the surface
+  // (the invalid value is logged as a stable field/reason pair, never as a
+  // value). Enabling it gates ONLY the new /drafts read commands.
+  const review = parseAdminReviewConfig(env as Readonly<Record<string, unknown>>);
+  if (!review.result.ok) {
+    for (const issue of review.result.issues) {
+      ctx.logger.warn('telegram.webhook.review_config_invalid', {
+        field: issue.field,
+        reason: issue.reason,
+      });
+    }
+  }
+  const reviewEnabled = review.config.reviewEnabled;
+
+  // R1.20-R: the admin post pipeline gates are parsed fail-closed —
+  // absent/false AND any invalid-present value both DISABLE (the invalid
+  // value is logged as a stable field/reason pair, never as a value).
+  // ADMIN_POST_ENABLED gates the capture/preview/approve/callback surface;
+  // ADMIN_POST_LIVE_PUBLISH_ENABLED (independent, default false) gates ONLY
+  // the actual channel send.
+  const adminPostFlags = parseAdminPostConfig(env as Readonly<Record<string, unknown>>);
+  if (!adminPostFlags.result.ok) {
+    for (const issue of adminPostFlags.result.issues) {
+      ctx.logger.warn('telegram.webhook.admin_post_config_invalid', {
+        field: issue.field,
+        reason: issue.reason,
+      });
+    }
+  }
+  const adminPostEnabled = adminPostFlags.config.adminPostEnabled;
+
+  // R1.20-R1: the REAL combined Bot API client is built ONCE and wired BOTH
+  // as the legacy action transport AND as the admin post pipeline's
+  // direct-entity channel transport (the SAME client instance — no second
+  // client, no bypass path). The LIVE flag still gates the send INSIDE the
+  // service (a wired transport never implies a live send: while
+  // ADMIN_POST_LIVE_PUBLISH_ENABLED is off, the publish action stops BEFORE
+  // any publication row or Bot API call). Without BOT_TOKEN the offline
+  // mode keeps its documented behavior (adminPost wired without transport:
+  // a publish attempt reports honestly and the row stays under its lease).
+  const botApi =
+    phase2.config.botToken !== undefined
+      ? createBotApiClient({ botToken: phase2.config.botToken, logger: ctx.logger })
+      : undefined;
+
   const ingress = createTelegramIngress({
     executor,
     authorization: createAuthorizationService({
@@ -230,13 +280,35 @@ export async function handleTelegramWebhook(
       // expectedBotUsername is NOT wired in Phase 2A: no live getMe and no
       // username source exists yet, so every explicitly-targeted command is
       // ignored (fail closed). Wiring arrives with Phase 2B.
+      reviewEnabled,
+      adminPostEnabled,
+      // R1.22 Phase A: the editorial→post bridge gate (fail-closed, default
+      // false) — gates ONLY the /post_from_draft conversion command.
+      editorialToPostEnabled: adminPostFlags.config.editorialToPostEnabled,
     }),
+    // R1.18: the read-only review service is wired ONLY while the gate is
+    // ON — the SAME production factory the offline demo shares.
+    editorialReview: reviewEnabled ? createEditorialReviewService({ executor }) : undefined,
+    // R1.20-R: the admin post service is wired ONLY while its gate is ON;
+    // R1.20-R1: the transport is the SAME real Bot API client instance built
+    // above (direct-entity send), and the destination is the
+    // operator-configured TARGET_CHANNEL (never user input). The
+    // live-publish flag ships OFF and gates the send inside the service.
+    adminPost: adminPostEnabled
+      ? createAdminPostService({
+          executor,
+          clock: systemClock,
+          logger: ctx.logger,
+          config: {
+            livePublishEnabled: adminPostFlags.config.livePublishEnabled,
+            destination: phase2.config.targetChannel,
+          },
+          transport: botApi,
+        })
+      : undefined,
     // Offline mode without BOT_TOKEN: noop actions complete; outbound
     // actions fail retryably (never silently skipped-and-acked).
-    botApi:
-      phase2.config.botToken !== undefined
-        ? createBotApiClient({ botToken: phase2.config.botToken, logger: ctx.logger })
-        : undefined,
+    botApi,
     clock: systemClock,
     logger: ctx.logger,
   });

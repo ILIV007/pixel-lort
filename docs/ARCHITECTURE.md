@@ -27,7 +27,7 @@ Runtime topology (planned):
 Telegram webhook ──► update claim (D1) ──► durable job (D1) ──► pixel-jobs
 Cron */5 ──────────► due source/publication scan ─────────────► pixel-jobs
 pixel-jobs ────────► use case handlers ──► D1/R2/KV/external APIs
-Publisher ─────────► Telegram API ───────► @pixellort
+Publisher ─────────► Telegram API ───────► @pixellores
 Failures ──────────► retry_wait/D1 ──────► pixel-dlq after max attempts
 ```
 

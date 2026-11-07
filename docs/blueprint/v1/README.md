@@ -1,6 +1,6 @@
 # PIXEL Blueprint v1
 
-Implementation-ready planning package for the Pixel editorial Telegram agent and the **PIXEL LORT** channel (`@pixellort`).
+Implementation-ready planning package for the Pixel editorial Telegram agent and the **pixel lores** channel (`@pixellores`, https://t.me/pixellores; R1.10.5 owner amendment).
 
 ## Files
 

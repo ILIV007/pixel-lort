@@ -210,6 +210,12 @@ export function createSourcePollHandler(
       // capability resolves (bounded by the job's max attempts; a persistent
       // outage then dead-letters observably instead of fabricating a
       // success).
+      // R1.20-R1: version 5 (the LINEAR final candidate state — 0005 on top
+      // of 0004) PROVES the ownership column/index are present, so it takes
+      // the ownership path exactly like an exact v4 with the 0004 id. The
+      // retired v4-with-0005-id shape (admin post tables WITHOUT the
+      // ownership column) stays legacy. Anything unreadable/unknown stops
+      // before every effect.
       const capability = await resolveSchemaCapability(options.executor);
       if (capability.kind === 'unresolved') {
         options.logger?.warn('ingestion.poll.capability_unresolved', {
@@ -217,7 +223,10 @@ export function createSourcePollHandler(
         });
         return { kind: 'retry', reasonCode: 'ingestion_capability_unresolved' };
       }
-      const ownershipEnabled = capability.kind === 'known_v4_ownership';
+      const ownershipEnabled =
+        capability.kind === 'known_v4_ownership' ||
+        capability.kind === 'known_v5_admin_post' ||
+        capability.kind === 'known_v6_editorial_post';
       let ownedHoldUntilMs: number | null = null;
       if (ownershipEnabled) {
         const acquisition = await acquirePollOwnership(options.executor, {

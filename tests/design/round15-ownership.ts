@@ -68,11 +68,14 @@ export const PROPOSED_MIGRATION_0004: MigrationDescriptor = {
 /**
  * Lab migration plan: the accepted append-only set 0001–0003 plus the
  * PROPOSED 0004. Plan validation (strict continuity 1..4) applies unchanged.
- * NEVER registered as a product default — the product `MIGRATIONS` list
- * stays 0001–0003 until a migration is explicitly authorized.
+ * NEVER registered as a product default. R1.20-R: the product MIGRATIONS
+ * list now continues with the alternative version-4 candidate
+ * (0005_admin_post_pipeline), so the lab plan is built from the EXPLICIT
+ * accepted base (versions <= 3) instead of spreading the whole list — the
+ * two candidates remain mutually exclusive upgrade branches.
  */
 export const LAB_MIGRATION_PLAN: readonly MigrationDescriptor[] = [
-  ...MIGRATIONS,
+  ...MIGRATIONS.filter((migration) => migration.version <= 3),
   PROPOSED_MIGRATION_0004,
 ];
 

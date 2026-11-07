@@ -85,7 +85,7 @@ export function createGithubReleasesConnector(): SourceConnector {
       const token = effects.secrets('GITHUB_TOKEN');
       const headers: Record<string, string> = {
         accept: 'application/vnd.github+json',
-        'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellort)',
+        'user-agent': 'PixelEditorialAgent/1.4 (+https://t.me/pixellores)',
         'x-github-api-version': '2022-11-28',
       };
       if (token !== undefined) {

@@ -5,16 +5,17 @@ Phase-0 review / correction pass on 2026-10-02**. Entries are preserved below
 for history; each records the original context, the decision, and the closing
 ADR. New unresolved decisions would be added here with status Open.
 
-| ID     | Title                                    | Status | Decided    | ADR      |
-| ------ | ---------------------------------------- | ------ | ---------- | -------- |
-| OD-001 | TARGET_CHANNEL: secret or config?        | Closed | 2026-10-02 | ADR-0009 |
-| OD-002 | Zod adoption timing                      | Closed | 2026-10-02 | ADR-0010 |
-| OD-003 | Queue handler ack-all semantics          | Closed | 2026-10-02 | ADR-0011 |
-| OD-004 | `/version` endpoint timing               | Closed | 2026-10-02 | ADR-0012 |
-| OD-005 | `nodejs_compat` flag                     | Closed | 2026-10-02 | ADR-0013 |
-| OD-006 | Per-secret fail-closed readiness phasing | Closed | 2026-10-02 | ADR-0014 |
-| OD-007 | `degraded` readiness semantics           | Closed | 2026-10-02 | ADR-0015 |
-| OD-008 | Worker name and environment resources    | Closed | 2026-10-02 | ADR-0016 |
+| ID     | Title                                              | Status   | Decided    | ADR      |
+| ------ | -------------------------------------------------- | -------- | ---------- | -------- |
+| OD-001 | TARGET_CHANNEL: secret or config?                  | Closed   | 2026-10-02 | ADR-0009 |
+| OD-002 | Zod adoption timing                                | Closed   | 2026-10-02 | ADR-0010 |
+| OD-003 | Queue handler ack-all semantics                    | Closed   | 2026-10-02 | ADR-0011 |
+| OD-004 | `/version` endpoint timing                         | Closed   | 2026-10-02 | ADR-0012 |
+| OD-005 | `nodejs_compat` flag                               | Closed   | 2026-10-02 | ADR-0013 |
+| OD-006 | Per-secret fail-closed readiness phasing           | Closed   | 2026-10-02 | ADR-0014 |
+| OD-007 | `degraded` readiness semantics                     | Closed   | 2026-10-02 | ADR-0015 |
+| OD-008 | Worker name and environment resources              | Closed   | 2026-10-02 | ADR-0016 |
+| OD-009 | Source-data retention enforcement (`storeRawDays`) | **Open** | —          | —        |
 
 ---
 
@@ -32,6 +33,12 @@ Keep it outside `PixelSecrets`.
 
 **Implementation:** removed from `FUTURE_SECRET_CATALOG`; documented under
 non-secret configuration in `.env.example`. See ADR-0009.
+
+**Owner amendment (Round 1.10.5, 2026-10-27):** the channel was renamed by the
+owner to **pixel lores** (`@pixellores`, https://t.me/pixellores). The
+"as opened" quote above is preserved verbatim as history; the current
+intended value is `TARGET_CHANNEL=@pixellores` (still non-secret — ADR-0009
+classification unchanged).
 
 ---
 
@@ -159,3 +166,73 @@ pass.
 
 **Implementation:** `wrangler.jsonc` placeholders record the planned names;
 no resources were created. See ADR-0016.
+
+---
+
+## OD-009 — Source-data retention enforcement (`storeRawDays = 90`) — **OPEN**
+
+**Context (as opened, R1.22 autopilot tick, 2026-11-06, code @ 2dfba5a,
+v1.17.0/schema 6):** the blueprint registry's `globalPolicies.storeRawDays
+= 90` is validated by the runtime registry schema
+(`src/domain/source/source-registry.ts`) but has NO enforcement path in
+product code: no durable job and no DELETE/purge statement touches
+`source_items` or `raw_json` (verified by search this round; the "cleanup"
+mentions in `prepare-draft-handler.ts` are attempt-scoped in-memory
+union-row cleanup, unrelated to retention). `docs/ROADMAP.md` Phase 5 is
+honestly marked PARTIAL and claims no retention enforcement, so this is an
+OPEN product decision, not a false claim to correct. The Free-plan resource
+ledger records storage arrival/retention as UNMEASURED (risk R-STORAGE);
+the D1 Free cap is 500 MB per database.
+
+**Why it is not implemented unilaterally:** auto-deleting stored provenance
+data is a product/security decision. Raw payloads back the honest
+verification chains (evidence provenance, editorial snapshot verification,
+exact-content reuse), and a wrong purge silently destroys reproducibility.
+
+**Interactions every option must respect (verified against schema
+@ 2dfba5a):**
+
+1. `UNIQUE(source_id, external_id)` and `UNIQUE(source_id, canonical_url)`
+   are the ITEM-level dedup boundary — deleting whole rows removes the
+   dedup memory: a re-fetched old item re-enters as NEW (re-derived, new
+   editorial-draft path). The story-level `story_fingerprints`
+   `PRIMARY KEY(kind, value)` remains as the guard, conditional on
+   fingerprint coverage.
+2. `evidence.source_item_id` is a NOT NULL FK and each evidence row stores
+   its own excerpt — purging raw-payload COLUMNS does not destroy existing
+   evidence provenance; deleting ROWS needs an explicit FK policy decision.
+3. Editorial exact-reuse / snapshot verification relies on stored item
+   snapshot identity (`content_hash` / snapshot hashes) — whole-row
+   deletion ends future re-verification of old drafts (historical
+   auditability loss).
+4. Any enforcement must be a DURABLE job with the standard fail-closed gate
+   pattern (independent flag, default OFF), budget accounting, bounded
+   batches and its own real-path test suite — never an ad-hoc cron DELETE.
+
+**Options (for the owner):**
+
+- **A — purge `raw_json` only** for rows older than `storeRawDays` (rows,
+  normalized fields, `content_hash` and URLs retained): preserves dedup
+  memory, the evidence FK and the audit trail; loses only the bulk raw
+  provider payload, which is the dominant storage component. LEAST
+  destructive.
+- **B — delete whole rows** older than `storeRawDays`: strongest storage
+  relief; breaks item-level dedup memory (re-ingestion risk), needs an
+  explicit evidence-FK policy and an accepted historical-auditability loss.
+- **C — defer enforcement, measure first**: per the ledger, arrival/
+  retention actuals are UNMEASURED and 14 sources with bounded per-item
+  caps may stay far under the 500 MB Free cap for a long time; retention
+  may be unnecessary in the near term.
+- **D — stop storing `raw_json` (or shrink it) at ingestion time**: a
+  pipeline/schema change that affects the reproducibility of the
+  normalization itself; NOT a retention decision and wider-reaching than
+  the others.
+
+**Recommendation recorded for the owner:** Option A if/when enforcement is
+wanted, or Option C until a storage measurement exists. Any implementation
+is a separate authorized round (durable job + independent fail-closed gate
+default OFF + real-path tests); NO activation without an explicit owner
+decision, consistent with every other gate in the project.
+
+**Decision:** none yet — **Open**. No ADR filed; this entry records the
+options only.

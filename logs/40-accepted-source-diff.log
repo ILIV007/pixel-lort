@@ -1,0 +1,7 @@
+## accepted-tree cleanliness after ALL local runs (R1.10.3)
+## git status --porcelain --untracked-files=no (tracked changes; expected EMPTY):
+## git diff --exit-code (expected EMPTY, exit 0):
+diff-exit=0
+## untracked overlay dirs (expected: audit-tools/ design-lab/ node_modules/ — tooling overlays, not product files):
+?? audit-tools/
+?? design-lab/

@@ -23,8 +23,15 @@ import { defineConfigSpec, type ConfigSpec } from './spec';
 import { validateConfig, type ConfigIssue, type ConfigValidationResult } from './validate';
 import type { Environment } from './phase0';
 
-/** The expected schema version (migrations 0001+0002 — ADR-0019/0030). */
-export const EXPECTED_SCHEMA_VERSION = 3;
+/**
+ * Expected schema version of the LINEAR migration candidate chain
+ * (0001+0002+0003 applied + the LOCAL-ONLY candidates 0004 → 4 and
+ * 0005 → 5). The APPLIED real runtime stays 3 until the owner separately
+ * authorizes the remote migration — a database still at 3 is healthy for
+ * its era but reports a mismatch against this bundle expectation, exactly
+ * the pre-activation posture of every review round.
+ */
+export const EXPECTED_SCHEMA_VERSION = 6;
 
 /** Local-development placeholder commit identifier (invalid outside development). */
 export const DEFAULT_APP_COMMIT = 'local-dev';

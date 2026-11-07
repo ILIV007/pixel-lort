@@ -22,6 +22,9 @@
  *   only the stable fields this module returns (never the raw payload).
  */
 
+import type { RichTextKind } from '../../domain/telegram/rich-text-envelope';
+import { RICH_TEXT_LIMITS } from '../../domain/telegram/rich-text-envelope';
+
 export const TELEGRAM_UPDATE_LIMITS = {
   /** Telegram message text hard limit (4096 characters). */
   maxTextLength: 4096,
@@ -39,6 +42,111 @@ export const TELEGRAM_UPDATE_LIMITS = {
 const MAX_SAFE_ID = Number.MAX_SAFE_INTEGER;
 
 /**
+ * R1.21 — SINGLE-media extraction application bound for a Telegram file_id
+ * (an opaque reference string). Mirrors the post-content document cap so a
+ * file_id accepted by the parser can never fail the document validator.
+ */
+const MAX_MEDIA_FILE_ID_CHARS = 256;
+
+/** Photo dimensions can be huge but not unbounded — capped for area math. */
+const MAX_PHOTO_DIMENSION = 100_000;
+
+/**
+ * R1.21 — the typed SINGLE-media attachment extracted from a message.
+ * `photo` / `video` carry the LARGEST variant's (photo) or the video's
+ * Telegram file_id; EVERY other media shape (documents, audio, animation,
+ * voice, video_note, sticker, albums via media_group_id, conflicting or
+ * malformed media fields) maps to `unsupported` — the caller REJECTS it
+ * explicitly, nothing is ever degraded into a partial post.
+ */
+export type ParsedMediaAttachment =
+  | { readonly kind: 'photo'; readonly fileId: string }
+  | { readonly kind: 'video'; readonly fileId: string }
+  | { readonly kind: 'unsupported' };
+
+/**
+ * Bounded file_id validation: a non-empty printable-ASCII string within the
+ * application cap. file_id is opaque — never interpreted, only carried.
+ */
+function boundedFileId(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_MEDIA_FILE_ID_CHARS) {
+    return undefined;
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x20 || code >= 0x7f) {
+      return undefined;
+    }
+  }
+  return value;
+}
+
+/** Largest photo variant by bounded (width*height); ties keep the later entry. */
+function largestPhotoFileId(photo: readonly unknown[]): string | undefined {
+  let best: { readonly fileId: string; readonly area: number } | undefined;
+  for (const entry of photo) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const fileId = boundedFileId(record['file_id']);
+    if (fileId === undefined) {
+      continue;
+    }
+    const width = toSafeInteger(record['width'], { min: 1, max: MAX_PHOTO_DIMENSION }) ?? 0;
+    const height = toSafeInteger(record['height'], { min: 1, max: MAX_PHOTO_DIMENSION }) ?? 0;
+    const area = width * height;
+    if (best === undefined || area >= best.area) {
+      best = { fileId, area };
+    }
+  }
+  return best?.fileId;
+}
+
+/**
+ * Extract the typed SINGLE-media attachment. A message carrying MORE than
+ * one media field (photo + video, photo + document, ...) is malformed by
+ * Telegram's own model and maps to `unsupported` (never one-half of it).
+ */
+function extractMediaAttachment(payload: Record<string, unknown>): ParsedMediaAttachment {
+  const photo = payload['photo'];
+  const video = payload['video'];
+  const otherMedia =
+    payload['document'] !== undefined ||
+    payload['audio'] !== undefined ||
+    payload['animation'] !== undefined ||
+    payload['voice'] !== undefined ||
+    payload['video_note'] !== undefined ||
+    payload['sticker'] !== undefined;
+  const photoPresent = photo !== undefined;
+  const videoPresent = video !== undefined;
+  if (photoPresent && videoPresent) {
+    return { kind: 'unsupported' };
+  }
+  if (photoPresent && otherMedia) {
+    return { kind: 'unsupported' };
+  }
+  if (videoPresent && otherMedia) {
+    return { kind: 'unsupported' };
+  }
+  if (photoPresent) {
+    if (!Array.isArray(photo)) {
+      return { kind: 'unsupported' };
+    }
+    const fileId = largestPhotoFileId(photo);
+    return fileId === undefined ? { kind: 'unsupported' } : { kind: 'photo', fileId };
+  }
+  if (videoPresent) {
+    if (typeof video !== 'object' || video === null || Array.isArray(video)) {
+      return { kind: 'unsupported' };
+    }
+    const fileId = boundedFileId((video as Record<string, unknown>)['file_id']);
+    return fileId === undefined ? { kind: 'unsupported' } : { kind: 'video', fileId };
+  }
+  return { kind: 'unsupported' };
+}
+
+/**
  * The exact Telegram chat types the admin surface may reason about (Phase 2B:
  * /language requires a PRIVATE chat). Fixed allowlist — any other or
  * malformed `chat.type` value is treated as ABSENT (fail closed).
@@ -49,6 +157,31 @@ const KNOWN_CHAT_TYPES: ReadonlySet<string> = new Set([
   'supergroup',
   'channel',
 ]);
+
+/**
+ * R1.20-R: media attachment field names checked for PRESENCE only (the
+ * admin post surface must be able to reject media posts EXPLICITLY instead
+ * of silently treating them as contentless). Values are never read.
+ */
+const MEDIA_ATTACHMENT_FIELDS: ReadonlySet<string> = new Set([
+  'photo',
+  'video',
+  'document',
+  'audio',
+  'animation',
+  'voice',
+  'video_note',
+  'sticker',
+]);
+
+function hasMediaAttachment(payload: Record<string, unknown>): boolean {
+  for (const field of MEDIA_ATTACHMENT_FIELDS) {
+    if (payload[field] !== undefined) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /** Bounded chat-type extraction: known values only, everything else absent. */
 function boundedChatType(value: unknown): string | undefined {
@@ -89,6 +222,53 @@ export interface ParsedMessageFields {
    * logged.
    */
   readonly chatType?: string;
+  /**
+   * R1.19: bounded typed native rich-text metadata extracted from
+   * `text` + `entities` (message and edited_message). PASSIVE metadata:
+   * command extraction, routing and every legacy gate are untouched by it.
+   * `undefined` = no rich metadata on the update (plain text). An explicit
+   * `ok: false` outcome means the metadata was present but malformed —
+   * never silently dropped, and it never erases the command text.
+   */
+  readonly richText?: ParsedRichTextExtraction;
+  /**
+   * R1.19: the same extraction for `caption` + `caption_entities`. A caption
+   * is NEVER a bot command; captions beyond the 1024-unit application cap
+   * are reported explicitly (`caption_too_large`), never silently dropped.
+   * R1.19.1: a plain caption with OMITTED optional `caption_entities` is
+   * preserved as `ok: true` with an EMPTY entity list (metadata absence is
+   * not content absence); explicit null/primitive metadata stays a typed
+   * `entities_malformed` outcome, never repaired into absence/empty.
+   */
+  readonly richCaption?: ParsedRichTextExtraction;
+  /**
+   * R1.20-R: PASSIVE presence flag — the raw `text` field is a non-empty
+   * string, REGARDLESS of the application bound. This lets callers
+   * distinguish "no text" from "text present but beyond the bound" so an
+   * oversized post can be rejected EXPLICITLY instead of silently
+   * mis-classified as contentless. Never logged.
+   */
+  readonly hasText?: boolean;
+  /**
+   * R1.20-R: PASSIVE presence flag — the message carries a media attachment
+   * (photo/video/document/audio/animation/voice/video_note/sticker).
+   * Presence only: no attachment content, id, or file reference is extracted
+   * or retained. Never logged.
+   */
+  readonly hasMediaAttachment?: boolean;
+  /**
+   * R1.21: the typed SINGLE-media extraction. `photo`/`video` carry the
+   * Telegram file_id (largest photo variant / the video itself); every other
+   * media shape is `unsupported`. Never logged.
+   */
+  readonly media?: ParsedMediaAttachment;
+  /**
+   * R1.21: PASSIVE presence flag — the message belongs to an ALBUM
+   * (`media_group_id` present). Album members are rejected explicitly by the
+   * capture surface; a single album member is never degraded into a post.
+   * Never logged.
+   */
+  readonly inMediaGroup?: boolean;
 }
 
 export interface ParsedCallbackFields {
@@ -183,6 +363,161 @@ function boundedText(value: unknown): string | undefined {
   return value;
 }
 
+// -------------------------------------------------------------------------
+// R1.19 — bounded typed native rich-text extraction (PASSIVE metadata).
+//
+// The parser performs a SHALLOW, bounded extraction only: each entity must
+// be an object with a bounded non-empty string `type`; the documented
+// metadata fields are projected as-is and everything else is DROPPED (the
+// documented consistent ignore policy — arbitrary raw payload fields are
+// never retained). FULL range/nesting/metadata/cap validation belongs to the
+// versioned envelope (src/domain/telegram/rich-text-envelope.ts); the parser
+// never judges ranges. Outcomes are EXPLICIT: malformed metadata is
+// `ok: false` — never silently absent, never silently empty — and it can
+// never erase the command text or alter routing.
+// -------------------------------------------------------------------------
+
+/** Shallow projection of one raw MessageEntity (documented fields only). */
+export interface ParsedMessageEntityMetadata {
+  readonly type: string;
+  /** Raw values — judged by the versioned envelope, never here. */
+  readonly offset: unknown;
+  readonly length: unknown;
+  readonly url?: unknown;
+  readonly language?: unknown;
+  readonly customEmojiId?: unknown;
+  readonly user?: unknown;
+  readonly unixTime?: unknown;
+  readonly dateTimeFormat?: unknown;
+}
+
+export type RichTextExtractionReason =
+  'entities_malformed' | 'entities_too_many' | 'caption_too_large';
+
+export type ParsedRichTextExtraction =
+  | {
+      readonly ok: true;
+      readonly kind: RichTextKind;
+      readonly text: string;
+      readonly entities: readonly ParsedMessageEntityMetadata[];
+    }
+  | {
+      readonly ok: false;
+      readonly kind: RichTextKind;
+      readonly reason: RichTextExtractionReason;
+    };
+
+/** Wire -> projection key mapping for the documented metadata fields. */
+const ENTITY_WIRE_FIELD_MAP = [
+  ['url', 'url'],
+  ['language', 'language'],
+  ['custom_emoji_id', 'customEmojiId'],
+  ['user', 'user'],
+  ['unix_time', 'unixTime'],
+  ['date_time_format', 'dateTimeFormat'],
+] as const;
+
+/**
+ * R1.19.1 (M1): bounded shallow projection of the documented minimal
+ * text_mention User fields from the REAL incoming WIRE shape to the canonical
+ * camelCase shape the envelope validates — the same wire->canonical mapping
+ * the storage reader and wire writer already use, now applied on the parser
+ * path so a real `user:{id,is_bot,first_name,...}` object survives into the
+ * domain instead of failing `user_invalid` there.
+ *
+ * Documented minimal field set ONLY: `id` / `is_bot` / `first_name` (required
+ * by the domain) plus the allowed optional `last_name` / `username` /
+ * `language_code`. Every OTHER key — including unrelated optional Telegram
+ * flags a real User payload commonly carries (is_premium,
+ * added_to_attachment_menu, ...) — is DROPPED by the documented ignore
+ * policy: dropped extras never reject an ordinary real User payload, and no
+ * arbitrary nested raw User object is ever retained.
+ *
+ * A non-object `user` is forwarded UNCHANGED so the envelope fails it typed
+ * (`user_invalid`) — the parser never judges field types or bounds (wrong
+ * id/boolean/name types and oversized names fail EXPLICITLY at the envelope
+ * boundary, which re-validates the full canonical shape).
+ */
+const MENTION_USER_WIRE_FIELD_MAP = [
+  ['id', 'id'],
+  ['is_bot', 'isBot'],
+  ['first_name', 'firstName'],
+  ['last_name', 'lastName'],
+  ['username', 'username'],
+  ['language_code', 'languageCode'],
+] as const;
+
+function projectMentionUser(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value; // not an object -> envelope fails it typed (user_invalid)
+  }
+  const projected: Record<string, unknown> = {};
+  for (const [wireKey, camelKey] of MENTION_USER_WIRE_FIELD_MAP) {
+    if (value[wireKey] !== undefined) {
+      projected[camelKey] = value[wireKey];
+    }
+  }
+  return projected;
+}
+
+/**
+ * Shallow-project one raw entity. Undefined for anything that is not an
+ * object with a bounded non-empty string type (the WHOLE metadata becomes
+ * explicitly malformed — never a silently partial list). Telegram's wire
+ * snake_case metadata keys are mapped to the camelCase projection shape the
+ * envelope validates; everything undocumented is DROPPED.
+ */
+function projectEntityMetadata(entry: unknown): ParsedMessageEntityMetadata | undefined {
+  if (!isRecord(entry)) {
+    return undefined;
+  }
+  const type = entry['type'];
+  if (
+    typeof type !== 'string' ||
+    type.length === 0 ||
+    type.length > RICH_TEXT_LIMITS.maxEntityTypeUnits
+  ) {
+    return undefined;
+  }
+  const projected: Record<string, unknown> = {
+    type,
+    offset: entry['offset'],
+    length: entry['length'],
+  };
+  for (const [wireKey, camelKey] of ENTITY_WIRE_FIELD_MAP) {
+    if (entry[wireKey] !== undefined) {
+      projected[camelKey] =
+        wireKey === 'user' ? projectMentionUser(entry[wireKey]) : entry[wireKey];
+    }
+  }
+  return projected as unknown as ParsedMessageEntityMetadata;
+}
+
+function extractRichTextMetadata(
+  kind: RichTextKind,
+  text: string,
+  rawEntities: unknown,
+): ParsedRichTextExtraction | undefined {
+  if (rawEntities === undefined) {
+    return undefined; // no rich metadata on this content (plain text)
+  }
+  if (!Array.isArray(rawEntities)) {
+    return { ok: false, kind, reason: 'entities_malformed' };
+  }
+  if (rawEntities.length > RICH_TEXT_LIMITS.maxEntities) {
+    return { ok: false, kind, reason: 'entities_too_many' };
+  }
+  const entities: ParsedMessageEntityMetadata[] = [];
+  for (const entry of rawEntities) {
+    const projected = projectEntityMetadata(entry);
+    if (projected === undefined) {
+      return { ok: false, kind, reason: 'entities_malformed' };
+    }
+    entities.push(projected);
+  }
+  return { ok: true, kind, text, entities };
+}
+
 function boundedCallbackData(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.length === 0) {
     return undefined;
@@ -220,8 +555,45 @@ function parseMessageLike(
   }
   const chat = payload['chat'];
   const from = payload['from'];
-  const text = boundedText(payload['text']);
+  // R1.20-R: raw presence flags BEFORE the bound projection — hasText is
+  // true for ANY non-empty string text (even beyond the application bound),
+  // so an oversized post stays explicitly distinguishable from no content.
+  const rawText = payload['text'];
+  const hasText = typeof rawText === 'string' && rawText.length > 0;
+  const mediaAttachment = hasMediaAttachment(payload);
+  const text = boundedText(rawText);
   const parsedCommand = text === undefined ? undefined : extractBotCommand(text);
+
+  // R1.19: rich-text metadata is extracted from BOTH content kinds
+  // independently — a malformed payload carrying both keeps BOTH (neither is
+  // silently selected over the other). Extraction never touches the command
+  // fields below.
+  const richText =
+    text === undefined ? undefined : extractRichTextMetadata('text', text, payload['entities']);
+  let richCaption: ParsedRichTextExtraction | undefined;
+  const rawCaption = payload['caption'];
+  if (typeof rawCaption === 'string' && rawCaption.length > 0) {
+    if (rawCaption.length > RICH_TEXT_LIMITS.maxCaptionUnits) {
+      richCaption = { ok: false, kind: 'caption', reason: 'caption_too_large' };
+    } else if (payload['caption_entities'] === undefined) {
+      // R1.19.1 (P1): a plain caption with OMITTED optional caption_entities
+      // is VALID content — metadata absence is not content absence. Plain
+      // text has the legacy `text` field, plain captions have none, so the
+      // caption is preserved here as the canonical plain-caption extraction
+      // (exact text, empty entity list). Explicit null/primitive metadata is
+      // NOT absence — extractRichTextMetadata below fails it typed
+      // (entities_malformed); it is never repaired or treated as empty.
+      richCaption = { ok: true, kind: 'caption', text: rawCaption, entities: [] };
+    } else {
+      richCaption = extractRichTextMetadata('caption', rawCaption, payload['caption_entities']);
+    }
+  }
+
+  // R1.21: typed single-media extraction (photo/video file_id) + the album
+  // membership flag. Purely additive to the presence flag above.
+  const media = extractMediaAttachment(payload);
+  const inMediaGroup = payload['media_group_id'] !== undefined;
+
   return {
     kind,
     updateId,
@@ -236,6 +608,12 @@ function parseMessageLike(
     text,
     command: parsedCommand?.command,
     commandTarget: parsedCommand?.targetUsername,
+    ...(richText !== undefined ? { richText } : {}),
+    ...(richCaption !== undefined ? { richCaption } : {}),
+    ...(hasText ? { hasText } : {}),
+    ...(mediaAttachment ? { hasMediaAttachment: mediaAttachment } : {}),
+    ...(media.kind !== 'unsupported' || mediaAttachment ? { media } : {}),
+    ...(inMediaGroup ? { inMediaGroup } : {}),
   };
 }
 

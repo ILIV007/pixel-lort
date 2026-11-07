@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
-import { applyMigrations } from '../helpers/migrations';
+import { applyMigrations, LEGACY_APPLIED_MIGRATION_PLAN } from '../helpers/migrations';
 import { createDbExecutor, type DbExecutor } from '../../src/adapters/db/db-executor';
 import { parseEmbeddedRegistry } from '../../src/domain/source/source-registry';
 import { seedSourcesFromRegistry } from '../../src/adapters/db/source-registry-store';
@@ -225,7 +225,7 @@ async function provisionSteam(
 }
 
 beforeEach(async () => {
-  await applyMigrations(env.DB);
+  await applyMigrations(env.DB, LEGACY_APPLIED_MIGRATION_PLAN);
   for (const table of ['source_items', 'source_state', 'sources', 'jobs'])
     await db.run({ sql: `DELETE FROM ${table}` });
   await db.run({ sql: "DELETE FROM budgets WHERE scope='ingestion'" });

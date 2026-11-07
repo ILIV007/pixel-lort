@@ -36,9 +36,9 @@ describe('GET /version via SELF', () => {
       'environment',
       'schemaVersion',
     ]);
-    expect(body['applicationVersion']).toBe('1.4.0');
+    expect(body['applicationVersion']).toBe('1.17.0');
     expect(body['commit']).toBe('local-dev');
-    expect(body['schemaVersion']).toBe(3);
+    expect(body['schemaVersion']).toBe(6);
     expect(body['environment']).toBe('development');
   });
 
@@ -131,20 +131,21 @@ describe('GET /health/ready — Phase 1A schema health (DB binding present)', ()
     expect(body['status']).toBe('not_ready');
     expect(Object.keys(body).sort()).toEqual(['ok', 'service', 'status']);
 
-    // Restore the application metadata (schema v3) so later tests in this
-    // file do not treat the migrations as pending again (shared storage);
-    // re-applying migration 0003 would fail on its ALTER TABLE statement.
+    // Restore the application metadata (schema v5 — the R1.20-R1 LINEAR
+    // chain) so later tests in this file do not treat the migrations as
+    // pending again (shared storage); re-applying a migration would fail on
+    // its CREATE/ALTER statements.
     await env.DB.prepare(
       `INSERT INTO schema_metadata (key, value, updated_at_ms) VALUES
-         ('schema_version', '3', 1),
-         ('migration_id', '0003_job_dlq_delivery', 1),
+         ('schema_version', '6', 1),
+         ('migration_id', '0006_admin_post_editorial_source', 1),
          ('applied_at', '1970-01-01T00:00:00.000Z', 1)`,
     ).run();
   });
 
   it('reports not_ready when the schema version mismatches the configuration', async () => {
-    // The applied schema is at version 3 (migrations 0001+0002+0003); force
-    // an OLDER recorded version to prove the mismatch path fails closed.
+    // The applied LINEAR chain is at version 5; force an OLDER recorded
+    // version to prove the mismatch path fails closed.
     await env.DB.prepare(
       `UPDATE schema_metadata SET value = '2' WHERE key = 'schema_version'`,
     ).run();
@@ -155,9 +156,10 @@ describe('GET /health/ready — Phase 1A schema health (DB binding present)', ()
     expect(body['status']).toBe('not_ready');
 
     // Restore the recorded version so later storage in this file does not
-    // treat migration 0003 as pending again (shared file storage).
+    // treat migrations as pending again (shared file storage). R1.20-R1: the
+    // applied LINEAR chain lands at version 5 (0004 -> 4, 0005 -> 5).
     await env.DB.prepare(
-      `UPDATE schema_metadata SET value = '3' WHERE key = 'schema_version'`,
+      `UPDATE schema_metadata SET value = '6' WHERE key = 'schema_version'`,
     ).run();
   });
 });

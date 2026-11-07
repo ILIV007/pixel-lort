@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
-import { applyMigrations } from '../helpers/migrations';
+import { applyMigrations, LEGACY_APPLIED_MIGRATION_PLAN } from '../helpers/migrations';
 import { createDbExecutor, type DbExecutor } from '../../src/adapters/db/db-executor';
 import {
   createJobsEngine,
@@ -132,7 +132,7 @@ async function itemCount(executor: DbExecutor, sourceId: string): Promise<number
 }
 
 beforeEach(async () => {
-  await applyMigrations(env.DB);
+  await applyMigrations(env.DB, LEGACY_APPLIED_MIGRATION_PLAN);
   await executor.run({ sql: 'DELETE FROM source_items' });
   await executor.run({ sql: 'DELETE FROM source_state' });
   await executor.run({ sql: 'DELETE FROM sources' });
