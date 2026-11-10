@@ -100,6 +100,18 @@ const ALBUM_MAX_ITEMS = 10;
 const VISUALLY_SIMILAR_CAP = 2;
 
 export function planAlbumMedia(input: AlbumPlanningInputV1): AlbumPlanOutcome {
+  // 0. The input SHAPE gate (fail-closed): garbage input (a raw array, a
+  //    null, a missing candidates list) is a typed failure — never a
+  //    silently-EMPTY 'none' plan (the silent-none would launder a caller
+  //    bug into a valid-looking outcome).
+  if (
+    typeof input !== 'object' ||
+    input === null ||
+    Array.isArray(input) ||
+    !Array.isArray(input.candidates)
+  ) {
+    return { ok: false, reason: 'candidate_malformed' };
+  }
   // 1. Re-validate EVERY input candidate (defense in depth).
   const candidates: MediaCandidateV1[] = [];
   for (const raw of input.candidates ?? []) {

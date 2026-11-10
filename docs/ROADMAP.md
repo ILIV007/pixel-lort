@@ -1299,7 +1299,55 @@ independent decisions; executing them is NOT part of this round.
       work): the three no-separation layers extend never weaken; the plan
       is the ONLY album shape 7.3 may build; every live surface stays
       BLOCKED_LIVE (Posidon only); PR #11 draft; FF-only pushes.
-- [ ] Telegram upload with `file_id` reuse and R2 retention cleanup.
+- [x] **Phase 7.3 (V4 local round, docs/reviews/PHASE_7_3_UPLOAD_PATH_REVIEW.md,
+      v1.23.0, ADR-0056, on the post-7.2 tick-record tree): the roadmap's
+      «Telegram upload with file_id reuse and R2 retention cleanup»
+      executed as the REAL upload path over the FOUR documented seams
+      (ADR-0042 §6: MediaFetchPort / MediaStoragePort / MediaAssetStore /
+      TelegramMediaPort are the ONLY artificial pieces in tests; the D1
+      asset store is REAL and driven over real workerd D1) — and the
+      DELIBERATE schema decision: NO parallel tables (the FIRST draft's
+      parallel media_usage/media_staging migration was REPLACED before any
+      commit by the blueprint-faithful design — the APPROVED media_assets
+      table from 0001 IS the ledger + staging anchor: canonical_url/
+      sha256 = the ledger keys, telegram_file_id = the ledger value,
+      r2_key + expires_at = the staging state and the deterministic 72h
+      deadline, the candidate→…→uploaded→failed→expired status vocabulary
+      = the durable lifecycle; the rtp1 policy machine MAPS onto it,
+      documented in ADR-0056; schema 6 UNTOUCHED): the ECONOMY rule (an
+      EXACT canonical-url or sha256 hit against an UPLOADED asset reuses
+      its file_id — ZERO fetch, ZERO storage, ZERO upload cost; URL
+      similarity never establishes identity; a staged non-uploaded row
+      never resolves as reuse), the ALL-OR-NOTHING group (one
+      deferred/rejected item withholds the WHOLE send typed — no partial
+      album, no silent degrade), the staging ('candidate' rows written
+      BEFORE the R2 put with the deterministic media/staging/<id> key so a
+      crash leaves honest bookkeeping), the blueprint step-10 transition
+      IN ONE STORE CALL (file_id saved + r2_key/expires_at cleared +
+      status 'uploaded') followed by the IMMEDIATE R2 object deletion (the
+      72h deadline is the backstop), the failed-send honesty (rows marked
+      'failed', objects stay for the backstop, NOTHING auto-resent), the
+      bounded retention cleanup (chunked over idx_media_expiry; the
+      uploaded row's ledger value SURVIVES the cleanup), PLUS the album
+      CONTENT KIND (album-content: the ONLY legal construction path maps
+      a 7.2 alp1 plan + the resolved per-item fileIds; the caption rides
+      ordinal 0 ONLY with NO per-item caption field existing at all — the
+      7.1 no-separation layer EXTENDED; the SHA-256 fingerprint covers
+      EVERY item kind+fileId+url and the caption; the strict fail-closed
+      reader) and the sendMediaGroupRich CLIENT transport (2..10 items,
+      EXACTLY ONE reference per item — file_id/URL/attach; the
+      caption-ordinal-0 invariant AT THE TRANSPORT BOUNDARY; the JSON
+      path for reuse/URL references and the MULTIPART FormData path for
+      staged bytes; the honest reply parser — photo = the LARGEST variant,
+      video = the video's file_id, a malformed reply fails the WHOLE
+      parse). Suites: 13 unit (media-usage) + 9 unit (album-content) + 9
+      unit (media-group client) + 9 REAL-D1 integration (media-73-upload,
+      registered in test:db); gates: check exit 0 (168 files/2201 tests),
+      test:db exit 0 (55/593). HONEST CARRY: the album-post PIPELINE
+      integration (capture/preview/approve/publish of album versions in
+      the admin-post flows) is NOT built here — recorded as the Phase 8
+      planning input; every REAL fetch/R2 write/Telegram send stays
+      BLOCKED_LIVE (Posidon only); PR #11 draft; FF-only pushes.
 
 ## Phase 8 — publication scheduler, edit and correction ⬜
 

@@ -205,6 +205,45 @@ export interface TelegramSendVideoRichInput {
   readonly customEmojiEligible?: boolean;
 }
 
+/**
+ * Phase 7.3 — the MEDIA-GROUP send (sendMediaGroup, the album transport):
+ * 2..10 items, EACH carrying EXACTLY ONE media reference (an existing
+ * file_id — the reuse path; a direct https URL — the direct-URL path; or
+ * an attach upload — the staged-bytes multipart path), and a caption
+ * envelope that is LEGAL ONLY ON THE FIRST ITEM (the house invariant: the
+ * album caption rides ordinal 0 and nowhere else — a caption on any other
+ * item fails typed BEFORE any fetch). NO parse_mode anywhere.
+ */
+export interface TelegramMediaGroupItemInput {
+  readonly type: 'photo' | 'video';
+  /** An existing Telegram file_id (the reuse path). */
+  readonly fileId?: string;
+  /** A direct https URL (the direct-URL path; Telegram fetches it). */
+  readonly url?: string;
+  /** A staged upload: the attach reference + its bytes (the multipart path). */
+  readonly attach?: {
+    readonly ref: string;
+    readonly bytes: Uint8Array;
+    readonly contentType: string;
+  };
+  /** kind must be 'caption'. LEGAL ONLY on the FIRST item of the group. */
+  readonly caption?: RichTextEnvelope;
+}
+
+export interface TelegramSendMediaGroupRichInput {
+  readonly chatId: number | string;
+  /** 2..10 items (the Bot API media-group bound; blueprint §14 step 7). */
+  readonly items: readonly TelegramMediaGroupItemInput[];
+  readonly customEmojiEligible?: boolean;
+}
+
+/** ONE message of a media-group reply: its id + the returned media file_id. */
+export interface TelegramSentMediaGroupMessage {
+  readonly messageId: number;
+  /** photo = the LARGEST variant's file_id; video = the video's file_id. */
+  readonly fileId?: string;
+}
+
 export interface TelegramEditRichInput {
   readonly chatId: number;
   readonly messageId: number;
@@ -232,6 +271,10 @@ export interface TelegramRichTextClient {
   sendPhotoRich(input: TelegramSendPhotoRichInput): Promise<TelegramSentMessage>;
   /** R1.21: the single-video channel/preview send (sendVideo, no parse_mode). */
   sendVideoRich(input: TelegramSendVideoRichInput): Promise<TelegramSentMessage>;
+  /** Phase 7.3: the album media-group send (sendMediaGroup, no parse_mode). */
+  sendMediaGroupRich(
+    input: TelegramSendMediaGroupRichInput,
+  ): Promise<readonly TelegramSentMediaGroupMessage[]>;
   editMessageTextRich(input: TelegramEditRichInput): Promise<boolean>;
   editMessageCaptionRich(input: TelegramEditCaptionRichInput): Promise<boolean>;
 }
@@ -337,6 +380,7 @@ export function createBotApiClient(
     method: string,
     payload: Record<string, unknown>,
     parseResult: (result: unknown) => T | null,
+    formBody?: FormData,
   ): Promise<T> {
     logger?.debug('telegram.api.request', { method });
 
@@ -344,8 +388,12 @@ export function createBotApiClient(
     try {
       response = await fetchImpl(baseUrl + method, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
+        // The JSON transport (every existing method) declares its content
+        // type; the multipart transport (sendMediaGroup attach uploads,
+        // Phase 7.3) lets the runtime set the multipart boundary — the
+        // content-type header MUST stay absent there.
+        headers: formBody === undefined ? { 'content-type': 'application/json' } : {},
+        body: formBody ?? JSON.stringify(payload),
         // Observe and reject 3xx ourselves; never follow a redirect or
         // read/log Location. This preserves the token boundary on live
         // Cloudflare fetch, including runtimes that reject error mode.
@@ -436,6 +484,62 @@ export function createBotApiClient(
       ? safeInteger(result['message_id'], 1, Number.MAX_SAFE_INTEGER)
       : undefined;
     return messageId === undefined ? null : { messageId };
+  }
+
+  /** Bounded non-throwing file_id shape check (the media-group parser). */
+  function isBoundedFileIdWire(value: unknown): value is string {
+    if (typeof value !== 'string' || value.length === 0 || value.length > 256) return false;
+    if (new TextEncoder().encode(value).byteLength > 1024) return false;
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      if (code <= 0x20 || code >= 0x7f) return false;
+    }
+    return true;
+  }
+
+  /** The LARGEST photo variant's file_id (bounded area math, ties keep the later entry). */
+  function largestPhotoFileIdFromWire(photo: readonly unknown[]): string | undefined {
+    let best: { readonly area: number; readonly fileId: string } | undefined;
+    for (const entry of photo) {
+      if (!isRecord(entry)) continue;
+      const width = safeInteger(entry['width'], 1, 100000);
+      const height = safeInteger(entry['height'], 1, 100000);
+      const fileId = entry['file_id'];
+      if (width === undefined || height === undefined || !isBoundedFileIdWire(fileId)) continue;
+      const area = width * height;
+      if (best === undefined || area >= best.area) best = { area, fileId };
+    }
+    return best?.fileId;
+  }
+
+  /**
+   * The media-group reply parser: an array of 2..10 messages, each with a
+   * message_id and (for a media message) the returned file_id — photo =
+   * the LARGEST variant, video = the video's file_id. A malformed entry
+   * fails the WHOLE parse (the response is invalid — never guessed).
+   */
+  function parseMediaGroupResult(result: unknown): TelegramSentMediaGroupMessage[] | null {
+    if (!Array.isArray(result) || result.length < 2 || result.length > 10) return null;
+    const messages: TelegramSentMediaGroupMessage[] = [];
+    for (const entry of result) {
+      const message = parseSentMessage(entry);
+      if (message === null || !isRecord(entry)) return null;
+      let fileId: string | undefined;
+      const photo = entry['photo'];
+      const video = entry['video'];
+      if (Array.isArray(photo)) {
+        fileId = largestPhotoFileIdFromWire(photo);
+        if (fileId === undefined) return null;
+      } else if (isRecord(video)) {
+        const videoFileId = video['file_id'];
+        if (!isBoundedFileIdWire(videoFileId)) return null;
+        fileId = videoFileId;
+      } else {
+        return null; // a media-group reply message carries its media
+      }
+      messages.push({ messageId: message.messageId, fileId });
+    }
+    return messages;
   }
 
   /**
@@ -626,6 +730,107 @@ export function createBotApiClient(
             : {}),
         },
         parseSentMessage,
+      );
+    },
+
+    // ---- Phase 7.3: the album media-group send (sendMediaGroup) --------
+    async sendMediaGroupRich(input) {
+      // Bounded group: 2..10 items (the Bot API bound; blueprint §14 step 7).
+      if (!Array.isArray(input.items) || input.items.length < 2 || input.items.length > 10) {
+        throw new TelegramRichContentError('invalid_content');
+      }
+      const mediaWire: Record<string, unknown>[] = [];
+      const attachments = new Map<
+        string,
+        { readonly bytes: Uint8Array; readonly contentType: string }
+      >();
+      for (let index = 0; index < input.items.length; index += 1) {
+        const item = input.items[index]!;
+        // The house invariant AT THE TRANSPORT BOUNDARY: a caption is legal
+        // ONLY on the ordinal-0 item — anything else fails typed with ZERO
+        // fetch calls (the 7.1 no-separation layer, extended).
+        if (index !== 0 && item.caption !== undefined) {
+          throw new TelegramRichContentError('invalid_content');
+        }
+        // EXACTLY ONE reference per item.
+        const referenceCount =
+          (item.fileId !== undefined ? 1 : 0) +
+          (item.url !== undefined ? 1 : 0) +
+          (item.attach !== undefined ? 1 : 0);
+        if (referenceCount !== 1) {
+          throw new TelegramRichContentError('invalid_content');
+        }
+        let mediaRef: string;
+        if (item.fileId !== undefined) {
+          mediaRef = requireFileId(item.fileId);
+        } else if (item.url !== undefined) {
+          // The direct-URL path: https-only, bounded (the client boundary is
+          // conservative; the FULL transport rules live in the 7.2 policy).
+          const url = item.url;
+          if (typeof url !== 'string' || !url.startsWith('https://') || url.length > 2048) {
+            throw new TelegramRichContentError('invalid_content');
+          }
+          mediaRef = url;
+        } else if (item.attach !== undefined) {
+          const ref = item.attach.ref;
+          if (
+            typeof ref !== 'string' ||
+            ref.length === 0 ||
+            ref.length > 64 ||
+            !/^[A-Za-z0-9_-]+$/.test(ref)
+          ) {
+            throw new TelegramRichContentError('invalid_content');
+          }
+          if (!(item.attach.bytes instanceof Uint8Array) || item.attach.bytes.byteLength === 0) {
+            throw new TelegramRichContentError('invalid_content');
+          }
+          if (typeof item.attach.contentType !== 'string' || item.attach.contentType.length === 0) {
+            throw new TelegramRichContentError('invalid_content');
+          }
+          mediaRef = `attach://${ref}`;
+          attachments.set(ref, { bytes: item.attach.bytes, contentType: item.attach.contentType });
+        } else {
+          throw new TelegramRichContentError('invalid_content');
+        }
+        const caption =
+          index === 0 && item.caption !== undefined
+            ? requireRichContent(item.caption, 'caption', input.customEmojiEligible === true)
+            : undefined;
+        mediaWire.push({
+          type: item.type === 'video' ? 'video' : 'photo',
+          media: mediaRef,
+          ...(caption !== undefined
+            ? {
+                caption: caption.text,
+                caption_entities: richTextEntitiesWire(caption.entities),
+              }
+            : {}),
+        });
+      }
+
+      if (attachments.size === 0) {
+        // The JSON transport: file_id/URL references only (the reuse path
+        // and the direct-URL path).
+        return callMethod(
+          'sendMediaGroup',
+          { chat_id: input.chatId, media: JSON.stringify(mediaWire) },
+          parseMediaGroupResult,
+        );
+      }
+
+      // The multipart transport (the staged-bytes upload path): the runtime
+      // sets the multipart boundary — no content-type header is declared.
+      const form = new FormData();
+      form.append('chat_id', String(input.chatId));
+      form.append('media', JSON.stringify(mediaWire));
+      for (const [ref, file] of attachments) {
+        form.append(ref, new Blob([file.bytes], { type: file.contentType }), ref);
+      }
+      return callMethod(
+        'sendMediaGroup',
+        { chat_id: input.chatId, media: '' },
+        parseMediaGroupResult,
+        form,
       );
     },
 

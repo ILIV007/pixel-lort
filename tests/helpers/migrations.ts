@@ -64,7 +64,7 @@ export interface MigrationDescriptor {
  *   -> 0006_admin_post_editorial_source (v6, the R1.22 editorial→post
  *      provenance: nullable source_update_id + the per-version editorial
  *      link + the partial unique conversion index, ON TOP of the admin post
- *      pipeline).
+ *      pipeline)
  * The order here is exactly the order real Wrangler applies the files
  * (lexical filename order, one atomic batch per file), so a database that
  * walked the whole chain reports schema 6 with ALL capabilities present.
