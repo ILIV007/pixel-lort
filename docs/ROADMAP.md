@@ -876,6 +876,42 @@ decision.
       retry; the distinct editorial_no_traced_claim reason); the
       suite registered in test:db; NO Phase-6-completion claim; live
       surfaces BLOCKED_LIVE (Posidon only); Free readiness NOT_READY.
+- [x] **Phase 6 GATE (V4 local round, docs/reviews/PHASE_6_GATE.md, on the
+      1.21.0 tree, tests+docs only, no version bump): the roadmap's Phase 6
+      gate executed as a documented EVIDENCE-BASED review — PASS FOR LOCAL
+      ENGINEERING HAND-OFF. Pillar 1 (no numeric-accuracy or
+      model-competence claim without a REAL benchmark): a full-text scan of
+      docs/src/tests/VERSION.json classified every accuracy/benchmark/percent
+      hit — ZERO achieved-capability claims in the delivered surface; the
+      shipped reports structurally cannot claim accuracy (the mandatory
+      observation-not-truth note RESERVED before variable content and pinned
+      by the 6.4 view suite; non-exhaustive lens lists travel in every
+      report; a truncated excerpt adds NO false precision); the demos ASSERT
+      the disclaimer as a rendered output ("plumbing/contract correctness,
+      NOT live-model semantic accuracy"); the ONLY ≥95% vocabulary is the
+      blueprint v1 §25 SHADOW-GATE required metrics — future Phase-11
+      entry criteria for Posidon's real measurement, the opposite of a
+      claim, cited nowhere as met. Pillar 2 (every suspicious output
+      fail-closed or reviewed): the 16-class taxonomy mapped to NAMED tests
+      (malformed output / unknown evidence refs / no-traced-claim terminal /
+      provider deadline / wall-deadline late-response ABSORBED / quota-first
+      zero-calls / safety refusal / exhaustion / Gemini structurally OFF on
+      unverified eligibility even when gated / fail-closed invalid requests
+      with zero side effects / reviewRequired DERIVED on non-benign
+      findings / stored lies render malformed / injection text INERT /
+      no-false-precision truncation / evidence-guard identity gate / the
+      catch-all: every claim stays `unverified` and conversion launders
+      nothing) — no gap class found; gates re-run for the review with real
+      exits: check=0 (160 files/2076 tests), test:db=0 (54 files/584),
+      targeted design+demo suites=0 (6 files/53). Cannot-prove recorded
+      honestly: real provider behavior, live quota/cost, real 15 s waits,
+      independent acceptance of the adapter foundation. Binding conditions
+      carried INTO Phase 7 (flag discipline, additive documents, no claims
+      without real benchmarks, blueprint metrics stay future criteria,
+      media rights ambiguity ⇒ reject/defer, BLOCKED_LIVE, PR #11 draft,
+      FF-only pushes); NO Phase-6-completion claim (Gemini eligibility
+      UNVERIFIED, OD-009 OPEN, adapter foundation UNDER INDEPENDENT
+      REVIEW, Free readiness NOT_READY).
 - [x] **Phase 5D (R1.16, v1.11.0, ADR-0044): CONTROLLED entity aliases →
       DURABLE story mentions — the next real roadmap step: a fresh news
       draft is now durably connected to its REGISTERED entities through
