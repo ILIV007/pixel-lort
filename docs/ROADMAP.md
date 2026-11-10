@@ -402,7 +402,7 @@ decision.
       normalization/security suites. Measured final-tree totals in the
       Phase 4 handoff.
 
-## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery, Phase 5C-2 conservative candidate-assessment and Phase 5C-3 exact-content draft reuse with preserved provenance (R1.15.2 correction independently ACCEPTED offline) implemented; Phase 5D controlled entity aliases → durable story mentions implemented with its R1.16.1 corrections INDEPENDENTLY ACCEPTED offline; Phase 5E-1 bounded event-relation evaluation → durable evidence-referenced decisions implemented; Phase 5E-1 UNDER INDEPENDENT REVIEW, OFF)
+## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery, Phase 5C-2 conservative candidate-assessment and Phase 5C-3 exact-content draft reuse with preserved provenance (R1.15.2 correction independently ACCEPTED offline) implemented; Phase 5C-4 deterministic candidate-MATCHING report (V4 Phase 5.2 local slice, version 1.18.0) implemented behind its independent default-OFF gate; Phase 5D controlled entity aliases → durable story mentions implemented with its R1.16.1 corrections INDEPENDENTLY ACCEPTED offline; Phase 5E-1 bounded event-relation evaluation → durable evidence-referenced decisions implemented; Phase 5E-1 UNDER INDEPENDENT REVIEW, OFF)
 
 - [x] **Phase 5A (R1.11, ADR-0042): the FIRST integrated local source→draft
       path — ACCEPTED OFFLINE by independent review (R1.12 round ruling; the
@@ -622,6 +622,63 @@ decision.
       exact-content reuse capability was independently reviewed and
       ACCEPTED by Posidon; the accepted contract is the one R1.16
       preserves byte-for-byte on the reuse paths.
+- [x] **Phase 5C-4 (V4 Phase 5.2 local slice, v1.18.0): DETERMINISTIC
+      candidate-MATCHING report — scores + reasons, ambiguity/overflow
+      honesty, and the identical-news vs similar-event separation —
+      explicitly NOT a merge, NOT a threshold, NOT same-event proof** —
+      the owner's V4 directive explicitly lifted the former "wait for the
+      5.2 decision" gate FOR LOCAL design/build/test: a PURE, versioned
+      (`matchingVersion: 1`) evaluator derives a `candidateMatching`
+      report from the SAME draft's `candidateDiscovery` +
+      `candidateAssessment` at the lookup moment and rides INSIDE
+      `drafts.document_json` of the SAME fenced atomic commit (ZERO new
+      SQL statements, ZERO provider calls, ZERO cost; schema 6 untouched).
+      Per candidate: a TRANSPARENT score that is a canonical ONE-TO-ONE
+      encoding of the observed signal set (fixed weights 1/4/8 make every
+      non-empty subset sum unique — equal scores ⇔ identical observed
+      sets; correlated signals never compound; NEVER a
+      confidence/probability, never compared across reports, never a
+      threshold — every candidate stays listed with its assessment
+      verdict). Report level: `outcome` separates
+      `identical_content_relation_observed` (ONLY the versioned
+      content-composite fingerprint really matched — a LOCATOR for the
+      verified 5C-3 reuse path, never itself a merge/dedup decision) from
+      `similar_signals_only_observed` (any weaker combination — NEVER
+      same-news evidence); `resolution` is honest about coverage:
+      probe overflow or report truncation ⇒
+      `unresolvable_incomplete_coverage` (no best-candidate claim), a tie
+      at the top score over the SAME observed set ⇒
+      `ambiguous_tie_observed`, otherwise
+      `single_top_candidate_observed` — an observation of the list shape,
+      never a confirmation; nothing observed stays
+      `no_candidates_observed`/`no_candidate_to_resolve`. Fixed
+      `unrelatednessConcluded: false`; the same `unassessed` tuple
+      (same_event/truth/source_independence) rides verbatim; discovery
+      truncation/overflow/coverage limits preserved verbatim; candidate
+      data NOT re-fetched or re-validated. Gated by the INDEPENDENT
+      fail-closed `EDITORIAL_MATCHING_ENABLED` flag (default 'false'
+      everywhere — .env.example, .dev.vars.example, BOTH wrangler
+      environments): flag OFF ⇒ the payload is absent and the accepted
+      path stays byte-identical; flag ON adds zero statements. Typed
+      reader validates the REAL v1 invariants INCLUDING cross-validation
+      against BOTH siblings (mirrored entries 1:1 in the same order,
+      verdicts AND scores AND outcome/resolution/topScore re-derived from
+      the sibling's matched signals — a stored lie is malformed);
+      `absent`/`unsupported_version`/`malformed` stay distinct; pre-5C-4
+      drafts read absent (NO backfill); replay stays free and
+      byte-identical. Evidence: unit suite (score subset-sum injectivity
+      over all 7 non-empty subsets, determinism, outcome/resolution
+      precedence incl. overflow-with-zero-candidates, fixed sets, reader
+      negatives incl. 16 stored-lie cases) + REAL workerd-D1 integration
+      suite (flag-OFF byte-identical accepted path with NO
+      candidateMatching key; stale identical-content locator ⇒ reuse
+      refuses + identical-content relation observed as a LOCATOR ONLY;
+      weak-title path ⇒ similar_signals_only; two-story title tie ⇒
+      honest ambiguous tie; 10-story overflow ⇒ unresolvable with the
+      8-candidate truncated page; zero-new-SQL batch-shape equality
+      flag-ON vs flag-OFF; snapshot race writes NOTHING; replay free and
+      byte-stable). All gates stay OFF; free ingestion/full-poll stays
+      NOT_READY; no Phase-5-completion claim.
 - [x] **Phase 5D (R1.16, v1.11.0, ADR-0044): CONTROLLED entity aliases →
       DURABLE story mentions — the next real roadmap step: a fresh news
       draft is now durably connected to its REGISTERED entities through

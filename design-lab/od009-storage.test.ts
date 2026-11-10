@@ -89,6 +89,7 @@ const RSS_SOURCES = [
   'moddb_headlines',
   'itch_discovery',
 ] as const;
+const RAW_FETCHES = RSS_SOURCES.length + 1; // 7 sources, 8 feed URLs (itch_discovery x2)
 
 /* ------------------------------------------------------------------ */
 /* Feed fixtures (same shapes as the workload harness)                 */
@@ -445,8 +446,17 @@ describe('R1.10.3 design lab OD-009 — non-destructive storage measurement (rea
     const h = createStorageHarness();
     await seedAndEnable(h.executor, RSS_SOURCES);
     const feed = rssFeed(maxItems(20, 's02'), '2');
+    // SEVEN sources but EIGHT raw fetches: the REAL pipeline polls EVERY
+    // configured feed URL of a source in one poll (itch_discovery carries
+    // TWO endpointTemplates — the same documented behavior poll-workload
+    // W-07 asserts as rawHttpRequests EXACTLY 8). The original fixture
+    // scripted only SEVEN responses — one fetch always hit the empty
+    // queue, and WHICH source starved depended on nondeterministic
+    // dispatch order (the suite passed on 2026-11-06 only by luck).
+    // Eight responses make every feed succeed; itch_discovery's second
+    // feed dedups onto the same 20 items (UNIQUE(source_id, external_id)).
     h.mock.setResponses(
-      Array.from({ length: RSS_SOURCES.length }, () => ({
+      Array.from({ length: RAW_FETCHES }, () => ({
         status: 200,
         headers: { 'content-type': 'application/rss+xml', etag: '"od-2"' },
         bodyText: feed,

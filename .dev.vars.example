@@ -8,7 +8,7 @@
 # --- Non-secret (local overrides) ----------------------------------------------
 # ENVIRONMENT=development
 # LOG_LEVEL=debug
-# APP_VERSION=1.17.0
+# APP_VERSION=1.18.0
 # Phase 2A Telegram ingress flag (non-secret). Turn on locally ONLY together
 # with the three Phase 2 secrets below (fake local fixtures are fine).
 # TELEGRAM_INGRESS_ENABLED=false
@@ -20,6 +20,11 @@
 # editorial.prepare_draft work is losslessly policy-paused while off; the
 # AI service keeps its own independent gates.
 # EDITORIAL_ENABLED=false
+# Phase 5C-4 candidate-MATCHING report gate (V4 Phase 5.2): independent
+# fail-closed flag; while off no candidateMatching payload is computed or
+# stored; while on it is a pure zero-SQL/zero-cost derivation. Never
+# implies EDITORIAL_ENABLED or AI_ENABLED.
+# EDITORIAL_MATCHING_ENABLED=false
 # Intended owner value since R1.10.5 (owner channel identity: pixel lores;
 # non-secret per ADR-0009): TARGET_CHANNEL=@pixellores
 # TARGET_CHANNEL=@pixellores

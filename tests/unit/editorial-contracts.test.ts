@@ -190,6 +190,37 @@ describe('EDITORIAL_ENABLED configuration (fail-closed)', () => {
   });
 });
 
+describe('EDITORIAL_MATCHING_ENABLED configuration (fail-closed, Phase 5C-4 / V4 5.2)', () => {
+  it('defaults to false when absent (the accepted path stays byte-identical)', () => {
+    const { config, result } = parseEditorialConfig({});
+    expect(config.EDITORIAL_MATCHING_ENABLED).toBe(false);
+    expect(result.ok).toBe(true);
+  });
+
+  it('parses explicit true/false independently of EDITORIAL_ENABLED', () => {
+    expect(
+      parseEditorialConfig({ EDITORIAL_MATCHING_ENABLED: 'true' }).config
+        .EDITORIAL_MATCHING_ENABLED,
+    ).toBe(true);
+    expect(
+      parseEditorialConfig({ EDITORIAL_MATCHING_ENABLED: 'false' }).config
+        .EDITORIAL_MATCHING_ENABLED,
+    ).toBe(false);
+    // Independence both ways: neither flag implies the other.
+    expect(
+      parseEditorialConfig({ EDITORIAL_MATCHING_ENABLED: 'true' }).config.EDITORIAL_ENABLED,
+    ).toBe(false);
+    expect(
+      parseEditorialConfig({ EDITORIAL_ENABLED: 'true' }).config.EDITORIAL_MATCHING_ENABLED,
+    ).toBe(false);
+  });
+
+  it('fails closed on present-but-invalid values (never silently ignored)', () => {
+    const { result } = parseEditorialConfig({ EDITORIAL_MATCHING_ENABLED: 'YES' });
+    expect(result.ok).toBe(false);
+  });
+});
+
 describe('deterministic editorial identity (ADR-0042 §2)', () => {
   it('derives stable, versioned, bounded idempotency keys', async () => {
     const key1 = await editorialPrepareDraftIdempotencyKey(ITEM_ID, HASH);

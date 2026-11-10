@@ -11,6 +11,16 @@
  *   and NO AI call, NO budget write, NO editorial write can happen.
  *   Absent/invalid configuration never enables the path and never breaks
  *   the existing Telegram/health/job behaviors.
+ * - `EDITORIAL_MATCHING_ENABLED` ('true' | 'false', default 'false') is
+ *   the INDEPENDENT fail-closed gate for the Phase 5C-4 deterministic
+ *   candidate-MATCHING report (V4 Phase 5.2 local slice). It NEVER
+ *   implies `EDITORIAL_ENABLED`, `AI_ENABLED` or any other gate; while
+ *   OFF the handler computes and stores NO `candidateMatching` payload
+ *   (the accepted document shape stays byte-identical) and while ON it
+ *   adds ZERO SQL statements, ZERO provider calls and ZERO cost — the
+ *   report is a pure derivation of the discovery + assessment already
+ *   produced by the same commit. Absent/invalid configuration never
+ *   enables the payload and never breaks existing behaviors.
  *
  * Independence: `EDITORIAL_ENABLED` is a distinct gate from `JOBS_ENABLED`
  * (the engine), `SOURCE_INGESTION_ENABLED` (poll scheduling) and
@@ -39,11 +49,23 @@ export const PHASE_5A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
       'Editorial source→draft pipeline gate (non-secret; ADR-0042). Gates the editorial.prepare_draft job type only — fail-closed default false; the AI service keeps its own independent gates.',
     phase: 5,
   },
+  {
+    name: 'EDITORIAL_MATCHING_ENABLED',
+    type: 'enum',
+    required: false,
+    secret: false,
+    allowed: [...EDITORIAL_FLAG_VALUES],
+    default: 'false',
+    description:
+      'Candidate-matching report gate (non-secret; Phase 5C-4/V4 5.2). Independent fail-closed flag — while OFF no candidateMatching payload is computed or stored; while ON it is a pure zero-SQL/zero-cost derivation. Never implies EDITORIAL_ENABLED or AI_ENABLED.',
+    phase: 5,
+  },
 ]);
 
 /** Validated Phase 5A flag state (values only; no secrets involved). */
 export interface EditorialConfig {
   readonly EDITORIAL_ENABLED: boolean;
+  readonly EDITORIAL_MATCHING_ENABLED: boolean;
 }
 
 /**
@@ -58,6 +80,7 @@ export function parseEditorialConfig(env: Readonly<Record<string, unknown>>): {
   return {
     config: {
       EDITORIAL_ENABLED: result.config.EDITORIAL_ENABLED === 'true',
+      EDITORIAL_MATCHING_ENABLED: result.config.EDITORIAL_MATCHING_ENABLED === 'true',
     },
     result,
   };

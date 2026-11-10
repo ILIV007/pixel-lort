@@ -18,7 +18,7 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.17.0",
+    "APP_VERSION": "1.18.0",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
@@ -50,6 +50,12 @@
     // work is losslessly policy-paused (pre-claim ack, zero attempt burn,
     // zero writes) and the AI service keeps its own independent gates.
     "EDITORIAL_ENABLED": "false",
+    // Phase 5C-4 candidate-MATCHING report gate (V4 Phase 5.2;
+    // non-secret). Independent fail-closed flag: while off, no
+    // candidateMatching payload is computed or stored; while on, it is a
+    // pure zero-SQL/zero-cost derivation inside the same commit. Never
+    // implies EDITORIAL_ENABLED or AI_ENABLED.
+    "EDITORIAL_MATCHING_ENABLED": "false",
     // Target public channel username — NON-SECRET configuration (ADR-0009).
     // R1.10.5 owner channel identity: pixel lores / @pixellores
     // (https://t.me/pixellores). Not credential material; never a numeric
@@ -164,7 +170,7 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.17.0",
+        "APP_VERSION": "1.18.0",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
@@ -186,6 +192,11 @@
         // off, editorial.prepare_draft work is losslessly policy-paused;
         // AI_ENABLED stays an independent fail-closed gate.
         "EDITORIAL_ENABLED": "false",
+        // Phase 5C-4 candidate-MATCHING report gate ships DISABLED on
+        // preview too (V4 Phase 5.2 local slice): a pure zero-SQL/
+        // zero-cost derivation of the discovery + assessment of the same
+        // commit; independent fail-closed flag, never implies other gates.
+        "EDITORIAL_MATCHING_ENABLED": "false",
         // Target public channel username — NON-SECRET configuration
         // (ADR-0009). R1.10.5 owner channel identity: @pixellores
         // (https://t.me/pixellores). Format-validated; unconsumed today.

@@ -228,6 +228,7 @@ import {
 } from '../../domain/editorial/exact-content';
 import { buildCandidateDiscoveryReport } from '../../domain/editorial/candidate-discovery';
 import { buildCandidateAssessmentReport } from '../../domain/editorial/candidate-assessment';
+import { buildCandidateMatchingReport } from '../../domain/editorial/candidate-matching';
 import {
   buildEntityMentionPhrases,
   buildEntityMentionsReport,
@@ -265,6 +266,18 @@ export interface EditorialPrepareDraftHandlerOptions {
   readonly eventRelation?: {
     readonly enabled: boolean;
     readonly service: EventRelationService;
+  };
+  /**
+   * Phase 5C-4 (V4 Phase 5.2): the independent fail-closed gate for the
+   * DETERMINISTIC candidate-MATCHING report. Absent OR disabled ⇒ NO
+   * `candidateMatching` payload is computed or stored (the accepted
+   * document shape stays byte-identical). Enabled ⇒ a PURE, zero-SQL,
+   * zero-cost derivation of the discovery + assessment already produced
+   * by the same commit rides INSIDE document_json. The flag NEVER implies
+   * EDITORIAL_ENABLED or AI_ENABLED.
+   */
+  readonly matching?: {
+    readonly enabled: boolean;
   };
   readonly nowMs: () => number;
   /** R1.17.2 (D2): the scheduler for the relation step's bounded read
@@ -803,6 +816,34 @@ export function createEditorialPrepareDraftHandler(
     const candidateAssessment = buildCandidateAssessmentReport({
       discovery: candidateDiscovery,
     });
+
+    // ---- 5.6b Phase 5C-4 (V4 Phase 5.2) DETERMINISTIC candidate matching
+    //          — ONLY under the independent EDITORIAL_MATCHING_ENABLED
+    //          gate (options.matching): a PURE derivation of the discovery
+    //          + assessment reports above (same lookup moment, zero new
+    //          lookups, zero new SQL, zero provider involvement): the
+    //          transparent set-encoded score per candidate, the report-
+    //          level identical-content-vs-similar-signals outcome, and the
+    //          honest ambiguity/overflow resolution — NO threshold, NO
+    //          merge, NO confidence, and `unrelatednessConcluded` fixed
+    //          false. Flag OFF (the shipped default) ⇒ the payload is
+    //          simply absent and the accepted path stays byte-identical.
+    //          It rides INSIDE document_json of the SAME fenced commit.
+    const candidateMatching =
+      options.matching?.enabled === true
+        ? buildCandidateMatchingReport({
+            discovery: candidateDiscovery,
+            assessment: candidateAssessment,
+          })
+        : undefined;
+    if (candidateMatching !== undefined) {
+      logger?.debug('editorial.prepare_draft.candidate_matching_observed', {
+        outcome: candidateMatching.outcome,
+        resolution: candidateMatching.resolution,
+        matched: candidateMatching.counts.matched,
+        topScore: candidateMatching.topScoreObserved,
+      });
+    }
 
     // ---- 5.7 R1.16 (Phase 5D) CONTROLLED entity-alias mentions —
     //          strictly AFTER the input gates and the early-reuse
@@ -1565,6 +1606,9 @@ export function createEditorialPrepareDraftHandler(
           evidenceGuard,
           candidateDiscovery,
           candidateAssessment,
+          // Phase 5C-4 (V4 5.2): the versioned matching report ONLY under
+          // its gate — absent (key never written) otherwise.
+          candidateMatching,
           entityMentions: resolution.report,
           // R1.17: the bounded relation step's versioned ledger — rides in
           // the SAME fenced draft INSERT (the decision ledger of THIS input).

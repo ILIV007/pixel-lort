@@ -253,6 +253,14 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
           enabled: ai.config.AI_ENABLED && ai.config.EVENT_RELATION_ENABLED,
           service: eventRelationService,
         },
+        matching: {
+          // Phase 5C-4 (V4 5.2): the INDEPENDENT fail-closed gate for the
+          // deterministic candidate-matching report. OFF (the shipped
+          // default) ⇒ the payload is never computed or stored; ON ⇒ a
+          // pure zero-SQL/zero-cost derivation inside the same commit.
+          // It never implies EDITORIAL_ENABLED or AI_ENABLED.
+          enabled: editorial.config.EDITORIAL_MATCHING_ENABLED,
+        },
         nowMs: () => clock.now(),
         logger,
       }) as never,
