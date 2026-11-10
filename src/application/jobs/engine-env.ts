@@ -272,6 +272,16 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
           // a merge and never implies EDITORIAL_ENABLED or AI_ENABLED.
           enabled: editorial.config.EDITORIAL_ADJUDICATION_ENABLED,
         },
+        factGuard: {
+          // Phase 6.3 (V4, post 5→6 gate): the INDEPENDENT fail-closed
+          // gate for the deterministic fact-guard report. OFF (the shipped
+          // default) ⇒ the payload is never computed or stored; ON ⇒ a
+          // pure zero-SQL/zero-cost bounded lexical derivation inside the
+          // same commit. Observations only — never a claim-status change,
+          // never a truth verdict. It never implies EDITORIAL_ENABLED or
+          // AI_ENABLED.
+          enabled: editorial.config.EDITORIAL_FACT_GUARD_ENABLED,
+        },
         nowMs: () => clock.now(),
         logger,
       }) as never,

@@ -35,6 +35,18 @@
  *   Absent/invalid configuration never enables the payload and never
  *   breaks existing behaviors.
  *
+ * - `EDITORIAL_FACT_GUARD_ENABLED` ('true' | 'false', default 'false') is
+ *   the INDEPENDENT fail-closed gate for the Phase 6.3 deterministic
+ *   FACT-GUARD report (V4 post-gate local slice). It NEVER implies
+ *   `EDITORIAL_ENABLED`, `AI_ENABLED` or any other gate; while OFF the
+ *   handler computes and stores NO `factGuard` payload (the accepted
+ *   document shape stays byte-identical) and while ON it adds ZERO SQL
+ *   statements, ZERO provider calls and ZERO cost — the report is a pure
+ *   bounded lexical derivation of the draft claims + the SAME traceable
+ *   excerpt already produced by the same commit, and it NEVER rewrites a
+ *   claim's stored `unverified` status. Absent/invalid configuration
+ *   never enables the payload and never breaks existing behaviors.
+ *
  * Independence: `EDITORIAL_ENABLED` is a distinct gate from `JOBS_ENABLED`
  * (the engine), `SOURCE_INGESTION_ENABLED` (poll scheduling) and
  * `AI_ENABLED` (the draft service). The editorial gate REQUIRES the jobs
@@ -84,6 +96,17 @@ export const PHASE_5A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
       'Candidate-adjudication report gate (non-secret; Phase 5.3/V4). Independent fail-closed flag — while OFF no candidateAdjudication payload is computed or stored; while ON it is a pure zero-SQL/zero-cost derivation of the matching report (requires the matching gate too; the flags never imply each other) and NEVER executes a merge. Never implies EDITORIAL_ENABLED or AI_ENABLED.',
     phase: 5,
   },
+  {
+    name: 'EDITORIAL_FACT_GUARD_ENABLED',
+    type: 'enum',
+    required: false,
+    secret: false,
+    allowed: [...EDITORIAL_FLAG_VALUES],
+    default: 'false',
+    description:
+      'Fact-guard report gate (non-secret; Phase 6.3/V4). Independent fail-closed flag — while OFF no factGuard payload is computed or stored; while ON it is a pure zero-SQL/zero-cost bounded lexical derivation (unwitnessed claims, numbers, quotation spans, rumor markers, negation asymmetry) that never rewrites a claim status. Never implies EDITORIAL_ENABLED or AI_ENABLED.',
+    phase: 5,
+  },
 ]);
 
 /** Validated Phase 5A flag state (values only; no secrets involved). */
@@ -91,6 +114,7 @@ export interface EditorialConfig {
   readonly EDITORIAL_ENABLED: boolean;
   readonly EDITORIAL_MATCHING_ENABLED: boolean;
   readonly EDITORIAL_ADJUDICATION_ENABLED: boolean;
+  readonly EDITORIAL_FACT_GUARD_ENABLED: boolean;
 }
 
 /**
@@ -107,6 +131,7 @@ export function parseEditorialConfig(env: Readonly<Record<string, unknown>>): {
       EDITORIAL_ENABLED: result.config.EDITORIAL_ENABLED === 'true',
       EDITORIAL_MATCHING_ENABLED: result.config.EDITORIAL_MATCHING_ENABLED === 'true',
       EDITORIAL_ADJUDICATION_ENABLED: result.config.EDITORIAL_ADJUDICATION_ENABLED === 'true',
+      EDITORIAL_FACT_GUARD_ENABLED: result.config.EDITORIAL_FACT_GUARD_ENABLED === 'true',
     },
     result,
   };

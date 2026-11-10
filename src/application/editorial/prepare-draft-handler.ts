@@ -193,6 +193,7 @@ import {
   EDITORIAL_CREATED_BY,
 } from '../../domain/editorial/mapper';
 import { buildEvidenceGuardReport } from '../../domain/editorial/evidence-guard';
+import { buildFactGuardReport } from '../../domain/editorial/fact-guard';
 import { disabledEventRelationReport } from '../../domain/editorial/event-relation-decision';
 import {
   buildEventRelationCandidatesReport,
@@ -292,6 +293,21 @@ export interface EditorialPrepareDraftHandlerOptions {
    * NEVER implies EDITORIAL_ENABLED or AI_ENABLED.
    */
   readonly adjudication?: {
+    readonly enabled: boolean;
+  };
+  /**
+   * Phase 6.3 (V4, post 5→6 gate): the independent fail-closed gate for
+   * the DETERMINISTIC FACT-GUARD report. Absent OR disabled ⇒ NO
+   * `factGuard` payload is computed or stored (the accepted document
+   * shape stays byte-identical). Enabled ⇒ a PURE, zero-SQL, zero-cost
+   * bounded LEXICAL derivation over the draft's own claims + the SAME
+   * traceable excerpt (unwitnessed claims, number tokens, quotation
+   * spans, hedging markers, negation asymmetry) rides INSIDE
+   * document_json of the same commit — observations only; it NEVER
+   * rewrites a claim's stored `unverified` status. The flag NEVER
+   * implies EDITORIAL_ENABLED or AI_ENABLED.
+   */
+  readonly factGuard?: {
     readonly enabled: boolean;
   };
   readonly nowMs: () => number;
@@ -1632,6 +1648,45 @@ export function createEditorialPrepareDraftHandler(
         draftSummaryFa: outcome.draft.summaryFa,
         draftSourceItemId: item.id,
       });
+      // ---- 7b' Phase 6.3 (V4, post 5→6 gate) DETERMINISTIC fact guard —
+      //          ONLY under the independent EDITORIAL_FACT_GUARD_ENABLED
+      //          gate (options.factGuard): a PURE, bounded LEXICAL
+      //          derivation over THIS draft's own claims + the SAME
+      //          verified excerpt the evidence guard just judged (same
+      //          lookup moment, zero new reads, zero new SQL, zero
+      //          provider involvement): per-claim witness/number/quotation/
+      //          rumor/negation OBSERVATIONS with the fixed versioned
+      //          marker lists, a derived reviewRequired, and the honesty
+      //          boundary `lexical_presence_not_truth` — it NEVER rewrites
+      //          a claim's stored `unverified` status. Flag OFF (the
+      //          shipped default) ⇒ the payload is simply absent and the
+      //          accepted path stays byte-identical. It rides INSIDE
+      //          document_json of the SAME fenced commit.
+      const factGuard =
+        options.factGuard?.enabled === true
+          ? buildFactGuardReport({
+              snapshot: {
+                sourceItemId: item.id,
+                contentHash: item.content_hash,
+              },
+              evidence: {
+                evidenceId: snippet.id,
+                excerptText: excerpt.text,
+                excerptTruncated: excerpt.truncated,
+              },
+              draftClaims: outcome.draft.claims,
+              draftHeadlineFa: outcome.draft.headlineFa,
+              draftSummaryFa: outcome.draft.summaryFa,
+              draftSourceItemId: item.id,
+            })
+          : undefined;
+      if (factGuard !== undefined) {
+        logger?.debug('editorial.prepare_draft.fact_guard_observed', {
+          evaluationStatus: factGuard.evaluationStatus,
+          claimsRequiringReview: factGuard.counts.claimsRequiringReview,
+          unwitnessedClaims: factGuard.counts.unwitnessedClaims,
+        });
+      }
       const claimId = await sourceReportClaimId(storyId, item.id);
       const evidenceId = await mentionsEvidenceId(claimId, item.id);
       const draftId = await draftIdForStory(storyId);
@@ -1661,6 +1716,9 @@ export function createEditorialPrepareDraftHandler(
           // Phase 5.3 (V4): the versioned adjudication report ONLY under
           // BOTH its gate and the matching gate — absent otherwise.
           candidateAdjudication,
+          // Phase 6.3 (V4, post 5→6 gate): the versioned fact-guard report
+          // ONLY under its independent gate — absent otherwise.
+          factGuard,
           entityMentions: resolution.report,
           // R1.17: the bounded relation step's versioned ledger — rides in
           // the SAME fenced draft INSERT (the decision ledger of THIS input).

@@ -28,6 +28,7 @@ import type { CandidateDiscoveryReport } from './candidate-discovery';
 import type { CandidateAssessmentReport } from './candidate-assessment';
 import type { CandidateMatchingReport } from './candidate-matching';
 import type { CandidateAdjudicationReport } from './candidate-adjudication';
+import type { FactGuardReport } from './fact-guard';
 import type { EntityMentionsReport } from './entity-mentions';
 import type { EventRelationDecisionReport } from './event-relation-decision';
 
@@ -253,6 +254,12 @@ export function buildDraftDocument(input: {
    * EDITORIAL_ADJUDICATION_ENABLED gate AND the sibling matching gate;
    * absent = the key is not written. */
   readonly candidateAdjudication?: CandidateAdjudicationReport;
+  /** Phase 6.3 (V4): the versioned FACT-GUARD report — OPTIONAL:
+   * computed ONLY under the independent EDITORIAL_FACT_GUARD_ENABLED
+   * gate; absent = the key is not written. It rides INSIDE the SAME
+   * fenced commit and NEVER rewrites a claim's stored `unverified`
+   * status — a bounded lexical observation layer, not a truth engine. */
+  readonly factGuard?: FactGuardReport;
 }): {
   readonly layout: typeof EDITORIAL_DRAFT_LAYOUT;
   readonly title: string;
@@ -283,6 +290,8 @@ export function buildDraftDocument(input: {
     /** Present ONLY when BOTH the adjudication and matching gates are ON
      * (never an empty key). */
     readonly candidateAdjudication?: CandidateAdjudicationReport;
+    /** Present ONLY when the fact-guard gate is ON (never an empty key). */
+    readonly factGuard?: FactGuardReport;
   };
   readonly facts: readonly {
     readonly text: string;
@@ -328,6 +337,7 @@ export function buildDraftDocument(input: {
       ...(input.candidateAdjudication !== undefined
         ? { candidateAdjudication: input.candidateAdjudication }
         : {}),
+      ...(input.factGuard !== undefined ? { factGuard: input.factGuard } : {}),
     },
     facts: modelClaims.map((claim) => ({
       text: claim.text,

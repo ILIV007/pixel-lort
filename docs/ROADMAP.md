@@ -772,6 +772,67 @@ decision.
       unassessed BY DESIGN, BLOCKED_LIVE unchanged, NO Phase-5-completion
       claim). Gates re-run green on the final tree. Free readiness stays
       NOT_READY.
+- [x] **Phase 5→6 GATE (V4 local round, on the 1.19.0 tree): the
+      roadmap's «گیت ۵→۶» executed as a documented evidence-based review at
+      docs/reviews/PHASE_5_TO_6_GATE.md — PASS FOR LOCAL ENGINEERING
+      HAND-OFF (no Phase-5-completion claim; Posidon acceptance + live
+      evidence still outstanding for every live surface)**: the
+      wrong-merge safety verified as four INDEPENDENT layers (pure
+      projections with zero new SQL — batch-shape equality suites; the
+      only identity-grade output echoes the verified 5C-3 reuse path;
+      typed conflicts never auto-picked; suppression precedes proposals
+      under incomplete coverage) with the P1 independent-source proof
+      (byte-untouched candidate rows + raw_json + unassessed verbatim);
+      the real failures of Phase 5 listed WITH their fixes (R1.15.2
+      accepted, R1.16.1 accepted, the VERSION.json drift caught by
+      check:versions, the three 5.4 in-round findings); the unresolved
+      assumptions tabulated (same_event/truth/source_independence
+      unassessed, Gemini eligibility unverified, OD-009 open, live
+      Cloudflare UNKNOWN, Free readiness NOT_READY); the evidence
+      limitations restated as binding conditions carried INTO Phase 6
+      (fail-closed flag discipline, additive-document pattern, no
+      numeric-accuracy claims without a real benchmark, AI never replaces
+      truth verification or provenance — proven structurally: claims stay
+      `unverified`, the witness chain is recomputable, the conversion path
+      launders nothing).
+- [x] **Phase 6.3 (V4 local slice, v1.20.0, ADR-0053, ON the post-gate
+      tree): the DETERMINISTIC FACT-GUARD report — the roadmap's ۶.۳
+      bounded lexical layer, delivered in the established house shape
+      (pure, versioned `factGuardVersion: 1`, bounded, deterministic,
+      additive document key, typed reader, independent fail-closed
+      EDITORIAL_FACT_GUARD_ENABLED default-OFF everywhere, ZERO new SQL,
+      ZERO provider calls, ZERO cost, schema 6 untouched)** — per-claim
+      OBSERVATIONS (never verdicts): witness (unwitnessed claims /
+      foreign evidence basis), numbers (digit tokens NEVER folded across
+      Persian/Latin/Arabic-Indic scripts; missing numbers flagged with
+      bounded sorted token lists; ≤16-token scan bound with the honest
+      capped note), quotation (guillemet/straight/curly spans observed
+      verbatim; unclosed/empty/over-cap spans typed honest notes), rumor
+      (the FIXED versioned non-exhaustive hedging-marker list observed on
+      either side — claim hedges beyond its source OR the source's rumor
+      language is NOT reflected in the claim (the promotion-to-fact risk)
+      OR the benign reflected case), negation (a small FIXED token-bounded
+      vocabulary — token equality OR the ZWNJ-attached نمی verbal prefix,
+      substrings never match — with polarity asymmetry flagged in either
+      direction, never a contradiction conclusion); reviewRequired DERIVED
+      (any non-benign finding ⇒ true), the evidence guard's identity gate
+      inherited, the ONE limited normalization inherited (never
+      redefined), the Evidence Guard v1 contract FROZEN; the permanent
+      limitation labels travel inside EVERY report and NO claim's stored
+      `unverified` status is ever rewritten (asserted end-to-end on the
+      real path: modelClaims AND facts_json); injection-like text is INERT
+      DATA (observed lexically, never obeyed); the reader re-derives the
+      code→lens mapping, token discipline, reviewRequired coherence, exact
+      counts and identity coherence — a stored lie is malformed. Tests:
+      unit 40/40 (incl. Persian-digit-vs-Latin non-folding, ZWNJ
+      discipline, نیه/مانه never matching نه, the flagship promotion
+      case, bounds, injection inertness, reader stored-lie cases) + REAL
+      workerd-D1 integration 6/6 (flag-OFF byte-identical; flag-ON rides
+      the SAME commit with ZERO new SQL — batch-shape equality; the
+      honesty boundary end-to-end; flags never imply each other; replay
+      free + byte-stable via the no-provider-port re-execution; snapshot
+      race writes nothing). Free readiness stays NOT_READY; BLOCKED_LIVE
+      unchanged.
 - [x] **Phase 5D (R1.16, v1.11.0, ADR-0044): CONTROLLED entity aliases →
       DURABLE story mentions — the next real roadmap step: a fresh news
       draft is now durably connected to its REGISTERED entities through
