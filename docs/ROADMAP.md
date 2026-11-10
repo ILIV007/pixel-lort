@@ -745,6 +745,33 @@ decision.
       batch-shape equality; snapshot race writes NOTHING; replay free and
       byte-stable). All gates stay OFF; free ingestion/full-poll stays
       NOT_READY; no Phase-5-completion claim.
+- [x] **Phase 5.4 (V4 local round, ON the 1.19.0 tree): TESTS & SELF-REVIEW —
+      the adversarial cross-cutting round over the delivered 5.1–5.3 surfaces;
+      tests + docs ONLY (no product-code change, NO version bump, schema 6
+      untouched, every gate stays OFF)** — the roadmap dimensions were mapped
+      onto the EXISTING suites first and NEW tests were written ONLY for the
+      proven gaps (no duplicated coverage): NEW REAL workerd-D1 adversarial
+      suite 7 tests (crash mid-commit WITH both 5.2/5.3 gates ON → D1-layer
+      batch failure → atomic rollback → honest retry recomputes FRESH coherent
+      sibling reports; duplicate enqueue resolves the SAME durable job row;
+      url+title_key mixed signals with UPDATED content →
+      identity_not_established_signals_only defer; two same-name stories tie
+      at the weak score → ambiguous_tie + similarity-only defer, NOT a
+      conflict; version update at the same url → url-only defer, never a
+      locator; duplicate content from TWO INDEPENDENT sources → typed
+      conflict + every candidate-owned row byte-untouched + unassessed
+      verbatim + raw_json preserved — the P1 false-merge proof; the P1
+      provenance witness walk: item→draft chain preserved AND recomputable
+      incl. the exact-content GROUP anchor) + NEW unit cells 3 tests (zero-
+      candidates-under-overflow precedence; the ≥3-exact conflict boundary;
+      the derived reviewRequired↔disposition coherence matrix). The recorded
+      self-review lives at docs/reviews/PHASE_5_4_SELF_REVIEW.md (the
+      bullet→test matrix, the four-layer false-merge analysis, the witness-
+      chain analysis, three honest mid-round findings, and the explicit
+      limitations: fake provider only, same_event/truth/source_independence
+      unassessed BY DESIGN, BLOCKED_LIVE unchanged, NO Phase-5-completion
+      claim). Gates re-run green on the final tree. Free readiness stays
+      NOT_READY.
 - [x] **Phase 5D (R1.16, v1.11.0, ADR-0044): CONTROLLED entity aliases →
       DURABLE story mentions — the next real roadmap step: a fresh news
       draft is now durably connected to its REGISTERED entities through
