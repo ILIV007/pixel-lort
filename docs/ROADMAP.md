@@ -1215,6 +1215,39 @@ independent decisions; executing them is NOT part of this round.
 
 ## Phase 7 — media engine and album publisher ⬜
 
+- [x] **Phase 7.1 (V4 local round, docs/reviews/PHASE_7_1_MEDIA_COMPATIBILITY_REVIEW.md,
+      on the post-6-gate tree, docs only, no version bump): the roadmap's
+      «۷.۱ حفظ سازگاری» executed as a documented EVIDENCE-BASED inventory —
+      the EXISTING single photo/video surface verified clause by clause with
+      NAMED tests and NO gap found: single photo = the LARGEST variant's
+      file_id (dimension-cap proof), single video with the no-caption
+      distinct case sent with NO caption field at all, the bounded opaque
+      fileId contract (printable ASCII 1..256 units ≤1024 UTF-8 bytes,
+      invalid ⇒ typed rejection), the caption riding the kind-'caption'
+      envelope as `caption` + `caption_entities` with NO parse_mode (plain
+      captions = EMPTY entity list; editMessageCaption the same discipline;
+      kind mismatches fail typed BEFORE any fetch), caption entities under
+      the SAME UTF-16 envelope discipline (1024-unit cap pinned at exactly
+      1024/reject-1025), and the CORE guarantee — no silent
+      caption/media separation — proven as THREE independent layers (MODEL:
+      a caption can NEVER exist without media, `content_kind_mismatch` at
+      construction; STORAGE: a caption-kind bare envelope never readable as
+      a post; SEND: the fingerprint column blocks any post-approval file_id/
+      caption alteration); every non-photo/video shape and albums
+      (media_group_id) map to typed `unsupported` and are rejected
+      EXPLICITLY (never degraded); replay of the SAME media update never
+      creates a second version; a Bot-API-rejected file reference is a
+      DEFINITIVE honest failure never auto-resent; legacy bare-envelope
+      rows read through the documented fallback; the fingerprint covers
+      media kind + fileId + caption text + caption entities (deterministic
+      serialization; the byte cap fails TYPED, never truncates). Recorded
+      honestly: a VERIFICATION round — no new media capability built (the
+      album model is 7.3; rights/R2 policy is 7.2); no RED→GREEN cell was
+      needed; binding conditions carried into 7.2/7.3 (the three
+      no-separation layers are preservation requirements an album must
+      extend never weaken; rights ambiguity ⇒ reject/defer; YouTube outside
+      download permission; no accuracy claims without real benchmarks;
+      BLOCKED_LIVE; PR #11 draft; FF-only pushes).
 - [ ] Media candidates, rights policy, R2 temporary storage, album planning.
 - [ ] Telegram upload with `file_id` reuse and R2 retention cleanup.
 
