@@ -1248,7 +1248,57 @@ independent decisions; executing them is NOT part of this round.
       extend never weaken; rights ambiguity ⇒ reject/defer; YouTube outside
       download permission; no accuracy claims without real benchmarks;
       BLOCKED_LIVE; PR #11 draft; FF-only pushes).
-- [ ] Media candidates, rights policy, R2 temporary storage, album planning.
+- [x] **Phase 7.2 (V4 local round, docs/reviews/PHASE_7_2_MEDIA_POLICY_DESIGN.md,
+      v1.22.0, ADR-0055, on the post-7.1 tick-record tree): the roadmap's
+      «media candidates, rights policy, R2 temporary storage, album
+      planning» executed as the PURE typed domain layer `src/domain/media/`
+      (four modules, RED-first 82/82 GREEN, zero I/O/SQL/network — the
+      blueprint §3 `domain/media` plan): (1) `media-candidate` — the
+      versioned candidate (origin/officiality/relevance/freshness ORDINALS,
+      photo|video roles, opaque contentHash/visualKey dedup keys,
+      previouslyUsed economy input, bounded dimensions), the https-only
+      BYTE-PRESERVING canonicalization (credentials/non-ASCII-host/2048-cap
+      typed rejections; identity dedup NEVER from URL munging — the 5.3
+      lesson), the strict reader (absent version ⇒ malformed, wrong version
+      ⇒ unsupported, role/kind mismatch distinct, extra keys fail,
+      canonicalUrl must re-canonicalize to itself) and the TOTAL comparator
+      officiality > relevance > freshness > unused-before-used > URL
+      tiebreak — NO score/percent/weight anywhere; (2) `media-rights` — the
+      TOTAL typed decision (allow_temporary/reject/defer + reason +
+      policyVersion mrp1) under the DOCUMENTED precedence url > YouTube ban > host policy > MIME > byte cap > redirect cap > rights: the 7.1
+      binding is STRICTER than blueprint §14 step 4 (EVERY YouTube-family
+      host is OUTSIDE ANY download permission — linking is not downloading),
+      SSRF posture (IP literals + localhost/.localhost/.local/.internal
+      forbidden outright, bracketed-IPv6 NOT port-split — the in-round
+      RED-found bug fixed), the exact four-shape MIME allowlist
+      (image/jpeg, image/png, image/webp, video/mp4 — executables/archives/
+      documents rejected WITHOUT enumeration), the documented Bot API byte
+      caps (photo 10 MiB / video 50 MiB; an UNKNOWN size never sneaks
+      through — the allow carries byteCapUnchecked for the adapter), 3
+      redirects max, unknown/restricted/piracy REJECT + conflicting rights
+      DEFER (rights_ambiguous), and the allow ALWAYS destination
+      r2_temporary_only (a rights clearance NEVER grants a publish); (3)
+      `r2-temporary` — the 72-hour retention (blueprint §23) + the TOTAL
+      lifecycle machine (staged → upload_in_progress → file_id_saved →
+      r2_object_deleted terminal; upload_failed → retry/re-expiry; the
+      REUSE RULE enforced BY THE MACHINE — a saved file_id never
+      re-uploads; invalid fileId fails typed before any state change; no
+      transcoding) — NO measured free-tier claims; (4) `album-plan` — the
+      DERIVED select mode (none/single/album/official_video_link from the
+      FINAL selection), the deterministic blueprint ordering (cover first,
+      gameplay before concept UNLESS the story layer's explicit flag, videos
+      at the end UNLESS videoAsPrimaryNews promotes the comparator-best
+      video — relevance 'primary' ALONE promotes NOTHING), the ≤2-per-
+      visualKey cap (typed exclusions, never silent), the ≤10 size cap
+      (policy-ordered truncation + typed exclusions), the caption on ONLY
+      ordinal 0 (the 7.1 no-separation layer EXTENDED), duplicates (same
+      URL or contentHash) fail the WHOLE plan typed, mixed photo+video
+      composes, the SAME input is JSON-equal deterministic, and the 3–6
+      target is collector guidance — the planner NEVER pads. Binding
+      conditions carried into 7.3 (the album media kind + upload/R2-adapter
+      work): the three no-separation layers extend never weaken; the plan
+      is the ONLY album shape 7.3 may build; every live surface stays
+      BLOCKED_LIVE (Posidon only); PR #11 draft; FF-only pushes.
 - [ ] Telegram upload with `file_id` reuse and R2 retention cleanup.
 
 ## Phase 8 — publication scheduler, edit and correction ⬜

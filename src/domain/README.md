@@ -7,7 +7,7 @@ submodules here over later phases:
 - `editorial` — Draft document, layout, persona and fact contracts (phase 6)
 - `publication` — Publication state machine and edit/correction rules (phase 8)
 - `source` — Source, cursor, budget, reputation, normalized SourceItem (phase 4)
-- `media` — Media candidate, rights state, album plan, usage history (phase 7)
+- `media` — Media candidate, rights state, album plan, usage history (phase 7; **7.2 DELIVERED**: `media-candidate` + `media-rights` + `r2-temporary` + `album-plan` — the PURE policy-contract layer, ADR-0055; the album media kind + the upload/R2 adapter are 7.3)
 - `identity` — Admin, permission, one-time action token (phase 2)
 
 Boundary rule: domain code imports NO Cloudflare, Telegram, provider SDK, or
