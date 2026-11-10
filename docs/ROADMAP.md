@@ -402,7 +402,7 @@ decision.
       normalization/security suites. Measured final-tree totals in the
       Phase 4 handoff.
 
-## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery, Phase 5C-2 conservative candidate-assessment and Phase 5C-3 exact-content draft reuse with preserved provenance (R1.15.2 correction independently ACCEPTED offline) implemented; Phase 5C-4 deterministic candidate-MATCHING report (V4 Phase 5.2 local slice, version 1.18.0) implemented behind its independent default-OFF gate; Phase 5D controlled entity aliases → durable story mentions implemented with its R1.16.1 corrections INDEPENDENTLY ACCEPTED offline; Phase 5E-1 bounded event-relation evaluation → durable evidence-referenced decisions implemented; Phase 5E-1 UNDER INDEPENDENT REVIEW, OFF)
+## Phase 5 — story/claim/evidence engine ◒ (PARTIAL — Phase 5A ACCEPTED offline; Phase 5B Evidence Guard v1, Phase 5C-1 fingerprints/candidate-discovery, Phase 5C-2 conservative candidate-assessment and Phase 5C-3 exact-content draft reuse with preserved provenance (R1.15.2 correction independently ACCEPTED offline) implemented; Phase 5C-4 deterministic candidate-MATCHING report (V4 Phase 5.2 local slice, version 1.18.0) implemented behind its independent default-OFF gate; Phase 5.3 deterministic candidate-ADJUDICATION report (V4 local slice, version 1.19.0) implemented behind ITS independent default-OFF gate (+ the sibling matching gate); Phase 5D controlled entity aliases → durable story mentions implemented with its R1.16.1 corrections INDEPENDENTLY ACCEPTED offline; Phase 5E-1 bounded event-relation evaluation → durable evidence-referenced decisions implemented; Phase 5E-1 UNDER INDEPENDENT REVIEW, OFF)
 
 - [x] **Phase 5A (R1.11, ADR-0042): the FIRST integrated local source→draft
       path — ACCEPTED OFFLINE by independent review (R1.12 round ruling; the
@@ -677,6 +677,72 @@ decision.
       honest ambiguous tie; 10-story overflow ⇒ unresolvable with the
       8-candidate truncated page; zero-new-SQL batch-shape equality
       flag-ON vs flag-OFF; snapshot race writes NOTHING; replay free and
+      byte-stable). All gates stay OFF; free ingestion/full-poll stays
+      NOT_READY; no Phase-5-completion claim.
+- [x] **Phase 5.3 (V4 local slice, v1.19.0): DETERMINISTIC candidate-ADJUDICATION
+      report — the identity-stance + merge-disposition layer over the 5C-4
+      matching report — explicitly an ADVISORY projection that NEVER executes
+      a merge** — the owner's V4 directive (2026-11-10) lifted the former
+      "5.3 waits for an owner decision" gate FOR LOCAL design/build/test with
+      the hard constraints (deterministic, versioned, bounded, conservative,
+      default OFF, reversible, conflict-tested, no production-data change,
+      never claim event identity from similarity or AI alone). A PURE,
+      versioned (`adjudicationVersion: 1`, `mergePolicyVersion: 'mp1'`)
+      evaluator derives a `candidateAdjudication` report from the SAME
+      draft's `candidateMatching` (+ its discovery/assessment parents,
+      cross-checked) at the lookup moment and rides INSIDE
+      `drafts.document_json` of the SAME fenced atomic commit (ZERO new SQL
+      statements, ZERO provider calls, ZERO cost; schema 6 untouched). Per
+      candidate: ONLY the exact content-composite fingerprint equality is
+      identity-grade (`exact_content_identity_observed` +
+      `reuse_locator_supported` — an ECHO of the verified 5C-3 reuse locator
+      path, never itself an executed merge); every weaker similarity defers
+      to review (`identity_not_established_url_only`/`_title_only`/
+      `_signals_only`, reasons carry `similarity_never_proves_identity`
+      FIRST). Report level: the merge disposition precedence is fixed and
+      tested — nothing observed ⇒ `no_ground_no_candidates` (reviewRequired
+      false); incomplete coverage (probe overflow OR truncation) ⇒
+      `defer_incomplete_coverage` (the SUPPRESSION policy adopted from the
+      preserved sm1 proposal — an incomplete window never yields a merge
+      proposal while the observed stances stay listed); ≥2 exact-identity
+      candidates ⇒ `defer_conflict_multiple_identity_candidates` (a typed
+      conflict record, NEVER auto-picked); exactly 1 ⇒
+      `reuse_locator_single_exact_identity` (reviewRequired false); only
+      weaker signals ⇒ `defer_similarity_only` (reviewRequired true).
+      `reviewRequired` is DERIVED, never a stored opinion; every defer is
+      ambiguous-or-risky ⇒ review, never a merge. The preserved UNMERGED sm1
+      threshold proposal (ADR-0051) was reviewed as the recorded design
+      INPUT: its suppression/ambiguity/weak-title concepts and its versioned
+      policy id were ADOPTED in honest form; its integer-threshold
+      same-story identity proposals and its multi-signal 'bonus' were
+      REJECTED (a score cutoff claims identity from similarity — V4-forbidden;
+      correlated signals never compound); its dangling OD-010 reference is
+      recorded in ADR-0052 (no OD-010 exists in docs/OPEN_DECISIONS.md).
+      Fixed `unrelatednessConcluded: false` (a reject is not ours to
+      conclude); the same `unassessed` tuple (same_event/truth/
+      source_independence) rides verbatim; discovery limits preserved
+      verbatim; candidate data NOT re-fetched or re-validated; audit/
+      provenance/version/conflict/undo properties BY CONSTRUCTION (the pure
+      report mutates nothing — there is nothing to undo; provenance = the
+      versioned basis labels + mirrored sibling outcome/resolution). Gated
+      by the INDEPENDENT fail-closed `EDITORIAL_ADJUDICATION_ENABLED` (default
+      'false' everywhere — .env.example, .dev.vars.example, BOTH wrangler
+      environments) AND its sibling `EDITORIAL_MATCHING_ENABLED` — the flags
+      NEVER imply each other (without the matching sibling the payload is
+      honestly absent and a warn is logged). Typed reader re-derives stances/
+      dispositions/reasons/mergeDisposition/reviewRequired from the sibling
+      chain (a stored lie is malformed); `absent`/`unsupported_version`/
+      `malformed` stay distinct; pre-5.3 drafts read absent (NO backfill);
+      replay stays free and byte-identical. Evidence: unit suite 21 tests
+      (stance totality over all 4 verdicts, fixed sets, disposition
+      precedence incl. incomplete-beats-conflict, determinism, builder
+      basis-mismatch negatives, 21 stored-lie reader cases) + REAL
+      workerd-D1 integration suite 9 tests (flag-OFF byte-identical;
+      adjudication-without-matching ⇒ absent + honest warn; single
+      exact-identity ⇒ locator echo with NO story merge; weak-title ⇒
+      similarity-only defer; TWO exact-identity candidates ⇒ typed conflict;
+      9-story overflow ⇒ suppression with stances listed; zero-new-SQL
+      batch-shape equality; snapshot race writes NOTHING; replay free and
       byte-stable). All gates stay OFF; free ingestion/full-poll stays
       NOT_READY; no Phase-5-completion claim.
 - [x] **Phase 5D (R1.16, v1.11.0, ADR-0044): CONTROLLED entity aliases →

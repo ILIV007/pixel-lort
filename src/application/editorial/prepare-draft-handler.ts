@@ -229,6 +229,7 @@ import {
 import { buildCandidateDiscoveryReport } from '../../domain/editorial/candidate-discovery';
 import { buildCandidateAssessmentReport } from '../../domain/editorial/candidate-assessment';
 import { buildCandidateMatchingReport } from '../../domain/editorial/candidate-matching';
+import { buildCandidateAdjudicationReport } from '../../domain/editorial/candidate-adjudication';
 import {
   buildEntityMentionPhrases,
   buildEntityMentionsReport,
@@ -277,6 +278,20 @@ export interface EditorialPrepareDraftHandlerOptions {
    * EDITORIAL_ENABLED or AI_ENABLED.
    */
   readonly matching?: {
+    readonly enabled: boolean;
+  };
+  /**
+   * Phase 5.3 (V4 2026-11-10): the independent fail-closed gate for the
+   * DETERMINISTIC candidate-ADJUDICATION report. Absent OR disabled ⇒ NO
+   * `candidateAdjudication` payload is computed or stored (the accepted
+   * document shape stays byte-identical). Enabled ⇒ a PURE, zero-SQL,
+   * zero-cost derivation of the matching report already produced by the
+   * same commit rides INSIDE document_json — but ONLY when its sibling
+   * matching gate is ALSO on (the flags NEVER imply each other; without
+   * the sibling there is no basis and an HONEST warn is logged). The flag
+   * NEVER implies EDITORIAL_ENABLED or AI_ENABLED.
+   */
+  readonly adjudication?: {
     readonly enabled: boolean;
   };
   readonly nowMs: () => number;
@@ -843,6 +858,40 @@ export function createEditorialPrepareDraftHandler(
         matched: candidateMatching.counts.matched,
         topScore: candidateMatching.topScoreObserved,
       });
+    }
+
+    // ---- 5.6c Phase 5.3 (V4 2026-11-10) DETERMINISTIC candidate
+    //          adjudication — ONLY under BOTH the independent
+    //          EDITORIAL_ADJUDICATION_ENABLED gate (options.adjudication)
+    //          AND the sibling matching gate above: a PURE derivation of
+    //          the matching report (same lookup moment, zero new lookups,
+    //          zero new SQL, zero provider involvement): the per-candidate
+    //          identity-stance layer (exact content-composite identity is
+    //          the ONLY reuse-locator support; every weaker similarity
+    //          defers to review with `similarity_never_proves_identity`)
+    //          under the versioned `mp1` merge policy, with the honest
+    //          suppression (incomplete coverage), typed conflict (≥2
+    //          identity-grade candidates, never auto-picked) and NO
+    //          executed merge anywhere. Without the matching sibling the
+    //          payload is honestly ABSENT and a warn is logged (the flags
+    //          never imply each other). It rides INSIDE document_json of
+    //          the SAME fenced commit.
+    let candidateAdjudication: ReturnType<typeof buildCandidateAdjudicationReport> | undefined;
+    if (options.adjudication?.enabled === true) {
+      if (candidateMatching === undefined) {
+        logger?.warn('editorial.prepare_draft.adjudication_requires_matching_gate');
+      } else {
+        candidateAdjudication = buildCandidateAdjudicationReport({
+          matching: candidateMatching,
+          discovery: candidateDiscovery,
+          assessment: candidateAssessment,
+        });
+        logger?.debug('editorial.prepare_draft.candidate_adjudication_observed', {
+          mergeDisposition: candidateAdjudication.mergeDisposition,
+          reviewRequired: candidateAdjudication.reviewRequired,
+          adjudicated: candidateAdjudication.counts.adjudicated,
+        });
+      }
     }
 
     // ---- 5.7 R1.16 (Phase 5D) CONTROLLED entity-alias mentions —
@@ -1609,6 +1658,9 @@ export function createEditorialPrepareDraftHandler(
           // Phase 5C-4 (V4 5.2): the versioned matching report ONLY under
           // its gate — absent (key never written) otherwise.
           candidateMatching,
+          // Phase 5.3 (V4): the versioned adjudication report ONLY under
+          // BOTH its gate and the matching gate — absent otherwise.
+          candidateAdjudication,
           entityMentions: resolution.report,
           // R1.17: the bounded relation step's versioned ledger — rides in
           // the SAME fenced draft INSERT (the decision ledger of THIS input).

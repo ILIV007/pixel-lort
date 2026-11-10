@@ -27,6 +27,7 @@ import type { EvidenceGuardReport } from './evidence-guard';
 import type { CandidateDiscoveryReport } from './candidate-discovery';
 import type { CandidateAssessmentReport } from './candidate-assessment';
 import type { CandidateMatchingReport } from './candidate-matching';
+import type { CandidateAdjudicationReport } from './candidate-adjudication';
 import type { EntityMentionsReport } from './entity-mentions';
 import type { EventRelationDecisionReport } from './event-relation-decision';
 
@@ -209,6 +210,20 @@ export const EDITORIAL_DRAFT_WARNINGS = [
  * default path stays byte-identical. It is a pure zero-SQL/zero-cost
  * derivation of the discovery + assessment already carried by this
  * document — never a merge, never a threshold, never a publication effect.
+ *
+ * Phase 5.3 (V4 2026-11-10): the caller MAY pass the deterministic
+ * candidate-ADJUDICATION report for THIS draft — one more ADDITIVE
+ * versioned field (`adjudicationVersion` + `mergePolicyVersion` inside;
+ * `schemaVersion` stays 1) of the SAME `document_json` and the SAME
+ * fenced atomic commit, computed ONLY when BOTH the independent
+ * EDITORIAL_ADJUDICATION_ENABLED gate AND its sibling
+ * EDITORIAL_MATCHING_ENABLED gate are ON (the flags NEVER imply each
+ * other). ABSENT is the honest shape: the key is simply not written. It
+ * is a pure zero-SQL/zero-cost derivation of the matching report already
+ * carried by this document — the identity-stance layer (exact composite
+ * identity = the only reuse-locator support; every weaker similarity
+ * defers to review) under the versioned `mp1` merge policy — never an
+ * executed merge, never a threshold, never a publication effect.
  */
 export function buildDraftDocument(input: {
   readonly sourceItemId: string;
@@ -233,6 +248,11 @@ export function buildDraftDocument(input: {
    * OPTIONAL: computed ONLY under the independent
    * EDITORIAL_MATCHING_ENABLED gate; absent = the key is not written. */
   readonly candidateMatching?: CandidateMatchingReport;
+  /** Phase 5.3 (V4): the versioned candidate-ADJUDICATION report —
+   * OPTIONAL: computed ONLY under BOTH the independent
+   * EDITORIAL_ADJUDICATION_ENABLED gate AND the sibling matching gate;
+   * absent = the key is not written. */
+  readonly candidateAdjudication?: CandidateAdjudicationReport;
 }): {
   readonly layout: typeof EDITORIAL_DRAFT_LAYOUT;
   readonly title: string;
@@ -260,6 +280,9 @@ export function buildDraftDocument(input: {
     readonly eventRelation: EventRelationDecisionReport;
     /** Present ONLY when the matching gate is ON (never an empty key). */
     readonly candidateMatching?: CandidateMatchingReport;
+    /** Present ONLY when BOTH the adjudication and matching gates are ON
+     * (never an empty key). */
+    readonly candidateAdjudication?: CandidateAdjudicationReport;
   };
   readonly facts: readonly {
     readonly text: string;
@@ -301,6 +324,9 @@ export function buildDraftDocument(input: {
       eventRelation: input.eventRelation,
       ...(input.candidateMatching !== undefined
         ? { candidateMatching: input.candidateMatching }
+        : {}),
+      ...(input.candidateAdjudication !== undefined
+        ? { candidateAdjudication: input.candidateAdjudication }
         : {}),
     },
     facts: modelClaims.map((claim) => ({

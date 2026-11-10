@@ -18,7 +18,7 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.18.0",
+    "APP_VERSION": "1.19.0",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
@@ -56,6 +56,7 @@
     // pure zero-SQL/zero-cost derivation inside the same commit. Never
     // implies EDITORIAL_ENABLED or AI_ENABLED.
     "EDITORIAL_MATCHING_ENABLED": "false",
+    "EDITORIAL_ADJUDICATION_ENABLED": "false",
     // Target public channel username — NON-SECRET configuration (ADR-0009).
     // R1.10.5 owner channel identity: pixel lores / @pixellores
     // (https://t.me/pixellores). Not credential material; never a numeric
@@ -170,7 +171,7 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.18.0",
+        "APP_VERSION": "1.19.0",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
@@ -197,6 +198,7 @@
         // zero-cost derivation of the discovery + assessment of the same
         // commit; independent fail-closed flag, never implies other gates.
         "EDITORIAL_MATCHING_ENABLED": "false",
+        "EDITORIAL_ADJUDICATION_ENABLED": "false",
         // Target public channel username — NON-SECRET configuration
         // (ADR-0009). R1.10.5 owner channel identity: @pixellores
         // (https://t.me/pixellores). Format-validated; unconsumed today.

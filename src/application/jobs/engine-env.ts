@@ -261,6 +261,17 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
           // It never implies EDITORIAL_ENABLED or AI_ENABLED.
           enabled: editorial.config.EDITORIAL_MATCHING_ENABLED,
         },
+        adjudication: {
+          // Phase 5.3 (V4 2026-11-10): the INDEPENDENT fail-closed gate
+          // for the deterministic candidate-adjudication report. OFF (the
+          // shipped default) ⇒ the payload is never computed or stored;
+          // ON ⇒ a pure zero-SQL/zero-cost derivation of the matching
+          // report inside the same commit, produced ONLY when the sibling
+          // matching gate is ALSO on (the flags never imply each other;
+          // the handler logs an honest warn otherwise). It NEVER executes
+          // a merge and never implies EDITORIAL_ENABLED or AI_ENABLED.
+          enabled: editorial.config.EDITORIAL_ADJUDICATION_ENABLED,
+        },
         nowMs: () => clock.now(),
         logger,
       }) as never,

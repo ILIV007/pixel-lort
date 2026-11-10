@@ -10,7 +10,7 @@ import type { WorkerEnv } from '../../src/shared/types/env';
  */
 export function createTestEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
   return {
-    APP_VERSION: '1.18.0-test',
+    APP_VERSION: '1.19.0-test',
     ENVIRONMENT: 'development',
     LOG_LEVEL: 'debug',
     // R1.18 (ADR-0046): the read-only review gate ships OFF in the test-env
