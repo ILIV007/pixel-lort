@@ -833,6 +833,49 @@ decision.
       free + byte-stable via the no-provider-port re-execution; snapshot
       race writes nothing). Free readiness stays NOT_READY; BLOCKED_LIVE
       unchanged.
+- [x] **Phase 6.4 (V4 local slice, v1.21.0, ADR-0054, on the post-6.3
+      tree): the END-TO-END PATH REVIEW — the roadmap's «۶.۴ مسیر
+      سرتاسری» executed at full depth per the owner's FULLER-steps order:
+      the REAL chain (durable source snapshot → durable job → REAL engine
+      dispatch → REAL prepare-draft handler → REAL budget authority +
+      allowlist ladder + wall deadline + output validation → REAL fenced
+      commit → REAL /drafts review view → REAL /post_from_draft
+      conversion) exercised with the ONE artificial piece being the
+      provider PORT (the documented ADR-0042 §6 seam; zero network, zero
+      live inference), re-verifying the roadmap failure taxonomy ALONG
+      the whole chain over real workerd D1 — provider deadline → typed
+      retry_wait + honest failed ai_run; the wall-deadline race with a
+      LATE response ABSORBED (the manual-scheduler test seam fires the
+      deadline while the call is in flight; the late resolution never
+      commits/resurrects; the attempt stays charged conservatively; the
+      legitimate retry is the ONLY draft — proven by its own traced
+      content); budget-first quota denial with ZERO provider calls and
+      the budget row unchanged; invalid output (unknown evidence
+      reference) retried per allowlist model (2 calls for the 2-model
+      ladder — invalid output is NOT a refusal) then exhausted to the
+      typed provider_unavailable retry; retry exhaustion → dead_letter
+      job_exhausted after exactly max_attempts with still NO draft; the
+      terminal safety refusal → dead_letter editorial_ai_refused with
+      the honest provider_safety_refusal run; the R1.11.1 acceptance
+      guard → TERMINAL editorial_no_traced_claim with an invalid run —
+      PLUS the fact-guard report (6.3) SURFACED by the read-only review
+      view: the projection reads the stored factGuard key through its
+      OWN strict typed reader and the renderer adds ONE section in the
+      exact house pattern of the other five stored reports (ok → the
+      evaluated counts line + a findings line + the mandatory
+      observation-not-truth note RESERVED before variable content per
+      the S1 discipline; absent/unsupported_version/malformed → the
+      shared honest-state line under its own reservation; a stored lie
+      displays malformed — never guessed into ok, never a crash); the
+      view stays READ-ONLY (the existing two bounded SELECTs, ZERO new
+      SQL, zero writes, zero provider calls, zero recomputation); flags
+      OFF keep the stored document shape byte-identical (the flag-OFF
+      draft shows the honest absent line, the same treatment every
+      legacy document gets for the other five reports); the two honest
+      in-round assertion corrections recorded (per-model invalid-output
+      retry; the distinct editorial_no_traced_claim reason); the
+      suite registered in test:db; NO Phase-6-completion claim; live
+      surfaces BLOCKED_LIVE (Posidon only); Free readiness NOT_READY.
 - [x] **Phase 5D (R1.16, v1.11.0, ADR-0044): CONTROLLED entity aliases →
       DURABLE story mentions — the next real roadmap step: a fresh news
       draft is now durably connected to its REGISTERED entities through

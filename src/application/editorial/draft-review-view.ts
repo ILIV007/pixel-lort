@@ -38,6 +38,8 @@ import type { EntityMentionsReport } from '../../domain/editorial/entity-mention
 import { readEntityMentionsReport } from '../../domain/editorial/entity-mentions';
 import type { EventRelationDecisionReport } from '../../domain/editorial/event-relation-decision';
 import { readEventRelationDecision } from '../../domain/editorial/event-relation-decision';
+import type { FactGuardReport } from '../../domain/editorial/fact-guard';
+import { readFactGuardReport } from '../../domain/editorial/fact-guard';
 import {
   renderDraftDetail,
   renderDraftsList,
@@ -148,6 +150,10 @@ function projectDocument(
   // NOTE the deliberate API difference: the relation reader takes the
   // document JSON STRING (its own strict contract — never re-implemented).
   const relationRead = readEventRelationDecision(documentJson);
+  // Phase 6.4: the fact-guard report rides the SAME stored document when
+  // its independent gate was ON at commit time; the view reads it through
+  // its OWN strict reader so its honest states stay visible and distinct.
+  const factGuardRead = readFactGuardReport(parsed);
 
   const guard = toReportState<EvidenceGuardReport>(guardRead);
   const snapshotContentHash =
@@ -174,6 +180,7 @@ function projectDocument(
     assessment: toReportState<CandidateAssessmentReport>(assessmentRead),
     mentions: toReportState<EntityMentionsReport>(mentionsRead),
     relation: toReportState<EventRelationDecisionReport>(relationRead),
+    factGuard: toReportState<FactGuardReport>(factGuardRead),
   };
   return { kind: 'full', document };
 }

@@ -34,6 +34,10 @@ export interface ReviewRenderLabels {
   readonly claimsUnverifiedNote: string;
   readonly labelGuard: string;
   readonly guardUnassessedNote: string;
+  readonly labelFactGuard: string;
+  readonly factGuardRequiringReview: string;
+  readonly factGuardUnwitnessed: string;
+  readonly factGuardObsNote: string;
   readonly labelCandidates: string;
   readonly labelMentions: string;
   readonly candidatesNote: string;
@@ -82,6 +86,11 @@ export const REVIEW_RENDER_LABELS: Readonly<Record<AdminUiLanguage, ReviewRender
       'Model claims are unverified model output — presence in text is not truth.',
     labelGuard: 'Evidence guard (v1 summary)',
     guardUnassessedNote: 'Headline and summary are explicitly UNASSESSED.',
+    labelFactGuard: 'Fact guard (v1 lexical observations)',
+    factGuardRequiringReview: 'requiring review',
+    factGuardUnwitnessed: 'unwitnessed',
+    factGuardObsNote:
+      'Lexical observations only — never truth verdicts; headline and summary are explicitly UNASSESSED.',
     labelCandidates: 'Candidates (discovery/assessment — historical observations)',
     labelMentions: 'Entity mentions (historical observation)',
     candidatesNote:
@@ -132,6 +141,11 @@ export const REVIEW_RENDER_LABELS: Readonly<Record<AdminUiLanguage, ReviewRender
       'ادعاهای مدل خروجی تأییدنشدهٔ مدل هستند — حضور در متن به معنای حقیقت نیست.',
     labelGuard: 'نگهبان شواهد (خلاصهٔ نسخهٔ ۱)',
     guardUnassessedNote: 'تیتر و خلاصه صراحتاً ارزیابی نشده‌اند.',
+    labelFactGuard: 'نگهبان واقعیت (مشاهدات واژگانی نسخهٔ ۱)',
+    factGuardRequiringReview: 'نیازمند بازبینی',
+    factGuardUnwitnessed: 'بدون شاهد',
+    factGuardObsNote:
+      'فقط مشاهدات واژگانی — هرگز حکم حقیقت نیستند؛ تیتر و خلاصه صراحتاً ارزیابی نشده‌اند.',
     labelCandidates: 'کاندیدها (کشف/ارزیابی — مشاهدات تاریخی)',
     labelMentions: 'اشاره‌های موجودیت (مشاهدهٔ تاریخی)',
     candidatesNote:

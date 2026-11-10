@@ -30,6 +30,7 @@ import { REVIEW_RENDER_LABELS, type ReviewRenderLabels } from './draft-review-la
 import type { EvidenceGuardReport } from '../../domain/editorial/evidence-guard';
 import type { CandidateDiscoveryReport } from '../../domain/editorial/candidate-discovery';
 import type { CandidateAssessmentReport } from '../../domain/editorial/candidate-assessment';
+import type { FactGuardReport } from '../../domain/editorial/fact-guard';
 import type { EntityMentionsReport } from '../../domain/editorial/entity-mentions';
 import type { EventRelationDecisionReport } from '../../domain/editorial/event-relation-decision';
 
@@ -357,6 +358,10 @@ export interface DraftDocumentView {
   readonly assessment: ReviewReportState<CandidateAssessmentReport> | null;
   readonly mentions: ReviewReportState<EntityMentionsReport> | null;
   readonly relation: ReviewReportState<EventRelationDecisionReport> | null;
+  /** Phase 6.4: the stored fact-guard report's typed read state (the
+   * strict reader's own outcomes; null never occurs from the projection
+   * but the renderer stays defensive). */
+  readonly factGuard: ReviewReportState<FactGuardReport> | null;
 }
 
 export type DraftDetailViewModel =
@@ -479,6 +484,9 @@ export function renderDraftDetail(
     message.reserveLine('relTechnicalNote', fixedLineUnits(labels.relationTechnicalNote));
     message.reserveLine('relNoCandidateNote', fixedLineUnits(labels.relationNoCandidateNote));
   }
+  if (doc.factGuard?.kind === 'ok') {
+    message.reserveLine('factGuardNote', fixedLineUnits(labels.factGuardObsNote));
+  }
   if (doc.guard !== null && doc.guard.kind !== 'ok') {
     message.reserveLine(
       'guardState',
@@ -507,6 +515,12 @@ export function renderDraftDetail(
     message.reserveLine(
       'relationState',
       labeledLineUnits(labels.labelRelation, reportStateLine(doc.relation.kind, labels)),
+    );
+  }
+  if (doc.factGuard !== null && doc.factGuard.kind !== 'ok') {
+    message.reserveLine(
+      'factGuardState',
+      labeledLineUnits(labels.labelFactGuard, reportStateLine(doc.factGuard.kind, labels)),
     );
   }
 
@@ -593,6 +607,26 @@ export function renderDraftDetail(
       message.addLabeledValue(labels.labelGuard, statuses);
     }
     message.addReservedFixed('guardNote', labels.guardUnassessedNote);
+  }
+
+  // Fact guard (Phase 6.4) — the stored LEXICAL observations only. The
+  // section states the observation counts under the SAME reservation
+  // discipline (the mandatory note survives budget pressure); the typed
+  // non-ok states render through the shared honest-state line.
+  addReportState(message, labels.labelFactGuard, doc.factGuard, labels, 'factGuardState');
+  if (doc.factGuard?.kind === 'ok') {
+    const factGuard = doc.factGuard.report;
+    message.addLabeledValue(
+      labels.labelFactGuard,
+      `${labels.labelStatus}: ${factGuard.evaluationStatus} · ${factGuard.counts.total} (${factGuard.counts.claimsRequiringReview} ${labels.factGuardRequiringReview} / ${factGuard.counts.unwitnessedClaims} ${labels.factGuardUnwitnessed})`,
+    );
+    const findings =
+      factGuard.counts.numberFindings +
+      factGuard.counts.quotationFindings +
+      factGuard.counts.rumorFindings +
+      factGuard.counts.negationFindings;
+    message.addLabeledValue(labels.labelFactGuard, `findings: ${findings}`);
+    message.addReservedFixed('factGuardNote', labels.factGuardObsNote);
   }
 
   // Candidates (discovery + assessment) — historical observations only.
