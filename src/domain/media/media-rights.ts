@@ -127,11 +127,17 @@ function isYoutubeHost(host: string): boolean {
 
 function isForbiddenHost(host: string): boolean {
   // IP literals (v4 dotted-quad or a bracketed v6) and the local-name
-  // families are forbidden outright — public DNS names only.
+  // families are forbidden outright — public DNS names only. The 7.4
+  // security-sweep hardening: a host WITHOUT a dot can never be a public
+  // DNS name (a single-label name resolves through the RESOLVER's own
+  // search domains — an intranet-shaped SSRF vector), so it is forbidden
+  // too. The bracketed-v6 and dotted-quad checks run FIRST so their
+  // dot-less shapes are never misread as names.
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
   if (/^\[.+\]$/.test(host)) return true;
   if (host === 'localhost' || host.endsWith('.localhost')) return true;
   if (host.endsWith('.local') || host.endsWith('.internal')) return true;
+  if (!host.includes('.')) return true;
   return false;
 }
 

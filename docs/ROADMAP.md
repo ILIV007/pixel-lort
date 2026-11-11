@@ -1581,6 +1581,23 @@ independent decisions; executing them is NOT part of this round.
 
 ## Phase 10 — security hardening and budget controls ⬜
 
+- [x] Phase 10.1 (app 1.29.0, schema still 6 — ZERO DDL): the
+      CONSOLIDATED adversarial security sweep (27 REAL-D1/unit tests
+      registered in test:db) pinning the cross-cutting invariants — the
+      SSRF host-policy family over the TOTAL rights decision, the
+      scheme/userinfo injection boundary, the TOTAL request-id boundary,
+      the durable replay claim (ADR-0025) over REAL D1, and the
+      closed-vocabulary echo discipline; ONE REAL GAP closed fail-closed
+      (`isForbiddenHost` now rejects SINGLE-LABEL hosts — the shipped code
+      missed its own docblock's public-DNS-only contract; the 7.2 unit
+      family re-ran green); the non-breaking `npm audit fix` subset only
+      (16 to 13, NO blind --force) with the per-advisory exposure
+      inventory (zod = a bounded direct-runtime high with the v4
+      migration tracked; sharp/undici = dev-only chains) in
+      docs/reviews/PHASE_10_SECURITY_AUDIT.md. The budget side recorded
+      as the existing pinned machinery (ingestion/ai/budget-authority/
+      attempt-budget). The budget-soft-limit bullet stays carried to the
+      Free activation (BLOCKED_LIVE data).
 - [ ] Security test suite (webhook spoofing, replay, SSRF, injection).
 - [ ] Budget counters and soft-limit enforcement.
 
