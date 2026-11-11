@@ -1386,6 +1386,58 @@ independent decisions; executing them is NOT part of this round.
       lease, the ADR-0032 reconciliation) is the NEXT Phase 8 slice and
       the GATE checkbox below stays open; every live surface stays
       BLOCKED_LIVE (Posidon only).
+- [x] Phase 8.2 (ADR-0058; app 1.25.0, schema still 6 — ZERO DDL): the
+      DURABLE publication scheduler — the roadmap's «publications outbox,
+      claim/lease, failed-publication idempotency, the ADR-0032 gate
+      reconciliation» as the REAL engine over the blueprint-approved
+      `publications`/`publication_messages` tables (migration 0001,
+      CONSUMED like ADR-0056 consumed media_assets): the outbox lifecycle
+      machine pol1 (the TOTAL typed transition table over the REAL
+      nine-value status CHECK with THE HONEST PARKING PIN — the CHECK has
+      NO 'uncertain' value, so the ambiguous ADR-0032 outcome parks in
+      'failed' «ended WITHOUT A CONFIRMED publication» with the
+      classifier's code in last_error, the recorded-evidence heal is the
+      ONLY auto exit, `claim`/`schedule_retry` from the parked state are
+      machine-ILLEGAL, an unconfirmed attempt is NEVER auto-resent), the
+      send-outcome classifier sop1 (429 = proved non-delivery retryable
+      after the validated retry_after — the DELIBERATE pin vs the
+      admin-post doc/code mismatch recorded as a LOW out-of-scope finding;
+      the 4xx family held for a human; timeout/network/5xx/unreadable/
+      unknown = the ambiguous window), the publication identity pidek1
+      (the versioned deterministic idempotency key — the blueprint §7
+      identity: a duplicate enqueue returns the EXISTING row, never a
+      second publication; the exact-bytes text_hash), the REAL D1 store
+      (the atomic claim with the budget IN the WHERE — a spent row never
+      re-executes, the ADR-0037 lesson; the attempts value as the
+      GENERATION fence; the release with attempts RESTORED; the ledger's
+      UNIQUE(chat_id,message_id) rejecting a forged reused response id
+      into the honest unconfirmed parking; the stale-lease reclaim with
+      attempts preserved), and the scan engine (the 8.1 psp1 decision
+      INSIDE the claim on fresh JOINed history; the pre-send EVIDENCE
+      CHECK healing a crashed generation's recorded delivery WITHOUT a
+      second send — the recorded sub-window of the ambiguous window is
+      CLOSED, the stronger at-most-once protection ADR-0032 requires;
+      defers released with the exact dueAt or the pinned 10-minute
+      re-evaluation with scheduled_at NULL; the deterministic
+      per-candidate jitter cross-validated against the real psp1 for
+      every class/context; the TOTAL explicit 24→10 content-type map; the
+      decision-only observe mode; the LOUD misconfiguration refusal —
+      gate ON without a transport writes NOTHING). RED-first held (5
+      suites, 79 tests, real RED: 5 files cannot-resolve-module, exit 1)
+      then 79/79 GREEN (60 unit + 19 REAL-D1 registered in test:db); the
+      SEVEN in-round findings recorded in
+      docs/reviews/PHASE_8_2_DURABLE_SCHEDULER_DESIGN.md §2 (the
+      vocabulary constraint the tests discovered and the machine redesign;
+      the claim-batch generation-read defect; the render contract fixture
+      mismatch; the dueCount list-vs-true-count semantics; the gate-OFF
+      report carry; the admin-post 429 doc/code mismatch; the anti-robot
+      same-round gap pin). HONEST CARRY: the LIVE wiring (the cron route,
+      the real transport, the enablement flag + owner decision) stays
+      BLOCKED_LIVE (Posidon only); the story-layer inputs (game keys,
+      event-driven) default conservatively until the producing pipeline
+      exists; the audit_events per-outcome integration is deferred to a
+      dedicated slice; edit/correction (Phase 8.4's supersede consumption)
+      and the carried album-post pipeline integration remain.
 - [x] R1.19 (ADR-0047; app 1.14.0 candidate, schema still 3): the Telegram
       rich-text FOUNDATION — dependency-pulled for future editorial input and
       Phase 8/9 publishing, NOT a completion of either phase. Bounded typed

@@ -1,0 +1,820 @@
+/**
+ * Phase 8.2 — the DURABLE publication scheduler (the application
+ * composition). The engine that turns the 8.1 pure policy layer (psp1) into
+ * durable, reconciled sends over the blueprint-approved `publications`
+ * outbox (schema 6 — consumed, zero DDL; ADR-0058).
+ *
+ * THE ADR-0032 GATE (the reason this slice exists): before autonomous
+ * channel publishing is enabled, publishing needs a duplicate mitigation and
+ * reconciliation layer with stronger at-most-once protection than raw
+ * webhook responses. This engine delivers it:
+ *
+ *  - the per-candidate decision is made INSIDE the claimed section (fresh
+ *    history every time — the policy always sees the current world);
+ *  - the send is preceded by the EVIDENCE CHECK (`publication_messages`): a
+ *    recorded delivery from a crashed earlier generation heals the row to
+ *    `published` WITHOUT a second send — the recorded sub-window of the
+ *    ambiguous window is CLOSED;
+ *  - the message record (with the exact-bytes content hash) is written
+ *    BEFORE the terminal — a crash between the two is healed by the next
+ *    generation's evidence check;
+ *  - the ledger's UNIQUE(chat_id, message_id) rejects a reused/forged
+ *    message id — the honest outcome is `uncertain`, never a claimed
+ *    published;
+ *  - an uncertain outcome is NEVER auto-resent and never asserts
+ *    proved-non-delivery (the machine has no such transition);
+ *  - the retry family is bounded: only PROVED non-delivery with the
+ *    server's retry_after (429) retries, on the SAME row with the SAME
+ *    idempotency key, bounded by the blueprint §7 budget (3 normal / 5 P0)
+ *    enforced AT the claim boundary.
+ *
+ * The LIVE surfaces stay BLOCKED_LIVE (Posidon only): the transport is
+ * injected by the caller — nothing in this module can reach the network by
+ * itself. A gate enabled WITHOUT a transport is a LOUD misconfiguration
+ * (zero writes); a gate disabled makes the whole scan DECISION-ONLY
+ * (zero durable writes — observation, not simulation).
+ *
+ * The story-layer inputs (the same-game cooldown keys, the event-driven
+ * bypass) are carried: no durable story-layer mapping exists yet, so the
+ * context provider defaults them CONSERVATIVELY (no bypass, no cooldown
+ * rule, relatedness derived from the durable story identity alone).
+ */
+
+import type { DbExecutor } from '../../adapters/db/db-executor';
+import { AppError } from '../../shared/errors/app-error';
+import type { Clock } from '../../shared/time/clock';
+import type { Logger } from '../../observability/logger';
+import {
+  claimPublication,
+  countDuePublications,
+  listDuePublications,
+  listFailedPublications,
+  listPublicationMessages,
+  listRecentPublishedHistory,
+  markClaimedDeadLetter,
+  markClaimedFailed,
+  markClaimedPublished,
+  markClaimedRetryWait,
+  markClaimedUncertain,
+  markWaitingPublicationDeadLetter,
+  reclaimExpiredClaims,
+  healFailedToPublished,
+  healClaimedToPublished,
+  recordPublicationMessage,
+  releaseClaimed,
+  type PublicationRow,
+} from '../../adapters/db/publication-outbox-store';
+import { classifySendOutcome } from '../../domain/publishing/send-outcome';
+import {
+  planReleaseAfterScheduleDecision,
+  planRetryAfterProvedFailure,
+} from '../../domain/publishing/outbox-lifecycle';
+import {
+  classifyPriority,
+  type PublicationPriorityClass,
+} from '../../domain/publishing/priority-classes';
+import { planPublicationTime } from '../../domain/publishing/publication-schedule';
+import type { MixCategory } from '../../domain/publishing/anti-robot';
+import { renderEditorialPostText } from '../../domain/admin-post/editorial-post-render';
+import { contentTextHash } from '../../domain/publishing/publication-identity';
+import { mapContentTypeToMixCategory, scanJitterForCandidate } from './scheduler-policy';
+
+/** The channel transport seam (the ONLY artificial piece in tests). */
+export interface PublicationChannelTransport {
+  sendMessageRich(input: {
+    readonly chatId: number | string;
+    readonly content: {
+      readonly kind: string;
+      readonly text: string;
+      readonly entities: readonly unknown[];
+    };
+  }): Promise<{ readonly messageId: number }>;
+}
+
+export interface StoryLayerContext {
+  /** Is the candidate related to the previous send? (durable default: same story). */
+  readonly related: boolean;
+  /** The explicit story-layer event-driven flag (carried: default false). */
+  readonly eventDriven: boolean;
+  /** The same-game cooldown context (carried: no durable game-key mapping yet). */
+  readonly sameGame: {
+    readonly gameKey: string | null;
+    readonly lastPublishMs: number | null;
+    readonly meaningfulUpdate: boolean;
+  } | null;
+}
+
+export type PolicyContextResult =
+  | { readonly ok: true; readonly context: StoryLayerContext }
+  | { readonly ok: false; readonly reason: 'provider_failed' };
+
+/**
+ * The story-layer context seam. The SHIPPED default derives `related` from
+ * the durable story identity (the candidate's story is the last published
+ * story) and defaults the carried inputs conservatively; the carried real
+ * provider (the story-layer game keys and event flags) replaces it when the
+ * producing pipeline exists.
+ */
+export interface PublicationPolicyContextProvider {
+  buildContext(input: {
+    readonly storyId: string;
+    readonly nowMs: number;
+  }): Promise<PolicyContextResult>;
+}
+
+export function createStoriesPolicyContextProvider(
+  executor: DbExecutor,
+): PublicationPolicyContextProvider {
+  return {
+    async buildContext(input) {
+      try {
+        const lastPublished = await executor.first<{
+          readonly story_id: string;
+        }>({
+          sql: `SELECT story_id FROM publications
+                WHERE status = 'published' AND published_at IS NOT NULL AND published_at <= ?
+                ORDER BY published_at DESC LIMIT 1`,
+          params: [input.nowMs],
+        });
+        return {
+          ok: true,
+          context: {
+            related: lastPublished !== null && lastPublished.story_id === input.storyId,
+            eventDriven: false,
+            sameGame: null,
+          },
+        };
+      } catch {
+        return { ok: false, reason: 'provider_failed' };
+      }
+    },
+  };
+}
+
+const RECONCILIATION_LIMIT = 25;
+const DEFAULT_SCAN_LIMIT = 10;
+const MAX_LAYOUT_HISTORY = 64;
+const MAX_CATEGORY_HISTORY = 512;
+const MIX_WINDOW_MS = 168 * 3_600_000;
+const PUBLISH_LEASE_MS = 60_000;
+const MAX_DESTINATION_LENGTH = 256;
+
+export interface ScanDetail {
+  readonly publicationId: string;
+  readonly draftId: string;
+  readonly outcome:
+    | 'sent'
+    | 'healed_from_evidence'
+    | 'failed_unconfirmed'
+    | 'retry_scheduled'
+    | 'failed_hold'
+    | 'dead_lettered'
+    | 'deferred_time'
+    | 'deferred_policy'
+    | 'decision_only'
+    | 'not_claimable'
+    | 'fence_rejected'
+    | 'policy_input_invalid';
+  readonly dueAtMs?: number;
+  readonly code?: string;
+  readonly priorityClass?: string;
+}
+
+export interface SchedulerScanReport {
+  readonly scannedAtMs: number;
+  readonly gateEnabled: boolean;
+  readonly decisionOnly: boolean;
+  readonly misconfigured: false | 'transport_absent';
+  readonly dueCount: number;
+  readonly processed: number;
+  readonly reclaimed: number;
+  readonly uncertaintyHealed: number;
+  readonly details: readonly ScanDetail[];
+}
+
+interface DraftRead {
+  readonly id: string;
+  readonly status: string;
+  readonly layout: string;
+  readonly document_json: string;
+}
+
+function storyLayerOf(
+  row: PublicationRow,
+  provider: PublicationPolicyContextProvider,
+  nowMs: number,
+) {
+  return provider.buildContext({ storyId: row.story_id, nowMs });
+}
+
+export function createPublicationScheduler(deps: {
+  readonly executor: DbExecutor;
+  readonly destination: string;
+  readonly transport?: PublicationChannelTransport;
+  readonly sendGate: { readonly enabled: boolean };
+  readonly contextProvider: PublicationPolicyContextProvider;
+  readonly clock: Clock;
+  readonly logger: Logger;
+  readonly scanLimit?: number;
+}) {
+  const destination = deps.destination;
+  if (
+    typeof destination !== 'string' ||
+    destination.length === 0 ||
+    destination.length > MAX_DESTINATION_LENGTH
+  ) {
+    throw new AppError('config_invalid');
+  }
+  const scanLimit = Math.max(1, Math.min(64, Math.floor(deps.scanLimit ?? DEFAULT_SCAN_LIMIT)));
+
+  async function reconcileFailedWithEvidence(nowMs: number): Promise<number> {
+    const parked = await listFailedPublications(deps.executor, {
+      limit: RECONCILIATION_LIMIT,
+    });
+    let healed = 0;
+    for (const row of parked) {
+      const messages = await listPublicationMessages(deps.executor, row.id);
+      if (messages.length === 0) {
+        continue;
+      }
+      const outcome = await healFailedToPublished(deps.executor, {
+        publicationId: row.id,
+        nowMs,
+      });
+      if (outcome.kind === 'healed') {
+        healed += 1;
+        deps.logger.info('publication_scheduler.evidence_healed', { publicationId: row.id });
+      }
+    }
+    return healed;
+  }
+
+  async function buildPolicyDecision(
+    row: PublicationRow,
+    draft: DraftRead,
+    nowMs: number,
+  ): Promise<
+    | {
+        readonly ok: true;
+        readonly decision: ReturnType<typeof planPublicationTime>;
+        readonly priorityClass: string;
+      }
+    | { readonly ok: false; readonly code: string }
+  > {
+    const contentRow = await deps.executor.first<{ readonly content_type: string }>({
+      sql: `SELECT content_type FROM stories WHERE id = ?`,
+      params: [row.story_id],
+    });
+    if (!contentRow || typeof contentRow.content_type !== 'string') {
+      return { ok: false, code: 'policy_input_invalid' };
+    }
+    const mapped = mapContentTypeToMixCategory(contentRow.content_type);
+    if (!mapped.ok) {
+      return { ok: false, code: 'unknown_content_type' };
+    }
+    const layer = await storyLayerOf(row, deps.contextProvider, nowMs);
+    if (!layer.ok) {
+      return { ok: false, code: 'policy_provider_failed' };
+    }
+    const history = await listRecentPublishedHistory(deps.executor, {
+      nowMs,
+      limit: MAX_CATEGORY_HISTORY,
+    });
+    const trail = history.slice(-MAX_LAYOUT_HISTORY);
+    const recentLayouts = trail.map((entry) => entry.layout);
+    const recentCategories: { readonly category: MixCategory; readonly atMs: number }[] = [];
+    for (const entry of history) {
+      if (entry.publishedAtMs < nowMs - MIX_WINDOW_MS) {
+        continue;
+      }
+      const entryMapped = mapContentTypeToMixCategory(entry.contentType);
+      if (entryMapped.ok) {
+        recentCategories.push({ category: entryMapped.category, atMs: entry.publishedAtMs });
+      }
+      // A history row of an unknown future content type is skipped: the
+      // trail stays usable; the candidate's own unknown type fails loud.
+    }
+    const lastEntry = trail.length > 0 ? trail[trail.length - 1] : undefined;
+    let previousSend: {
+      readonly atMs: number;
+      readonly related: boolean;
+      readonly priorityClass: PublicationPriorityClass;
+    } | null = null;
+    if (lastEntry) {
+      const classified = classifyPriority(lastEntry.priority);
+      if (classified.ok) {
+        previousSend = {
+          atMs: lastEntry.publishedAtMs,
+          related: layer.context.related,
+          priorityClass: classified.value.class,
+        };
+      }
+    }
+    const jitter = scanJitterForCandidate({
+      candidateId: row.id,
+      priorityScore: row.priority,
+      hasPreviousSend: previousSend !== null,
+      related: layer.context.related,
+    });
+    if (!jitter.ok) {
+      return { ok: false, code: 'invalid_score' };
+    }
+    const decision = planPublicationTime({
+      schemaVersion: 1,
+      nowMs,
+      category: mapped.category,
+      candidateLayout: draft.layout,
+      priorityScore: row.priority,
+      jitterMs: jitter.jitterMs,
+      previousSend,
+      recentLayouts,
+      recentCategories,
+      sameGame: layer.context.sameGame,
+      eventDriven: layer.context.eventDriven,
+    });
+    return { ok: true, decision, priorityClass: jitter.priorityClass };
+  }
+
+  async function sendClaimed(
+    row: PublicationRow,
+    generation: number,
+    draft: DraftRead,
+    nowMs: number,
+  ): Promise<ScanDetail> {
+    if (deps.transport === undefined) {
+      // Unreachable: the gate-ON path validated the transport before any
+      // claim. The typed guard keeps the send honest under any cast.
+      throw new AppError('config_invalid');
+    }
+    // The pre-send evidence check: a recorded delivery from a crashed
+    // earlier generation heals WITHOUT a second send (the ADR-0032 gate).
+    const messages = await listPublicationMessages(deps.executor, row.id);
+    if (messages.length > 0) {
+      const healed = await healClaimedToPublished(deps.executor, {
+        publicationId: row.id,
+        generation,
+        nowMs,
+      });
+      return healed.kind === 'written'
+        ? { publicationId: row.id, draftId: row.draft_id, outcome: 'healed_from_evidence' }
+        : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+    const render = renderEditorialPostText(draft.document_json);
+    if (!render.ok) {
+      const deadLetter = await markClaimedDeadLetter(deps.executor, {
+        publicationId: row.id,
+        generation,
+        errorCode: `render_failed:${render.reason}`,
+        nowMs,
+      });
+      return deadLetter.kind === 'written'
+        ? {
+            publicationId: row.id,
+            draftId: row.draft_id,
+            outcome: 'dead_lettered',
+            code: `render_failed:${render.reason}`,
+          }
+        : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+    const hash = await contentTextHash(render.text);
+    if (!hash.ok) {
+      const deadLetter = await markClaimedDeadLetter(deps.executor, {
+        publicationId: row.id,
+        generation,
+        errorCode: 'content_hash_failed',
+        nowMs,
+      });
+      return deadLetter.kind === 'written'
+        ? {
+            publicationId: row.id,
+            draftId: row.draft_id,
+            outcome: 'dead_lettered',
+            code: 'content_hash_failed',
+          }
+        : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+    try {
+      const sent = await deps.transport.sendMessageRich({
+        chatId: destination,
+        content: render.envelope,
+      });
+      if (!Number.isInteger(sent.messageId) || sent.messageId <= 0) {
+        // A response without a usable message id proves nothing: uncertain,
+        // and NOTHING is recorded (the ledger never records a guess).
+        const marked = await markClaimedUncertain(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: 'response_message_id_invalid',
+          nowMs,
+        });
+        return marked.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'failed_unconfirmed',
+              code: 'response_message_id_invalid',
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+      const recorded = await recordPublicationMessage(deps.executor, {
+        publicationId: row.id,
+        chatId: destination,
+        messageId: sent.messageId,
+        textHash: hash.hash,
+        nowMs,
+      });
+      if (recorded.kind === 'duplicate_message') {
+        // The ledger rejected the response's message id (reused/forged or a
+        // racing generation): the honest outcome is uncertain — never a
+        // claimed published, never a re-send.
+        const marked = await markClaimedUncertain(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: 'delivery_record_rejected',
+          nowMs,
+        });
+        return marked.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'failed_unconfirmed',
+              code: 'delivery_record_rejected',
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+      const terminal = await markClaimedPublished(deps.executor, {
+        publicationId: row.id,
+        generation,
+        nowMs,
+      });
+      return terminal.kind === 'written'
+        ? { publicationId: row.id, draftId: row.draft_id, outcome: 'sent' }
+        : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    } catch (error) {
+      const outcome = classifySendOutcome(error);
+      if (outcome.kind === 'uncertain') {
+        const marked = await markClaimedUncertain(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: outcome.code,
+          nowMs,
+        });
+        return marked.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'failed_unconfirmed',
+              code: outcome.code,
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+      if (outcome.retryable) {
+        const plan = planRetryAfterProvedFailure({
+          attempts: generation,
+          maxAttempts: row.max_attempts,
+          retryAfterMs: outcome.retryAfterMs,
+          nowMs,
+        });
+        if (plan.ok && plan.action === 'retry_wait') {
+          const marked = await markClaimedRetryWait(deps.executor, {
+            publicationId: row.id,
+            generation,
+            errorCode: outcome.code,
+            runAfterMs: plan.runAfterMs,
+            nowMs,
+          });
+          return marked.kind === 'written'
+            ? {
+                publicationId: row.id,
+                draftId: row.draft_id,
+                outcome: 'retry_scheduled',
+                code: outcome.code,
+              }
+            : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+        }
+        const deadLetter = await markClaimedDeadLetter(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: 'attempt_budget_spent',
+          nowMs,
+        });
+        return deadLetter.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'dead_lettered',
+              code: 'attempt_budget_spent',
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+      const marked = await markClaimedFailed(deps.executor, {
+        publicationId: row.id,
+        generation,
+        errorCode: outcome.code,
+        nowMs,
+      });
+      return marked.kind === 'written'
+        ? {
+            publicationId: row.id,
+            draftId: row.draft_id,
+            outcome: 'failed_hold',
+            code: outcome.code,
+          }
+        : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+  }
+
+  /** The claim plus the boundary budget dead-letter (the ADR-0037 lesson). */
+  async function claimPublicationSafe(
+    row: PublicationRow,
+    nowMs: number,
+  ): Promise<
+    | { readonly kind: 'claimed'; readonly generation: number }
+    | { readonly kind: 'not_claimable' }
+    | { readonly kind: 'dead_lettered' }
+  > {
+    const claimed = await claimPublication(deps.executor, {
+      publicationId: row.id,
+      nowMs,
+      leaseMs: PUBLISH_LEASE_MS,
+    });
+    if (claimed.kind === 'claimed') {
+      return claimed;
+    }
+    // Not claimable: either a raced winner or the budget is spent. A
+    // waiting row with a spent budget dead-letters AT the boundary —
+    // without re-execution, without burning anything.
+    const boundary = await markWaitingPublicationDeadLetter(deps.executor, {
+      publicationId: row.id,
+      nowMs,
+    });
+    return boundary.kind === 'dead_lettered'
+      ? { kind: 'dead_lettered' }
+      : { kind: 'not_claimable' };
+  }
+
+  return {
+    /** One bounded scan round: reconcile, reclaim, decide, (maybe) send. */
+    async scanDuePublications(): Promise<SchedulerScanReport> {
+      const nowMs = deps.clock.now();
+      const gateEnabled = deps.sendGate.enabled === true;
+
+      // The misconfiguration is LOUD and writes NOTHING: an enablement
+      // without a transport can never silently stand in for a real send.
+      if (gateEnabled && deps.transport === undefined) {
+        deps.logger.error('publication_scheduler.misconfigured', {
+          reason: 'transport_absent',
+        });
+        return {
+          scannedAtMs: nowMs,
+          gateEnabled: true,
+          decisionOnly: false,
+          misconfigured: 'transport_absent',
+          dueCount: 0,
+          processed: 0,
+          reclaimed: 0,
+          uncertaintyHealed: 0,
+          details: [],
+        };
+      }
+
+      // Phase A: the evidence reconciliation — runs in BOTH modes: the heal
+      // asserts a recorded PROOF (the delivery happened), never a send
+      // decision; an observe-only scan still reconciles the ledger's facts.
+      const uncertaintyHealed = await reconcileFailedWithEvidence(nowMs);
+
+      if (!gateEnabled) {
+        // DECISION-ONLY observation: zero SEND-path durable writes. The due
+        // rows are read and the policy decisions computed and reported —
+        // nothing is claimed, nothing is sent, no deferral is recorded.
+        const due = await listDuePublications(deps.executor, { nowMs, limit: scanLimit });
+        const dueCount = await countDuePublications(deps.executor, { nowMs });
+        const details: ScanDetail[] = [];
+        for (const row of due) {
+          const draft = await deps.executor.first<DraftRead>({
+            sql: `SELECT id, status, layout, document_json FROM drafts WHERE id = ?`,
+            params: [row.draft_id],
+          });
+          if (!draft) {
+            details.push({
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'decision_only',
+              code: 'draft_not_found',
+            });
+            continue;
+          }
+          const decision = await buildPolicyDecision(row, draft, nowMs);
+          if (!decision.ok) {
+            details.push({
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'decision_only',
+              code: decision.code,
+            });
+            continue;
+          }
+          if (!decision.decision.ok) {
+            details.push({
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'decision_only',
+              code: decision.decision.reason,
+              priorityClass: decision.priorityClass,
+            });
+            continue;
+          }
+          details.push({
+            publicationId: row.id,
+            draftId: row.draft_id,
+            outcome: 'decision_only',
+            dueAtMs:
+              decision.decision.outcome === 'schedule' ? decision.decision.dueAtMs : undefined,
+            priorityClass: decision.priorityClass,
+          });
+        }
+        return {
+          scannedAtMs: nowMs,
+          gateEnabled: false,
+          decisionOnly: true,
+          misconfigured: false,
+          dueCount,
+          processed: details.length,
+          reclaimed: 0,
+          uncertaintyHealed,
+          details,
+        };
+      }
+
+      // Phase B: the stale-lease reclaim (attempts preserved; the next
+      // generation's evidence check closes the recorded window).
+      const reclaimed = (await reclaimExpiredClaims(deps.executor, { nowMs })).reclaimed;
+      // Phase C: the due scan.
+      const dueCount = await countDuePublications(deps.executor, { nowMs });
+      const due = await listDuePublications(deps.executor, { nowMs, limit: scanLimit });
+      const details: ScanDetail[] = [];
+      for (const row of due) {
+        const claim = await claimPublicationSafe(row, nowMs);
+        if (claim.kind === 'dead_lettered') {
+          details.push({
+            publicationId: row.id,
+            draftId: row.draft_id,
+            outcome: 'dead_lettered',
+            code: 'attempt_budget_spent',
+          });
+          continue;
+        }
+        if (claim.kind === 'not_claimable') {
+          details.push({
+            publicationId: row.id,
+            draftId: row.draft_id,
+            outcome: 'not_claimable',
+          });
+          continue;
+        }
+        const generation = claim.generation;
+        const draft = await deps.executor.first<DraftRead>({
+          sql: `SELECT id, status, layout, document_json FROM drafts WHERE id = ?`,
+          params: [row.draft_id],
+        });
+        if (!draft) {
+          const written = await markClaimedDeadLetter(deps.executor, {
+            publicationId: row.id,
+            generation,
+            errorCode: 'eligibility_lost',
+            nowMs,
+          });
+          details.push(
+            written.kind === 'written'
+              ? {
+                  publicationId: row.id,
+                  draftId: row.draft_id,
+                  outcome: 'dead_lettered',
+                  code: 'eligibility_lost',
+                }
+              : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' },
+          );
+          continue;
+        }
+        if (draft.status !== 'approved' && draft.status !== 'auto_approved') {
+          const written = await markClaimedDeadLetter(deps.executor, {
+            publicationId: row.id,
+            generation,
+            errorCode: 'eligibility_lost',
+            nowMs,
+          });
+          details.push(
+            written.kind === 'written'
+              ? {
+                  publicationId: row.id,
+                  draftId: row.draft_id,
+                  outcome: 'dead_lettered',
+                  code: 'eligibility_lost',
+                }
+              : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' },
+          );
+          continue;
+        }
+        const decision = await buildPolicyDecision(row, draft, nowMs);
+        if (!decision.ok) {
+          const written = await markClaimedDeadLetter(deps.executor, {
+            publicationId: row.id,
+            generation,
+            errorCode: decision.code,
+            nowMs,
+          });
+          details.push(
+            written.kind === 'written'
+              ? {
+                  publicationId: row.id,
+                  draftId: row.draft_id,
+                  outcome: 'dead_lettered',
+                  code: decision.code,
+                }
+              : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' },
+          );
+          continue;
+        }
+        if (!decision.decision.ok) {
+          // A typed psp1 input failure on a validated score is a policy
+          // data bug: loud, terminal, never a silent release loop.
+          const written = await markClaimedDeadLetter(deps.executor, {
+            publicationId: row.id,
+            generation,
+            errorCode: decision.decision.reason,
+            nowMs,
+          });
+          details.push(
+            written.kind === 'written'
+              ? {
+                  publicationId: row.id,
+                  draftId: row.draft_id,
+                  outcome: 'dead_lettered',
+                  code: decision.decision.reason,
+                }
+              : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' },
+          );
+          continue;
+        }
+        if (decision.decision.outcome === 'defer') {
+          const release = planReleaseAfterScheduleDecision({ dueAtMs: null, nowMs });
+          if (!release.ok) {
+            throw new AppError('internal_error');
+          }
+          const written = await releaseClaimed(deps.executor, {
+            publicationId: row.id,
+            generation,
+            runAfterMs: release.runAfterMs,
+            scheduledAtMs: release.scheduledAtMs,
+            nowMs,
+          });
+          details.push(
+            written.kind === 'written'
+              ? { publicationId: row.id, draftId: row.draft_id, outcome: 'deferred_policy' }
+              : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' },
+          );
+          continue;
+        }
+        if (decision.decision.dueAtMs > nowMs) {
+          const release = planReleaseAfterScheduleDecision({
+            dueAtMs: decision.decision.dueAtMs,
+            nowMs,
+          });
+          if (!release.ok) {
+            throw new AppError('internal_error');
+          }
+          const written = await releaseClaimed(deps.executor, {
+            publicationId: row.id,
+            generation,
+            runAfterMs: release.runAfterMs,
+            scheduledAtMs: release.scheduledAtMs,
+            nowMs,
+          });
+          details.push(
+            written.kind === 'written'
+              ? {
+                  publicationId: row.id,
+                  draftId: row.draft_id,
+                  outcome: 'deferred_time',
+                  dueAtMs: decision.decision.dueAtMs,
+                }
+              : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' },
+          );
+          continue;
+        }
+        details.push(await sendClaimed(row, generation, draft, nowMs));
+      }
+      return {
+        scannedAtMs: nowMs,
+        gateEnabled: true,
+        decisionOnly: false,
+        misconfigured: false,
+        dueCount,
+        processed: details.length,
+        reclaimed,
+        uncertaintyHealed,
+        details,
+      };
+    },
+  };
+}
