@@ -1349,6 +1349,29 @@ independent decisions; executing them is NOT part of this round.
       planning input; every REAL fetch/R2 write/Telegram send stays
       BLOCKED_LIVE (Posidon only); PR #11 draft; FF-only pushes.
 
+- [x] Phase 7.4 (the review-blocker round; app 1.27.0, schema still 6 —
+      ZERO DDL): the INDEPENDENT REVIEW's A1–A6 album findings CLOSED with
+      the adversarial probe scenarios re-written as a persistent RED-first
+      suite (21 of 22 RED on the unfixed tree, then all GREEN): the
+      fail-closed rights derivation (an UNOFFICIAL source_metadata claim is
+      `unknown` and mrp1 rejects it; only official_api and
+      official/verified_source metadata clear) + the honest durable rights
+      echo (official / attribution_required / licensed) + the guarded reuse
+      predicate (status uploaded + non-blocked rights + the type match);
+      the ORDINAL file_id mapping with the response-shape gate BEFORE any
+      ledger write; the RECOVERABLE R2 cleanup (delete FIRST, the ledger
+      clears the key only after success — the object can never outlive its
+      row's discoverability; the backstop proven end-to-end); the pre-send
+      gates (destination + caption validated before ANY effect) + the send
+      certainty honesty (absent = uncertain) + the versioned send identity
+      key (the outbox wiring scaffold); the typed attachment contract (the
+      fresh bytes cross the port under the same ref the wire item names);
+      the staged/sentConfirmed outcome honesty + the fetch_failed blocker.
+      RED-first evidence and the carries in
+      docs/reviews/PHASE_7_4_ALBUM_REVIEW_FIXES.md. The album-post pipeline
+      WIRING stays the documented carry (its contracts now exist);
+      BLOCKED_LIVE (Posidon only).
+
 ## Phase 8 — publication scheduler, edit and correction ⬜
 
 - [x] Phase 8.1 (ADR-0057; app 1.24.0, schema still 6): the publication

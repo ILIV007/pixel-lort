@@ -106,20 +106,53 @@ export interface MediaGroupItemWireV1 {
   readonly caption?: { readonly text: string; readonly entities: readonly unknown[] };
 }
 
+/**
+ * THE 7.4 A5 FIX: the typed FRESH-BYTES attachment mapping. A wire item
+ * that says `attach://item-N` MUST have its bytes carried here under ref
+ * `item-N` — the real multipart adapter can build the actual request from
+ * this input alone (the old contract carried no bytes at all, so no real
+ * request could ever be constructed from it).
+ */
+export interface MediaGroupAttachmentV1 {
+  /** The attach ref WITHOUT the `attach://` prefix (e.g. `item-0`). */
+  readonly ref: string;
+  readonly bytes: Uint8Array;
+  readonly contentType: string;
+}
+
+export interface MediaGroupSendInputV1 {
+  readonly chatId: string;
+  readonly items: readonly MediaGroupItemWireV1[];
+  /** Exactly the fresh items' bytes; reuse items ride NONE. */
+  readonly attachments: readonly MediaGroupAttachmentV1[];
+}
+
 export type MediaGroupSendResultV1 =
-  { ok: true; fileIds: readonly string[] } | { ok: false; reason: 'send_failed' | 'send_rejected' };
+  | { ok: true; fileIds: readonly string[] }
+  | {
+      ok: false;
+      reason: 'send_failed' | 'send_rejected';
+      /**
+       * THE 7.4 A4 FIX (the sop1 honesty at the media seam):
+       * `proved_non_delivery` = the request was NOT accepted (429/4xx);
+       * `uncertain` = the request MAY have been processed (timeout/
+       * network/5xx/unknown shape). ABSENT = uncertain (no false
+       * certainty for a shape the port does not classify).
+       */
+      certainty?: 'proved_non_delivery' | 'uncertain';
+      /** The stable error code (never a raw provider message). */
+      code?: string;
+    };
 
 export interface TelegramMediaPort {
   /**
    * Send ONE media group (2..10 items; caption rides ordinal 0 ONLY) and
    * return the per-item file_ids IN ORDINAL ORDER — the upload path's
-   * sole source of fresh file_ids. (The REAL adapter wraps the client's
+   * sole source of fresh file_ids. The fresh bytes travel INSIDE the
+   * input (the A5 contract). (The REAL adapter wraps the client's
    * sendMediaGroupRich; tests fake it; the LIVE send is BLOCKED_LIVE.)
    */
-  sendMediaGroup(
-    chatId: string,
-    items: readonly MediaGroupItemWireV1[],
-  ): Promise<MediaGroupSendResultV1>;
+  sendMediaGroup(input: MediaGroupSendInputV1): Promise<MediaGroupSendResultV1>;
 }
 
 export interface MediaUploadRightsPort {

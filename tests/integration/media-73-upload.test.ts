@@ -103,6 +103,7 @@ function recordingPorts(): RecordingPorts {
     putKeys: [] as string[],
     deleteKeys: [] as string[],
     sendGroups: 0,
+    attachmentsSent: [] as string[][],
   };
   let failNextSend = false;
   const bytes = new Uint8Array([1, 2, 3, 4]);
@@ -140,8 +141,9 @@ function recordingPorts(): RecordingPorts {
     },
     assets,
     telegram: {
-      sendMediaGroup: async (_chatId, items) => {
+      sendMediaGroup: async (input) => {
         calls.sendGroups += 1;
+        calls.attachmentsSent.push(input.attachments.map((a) => a.ref));
         if (failNextSend) {
           failNextSend = false;
           return { ok: false, reason: 'send_failed' };
@@ -150,7 +152,7 @@ function recordingPorts(): RecordingPorts {
         // carrying its returned file_id.
         return {
           ok: true,
-          fileIds: items.map((_, index) => `BAAC-fresh-${calls.sendGroups}-${index}`),
+          fileIds: input.items.map((_, index) => `BAAC-fresh-${calls.sendGroups}-${index}`),
         };
       },
     },

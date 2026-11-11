@@ -53,7 +53,11 @@ import {
   readMediaAssetRecordV1,
   type MediaAssetRecordV1,
 } from '../../domain/media/media-usage';
-import { MEDIA_FETCH_POLICY_V1, type MediaRightsDecisionV1 } from '../../domain/media/media-rights';
+import {
+  MEDIA_FETCH_POLICY_V1,
+  type MediaRightsDecisionV1,
+  type MediaRightsStateV1,
+} from '../../domain/media/media-rights';
 import { R2_TEMPORARY_POLICY_V1 } from '../../domain/media/r2-temporary';
 import type { MediaAlbumPlanV1, PlannedMediaItemV1 } from '../../domain/media/album-plan';
 import type { MediaCandidateV1 } from '../../domain/media/media-candidate';
@@ -61,23 +65,30 @@ import {
   createAlbumContentDocument,
   type AlbumContentDocumentV1,
 } from '../../domain/media/album-content';
-import type { RichTextEnvelope } from '../../domain/telegram/rich-text-envelope';
+import { RICH_TEXT_LIMITS, type RichTextEnvelope } from '../../domain/telegram/rich-text-envelope';
 import type {
   MediaFetchPort,
   MediaGroupItemWireV1,
+  MediaGroupAttachmentV1,
   MediaAssetStore,
   MediaStoragePort,
   TelegramMediaPort,
   MediaUploadRightsPort,
 } from '../../domain/media/media-ports';
 import type { IdGenerator } from '../../shared/ids/id';
+import { sha256Hex } from '../../shared/ids/idempotency-key';
 
 const RETENTION_MS = R2_TEMPORARY_POLICY_V1.retentionHours * 60 * 60 * 1000;
 
 export interface AlbumUploadItemOutcomeV1 {
   readonly ordinal: number;
   readonly canonicalUrl: string;
-  readonly outcome: 'reused' | 'uploaded' | 'deferred' | 'rejected';
+  /**
+   * `staged` = durably staged and awaiting the group send — NOT delivered
+   * (the honest pre-send state; the 7.4 review fix: the old vocabulary
+   * lied `uploaded` before any channel effect).
+   */
+  readonly outcome: 'reused' | 'staged' | 'uploaded' | 'deferred' | 'rejected';
   readonly fileId?: string;
   readonly reason?: MediaRightsDecisionV1['reason'] | 'fetch_failed';
 }
@@ -86,6 +97,12 @@ export type AlbumUploadOutcome =
   | {
       ok: true;
       fileIds: readonly string[];
+      /**
+       * The versioned deterministic send identity (sha256 over the
+       * destination + the plan content + the caption) — the at-most-once
+       * scaffold the outbox wiring consumes (ADR-0060 carry).
+       */
+      sendIdentityKey: string;
       document: AlbumContentDocumentV1;
       serialized: string;
       fingerprint: string;
@@ -98,6 +115,9 @@ export type AlbumUploadOutcome =
       reason:
         | 'plan_mode_unsupported'
         | 'plan_items_out_of_bounds'
+        | 'invalid_destination'
+        | 'caption_invalid'
+        | 'invalid_send_response'
         | 'rights_deferred'
         | 'rights_rejected'
         | 'fetch_failed'
@@ -105,6 +125,15 @@ export type AlbumUploadOutcome =
         | 'send_failed'
         | 'asset_write_failed';
       items: readonly AlbumUploadItemOutcomeV1[];
+      /**
+       * The honest post-send honesty (the 7.4 review fix): true = the send
+       * call SUCCEEDED and a later step failed (never reported as "not
+       * sent"); false = the send did not succeed; absent = no send was
+       * attempted or the outcome is genuinely unknown.
+       */
+      sentConfirmed?: boolean;
+      /** The sop-family certainty of a send failure (absent = uncertain). */
+      sendCertainty?: 'proved_non_delivery' | 'uncertain';
     };
 
 export interface AlbumUploadInput {
@@ -140,11 +169,86 @@ export function stagingObjectKey(assetId: string): string {
   return `media/staging/${assetId}`;
 }
 
-/** The durable rights echo: the mrp1 allow maps onto the blueprint rights vocabulary. */
-function rightsStatusFor(): MediaAssetRecordV1['rightsStatus'] {
-  // The v1 upload path's allow decisions come from the three cleared
-  // states; the durable echo uses the blueprint's vocabulary.
-  return 'official';
+/**
+ * THE 7.4 FAIL-CLOSED RIGHTS MAPPING (the A1 fix): a rights CLEARANCE is
+ * asserted only when the provenance actually carries one —
+ * `official_api` origins are cleared; `source_metadata` origins are
+ * cleared ONLY when the source's own metadata names an official/verified
+ * source; EVERYTHING else (an UNOFFICIAL metadata claim above all) maps
+ * to `unknown` — the mrp1 decision then REJECTS it typed. The old mapping
+ * fabricated `source_metadata_cleared` for every non-official origin.
+ */
+function rightsStateFor(candidate: MediaCandidateV1): MediaRightsStateV1 {
+  if (candidate.origin === 'official_api') return 'official_api';
+  if (candidate.officiality === 'official' || candidate.officiality === 'verified_source') {
+    return 'source_metadata_cleared';
+  }
+  return 'unknown';
+}
+
+/**
+ * THE HONEST DURABLE RIGHTS ECHO (the A1 fix): the stored rightsStatus
+ * names WHICH clearance was actually asserted — never a blanket
+ * `official` for every allow.
+ */
+function rightsStatusFor(state: MediaRightsStateV1): MediaAssetRecordV1['rightsStatus'] {
+  switch (state) {
+    case 'official_api':
+      return 'official';
+    case 'owner_granted':
+      return 'licensed';
+    case 'source_metadata_cleared':
+      return 'attribution_required';
+    default:
+      return 'unknown';
+  }
+}
+
+/**
+ * THE PRE-SEND CAPTION GATE (the A4 fix): the caption envelope is
+ * validated BEFORE any rights decision, fetch, staging or channel effect —
+ * an invalid caption can never reach the transport.
+ */
+function validateAlbumCaption(caption: RichTextEnvelope | undefined): { ok: true } | { ok: false } {
+  if (caption === undefined) return { ok: true };
+  if (typeof caption.text !== 'string') return { ok: false };
+  if (caption.text.length > RICH_TEXT_LIMITS.maxCaptionUnits) return { ok: false };
+  if (!Array.isArray(caption.entities)) return { ok: false };
+  return { ok: true };
+}
+
+/**
+ * THE DESTINATION GATE (the A4 fix): the destination is the OPERATOR
+ * configuration (ADR-0009), never user input — the bounded shape check
+ * keeps control characters and oversized values out before any effect.
+ */
+function validateDestination(chatId: string): boolean {
+  if (typeof chatId !== 'string' || chatId.length === 0 || chatId.length > 256) return false;
+  for (let index = 0; index < chatId.length; index += 1) {
+    const unit = chatId.charCodeAt(index);
+    if (unit <= 0x1f || unit === 0x7f) return false;
+  }
+  return true;
+}
+
+/**
+ * THE VERSIONED SEND IDENTITY (the A4 wiring scaffold): the deterministic
+ * sha256 over the destination + every plan item's identity + the caption —
+ * the key the outbox wiring claims before any send (ADR-0060 carry; the
+ * derivation is available NOW, the durable claim is the wiring slice).
+ */
+async function deriveAlbumSendIdentityKey(input: {
+  readonly chatId: string;
+  readonly plan: MediaAlbumPlanV1;
+  readonly caption?: RichTextEnvelope;
+}): Promise<string> {
+  const parts = [
+    'album-send:v1',
+    input.chatId,
+    ...input.plan.items.map((item) => `${item.candidate.kind}:${item.candidate.canonicalUrl}`),
+    input.caption?.text ?? '',
+  ];
+  return sha256Hex(parts.join('\u001f'));
 }
 
 export async function uploadAlbumMediaGroup(
@@ -161,12 +265,23 @@ export async function uploadAlbumMediaGroup(
   if (planItems.length < 2 || planItems.length > 10) {
     return { ok: false, reason: 'plan_items_out_of_bounds', items: [] };
   }
+  // THE A4 GATES: destination shape + caption envelope, BEFORE any effect.
+  if (!validateDestination(input.chatId)) {
+    return { ok: false, reason: 'invalid_destination', items: [] };
+  }
+  if (!validateAlbumCaption(input.caption).ok) {
+    return { ok: false, reason: 'caption_invalid', items: [] };
+  }
 
   // 1. URL-level reuse resolution (one bounded asset read for ALL urls).
+  // The A1 fix: the reuse predicate now checks status/rights/type too.
   const urls = planItems.map((item) => item.candidate.canonicalUrl);
   const urlAssets = await ports.assets.findAssetsByUrls(urls);
   const urlResolutions = resolveAssetReuse(
-    planItems.map((item) => ({ canonicalUrl: item.candidate.canonicalUrl })),
+    planItems.map((item) => ({
+      canonicalUrl: item.candidate.canonicalUrl,
+      kind: item.candidate.kind,
+    })),
     urlAssets,
   );
 
@@ -192,10 +307,13 @@ export async function uploadAlbumMediaGroup(
       }
       continue;
     }
-    // 2. the 7.2 TOTAL decision (mrp1) — the v1 upload path derives the
-    // input from the candidate (kind⇒mime, origin⇒rightsState).
+    // 2. the 7.2 TOTAL decision (mrp1) — the 7.4 FAIL-CLOSED derivation:
+    //    the rights state comes from the candidate's REAL provenance
+    //    (an unofficial metadata claim is `unknown` — mrp1 rejects it),
+    //    never a fabricated clearance.
+    const rightsState = rightsStateFor(candidate);
     const rights = ports.rights.decide({
-      rightsState: candidate.origin === 'official_api' ? 'official_api' : 'source_metadata_cleared',
+      rightsState,
       mime: candidate.kind === 'video' ? 'video/mp4' : 'image/jpeg',
       url: candidate.canonicalUrl,
       byteSize: undefined, // UNKNOWN size: the decision flags byteCapUnchecked for the fetch adapter
@@ -240,9 +358,16 @@ export async function uploadAlbumMediaGroup(
       continue;
     }
     // 4. hash-level reuse: the same bytes under another URL may already be uploaded.
+    // The A1 fix: the kind rides the predicate too.
     const hashAssets = await ports.assets.findAssetsByHashes([fetchResult.contentHash]);
     const hashResolutions = resolveAssetReuse(
-      [{ canonicalUrl: candidate.canonicalUrl, sha256: fetchResult.contentHash }],
+      [
+        {
+          canonicalUrl: candidate.canonicalUrl,
+          sha256: fetchResult.contentHash,
+          kind: candidate.kind,
+        },
+      ],
       hashAssets,
     );
     const hashResolution = hashResolutions[0]!;
@@ -270,24 +395,32 @@ export async function uploadAlbumMediaGroup(
       bytes: fetchResult.bytes,
       contentType: fetchResult.contentType,
       contentHash: fetchResult.contentHash,
-      outcome: 'uploaded', // provisional: real only after the group send succeeds
+      outcome: 'staged', // honest: staged for the send, NOT delivered (the 7.4 A6 fix)
     });
-    items.push({ ordinal: index, canonicalUrl: candidate.canonicalUrl, outcome: 'uploaded' });
+    items.push({ ordinal: index, canonicalUrl: candidate.canonicalUrl, outcome: 'staged' });
   }
 
   // ALL-OR-NOTHING: any deferred/rejected/failed item withholds the send.
-  const blocking = items.find((item) => item.outcome !== 'reused' && item.outcome !== 'uploaded');
+  // The 7.4 A6 fix: a fetch failure is a fetch_failed blocker — never
+  // summarized under rights_rejected.
+  const blocking = items.find((item) => item.outcome !== 'reused' && item.outcome !== 'staged');
   if (blocking !== undefined) {
     return {
       ok: false,
-      reason: blocking.outcome === 'deferred' ? 'rights_deferred' : 'rights_rejected',
+      reason:
+        blocking.reason === 'fetch_failed'
+          ? 'fetch_failed'
+          : blocking.outcome === 'deferred'
+            ? 'rights_deferred'
+            : 'rights_rejected',
       items,
     };
   }
 
   // 5. staging: the durable 'candidate' row FIRST (r2_key + the 72h
-  // deadline), then the R2 put (deterministic key).
-  const fresh = resolved.filter((item) => item.outcome === 'uploaded' && item.bytes !== undefined);
+  // deadline), then the R2 put (deterministic key). The rights echo is the
+  // REAL asserted state (the A1 fix) — never a blanket 'official'.
+  const fresh = resolved.filter((item) => item.outcome === 'staged' && item.bytes !== undefined);
   const stagedIds = new Map<number, string>();
   for (const item of fresh) {
     const assetId = ports.ids.newId();
@@ -298,7 +431,7 @@ export async function uploadAlbumMediaGroup(
         type: item.candidate.kind,
         canonicalUrl: item.candidate.canonicalUrl,
         sha256: item.contentHash,
-        rightsStatus: rightsStatusFor(),
+        rightsStatus: rightsStatusFor(rightsStateFor(item.candidate)),
         r2Key: stagingObjectKey(assetId),
         status: 'candidate',
         expiresAt: input.nowMs + RETENTION_MS,
@@ -317,7 +450,10 @@ export async function uploadAlbumMediaGroup(
   }
 
   // 6. ONE media-group send: reuse items ride their file_id, fresh items
-  // ride their attach ref; the caption rides ordinal 0 ONLY.
+  // ride their attach ref; the caption rides ordinal 0 ONLY. THE A5 FIX:
+  // the fresh BYTES cross the port contract as typed attachments keyed by
+  // the SAME ref the wire item names — the real multipart adapter can
+  // build the actual request from this input alone.
   const groupItems: MediaGroupItemWireV1[] = planItems.map((planItem, index) => {
     const item = resolved[index]!;
     const caption =
@@ -337,29 +473,67 @@ export async function uploadAlbumMediaGroup(
       ...(caption !== undefined ? { caption } : {}),
     };
   });
-  const sendResult = await ports.telegram.sendMediaGroup(input.chatId, groupItems);
+  const attachments: MediaGroupAttachmentV1[] = fresh.map((item) => ({
+    ref: `item-${item.ordinal}`,
+    bytes: item.bytes!,
+    contentType: item.contentType!,
+  }));
+  const sendResult = await ports.telegram.sendMediaGroup({
+    chatId: input.chatId,
+    items: groupItems,
+    attachments,
+  });
   if (!sendResult.ok) {
     // The failed-send transition for every staged row (the objects stay
-    // for the retention backstop; NOTHING is auto-resent).
+    // for the retention backstop; NOTHING is auto-resent). The 7.4 A4 fix:
+    // the outcome carries the send's certainty honestly — a missing
+    // classification is UNCERTAIN (no false proved non-delivery).
     for (const assetId of stagedIds.values()) {
       await ports.assets.markFailed(assetId, input.nowMs);
     }
-    return { ok: false, reason: 'send_failed', items };
+    return {
+      ok: false,
+      reason: 'send_failed',
+      items,
+      sentConfirmed: false,
+      sendCertainty: sendResult.certainty ?? 'uncertain',
+    };
+  }
+  // THE A2 FIX: the response contract is ONE id per ORDINAL — validate the
+  // shape BEFORE any ledger write, then map by the item's OWN ordinal (the
+  // old fresh-only counter recorded the WRONG id for mixed albums).
+  const responseValid =
+    Array.isArray(sendResult.fileIds) &&
+    sendResult.fileIds.length === planItems.length &&
+    sendResult.fileIds.every((fileId) => typeof fileId === 'string' && fileId.length > 0);
+  if (!responseValid) {
+    // The send call succeeded but the reply is unusable: the staged rows
+    // stay candidate (their keys + deadlines remain — the backstop can
+    // still clean them); NOTHING is recorded, nothing is auto-resent.
+    return {
+      ok: false,
+      reason: 'invalid_send_response',
+      items,
+      sentConfirmed: true,
+      sendCertainty: 'uncertain',
+    };
   }
 
-  // 7. the blueprint step-10 transition per fresh item: file_id saved +
-  // the R2 reference cleared IN ONE STORE CALL, then the object deleted.
-  let sentIndex = 0;
+  // 7. the blueprint step-10 transition per fresh item. THE A3 FIX: the
+  // R2 object is deleted FIRST (idempotent, missing = ok) and the ledger
+  // clears the key ONLY after a successful delete — the object can never
+  // outlive its row's discoverability; a crash/failure leaves the row
+  // candidate WITH key + deadline for the retention backstop.
   for (const item of resolved) {
-    if (item.outcome !== 'uploaded' || item.bytes === undefined) continue;
-    const sentFileId = sendResult.fileIds[sentIndex];
-    sentIndex += 1;
-    if (sentFileId === undefined) return { ok: false, reason: 'send_failed', items };
+    if (item.outcome !== 'staged' || item.bytes === undefined) continue;
+    const sentFileId = sendResult.fileIds[item.ordinal];
+    if (sentFileId === undefined)
+      return { ok: false, reason: 'invalid_send_response', items, sentConfirmed: true };
     const assetId = stagedIds.get(item.ordinal)!;
-    const marked = await ports.assets.markUploaded(assetId, sentFileId, input.nowMs);
-    if (!marked.ok) return { ok: false, reason: 'asset_write_failed', items };
     const deleted = await ports.storage.delete(stagingObjectKey(assetId));
-    if (!deleted.ok) return { ok: false, reason: 'storage_failed', items };
+    if (!deleted.ok) return { ok: false, reason: 'storage_failed', items, sentConfirmed: true };
+    const marked = await ports.assets.markUploaded(assetId, sentFileId, input.nowMs);
+    if (!marked.ok) return { ok: false, reason: 'asset_write_failed', items, sentConfirmed: true };
     items[item.ordinal] = {
       ordinal: item.ordinal,
       canonicalUrl: item.candidate.canonicalUrl,
@@ -381,11 +555,16 @@ export async function uploadAlbumMediaGroup(
     finalFileIds as readonly string[],
     input.caption,
   );
-  if (!document.ok) return { ok: false, reason: 'send_failed', items };
+  if (!document.ok) return { ok: false, reason: 'send_failed', items, sentConfirmed: true };
 
   return {
     ok: true,
     fileIds: finalFileIds as readonly string[],
+    sendIdentityKey: await deriveAlbumSendIdentityKey({
+      chatId: input.chatId,
+      plan,
+      caption: input.caption,
+    }),
     document: document.document,
     serialized: document.serialized,
     fingerprint: document.fingerprint,

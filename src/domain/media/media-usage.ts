@@ -216,6 +216,11 @@ export type ReuseResolutionV1 =
 export interface ReuseResolvableItem {
   readonly canonicalUrl: string;
   readonly sha256?: string;
+  /**
+   * THE 7.4 A1 FIX: the requested media kind — a video slot can never
+   * ride a photo asset's file_id. Absent = kind-agnostic (legacy callers).
+   */
+  readonly kind?: MediaAssetTypeV1;
 }
 
 /**
@@ -223,34 +228,44 @@ export interface ReuseResolvableItem {
  * rule): EXACT canonical-url or EXACT sha256 equality against an UPLOADED
  * asset (a saved telegram_file_id) reuses it; anything else is a `stage`
  * outcome. Deterministic: the FIRST matching row in the given order wins.
+ *
+ * THE 7.4 A1 GUARDS: a row is reusable ONLY when its durable state still
+ * supports it — `status === 'uploaded'` (a blocked/failed/candidate row
+ * holds no trusted file_id), a NON-blocked rightsStatus (a rights-revoked
+ * asset is never re-sent), and — when the caller names a kind — the SAME
+ * type (a video slot cannot ride a photo's id).
  */
+function isReusableRow(row: MediaAssetRecordV1, item: ReuseResolvableItem): boolean {
+  if (row.telegramFileId === undefined) return false;
+  if (row.status !== 'uploaded') return false;
+  if (row.rightsStatus === 'blocked') return false;
+  if (item.kind !== undefined && row.type !== item.kind) return false;
+  return true;
+}
+
 export function resolveAssetReuse(
   items: readonly ReuseResolvableItem[],
   assets: readonly MediaAssetRecordV1[],
 ): readonly ReuseResolutionV1[] {
   return items.map((item, index) => {
     for (const row of assets) {
-      if (row.telegramFileId === undefined) continue; // only UPLOADED assets carry a reusable file_id
+      if (!isReusableRow(row, item)) continue;
       if (row.canonicalUrl !== undefined && row.canonicalUrl === item.canonicalUrl) {
         return {
           item: index,
           outcome: 'reuse' as const,
-          fileId: row.telegramFileId,
+          fileId: row.telegramFileId!,
           matchedBy: 'canonical_url' as const,
         };
       }
     }
     if (item.sha256 !== undefined) {
       for (const row of assets) {
-        if (
-          row.telegramFileId !== undefined &&
-          row.sha256 !== undefined &&
-          row.sha256 === item.sha256
-        ) {
+        if (isReusableRow(row, item) && row.sha256 !== undefined && row.sha256 === item.sha256) {
           return {
             item: index,
             outcome: 'reuse' as const,
-            fileId: row.telegramFileId,
+            fileId: row.telegramFileId!,
             matchedBy: 'sha256' as const,
           };
         }
