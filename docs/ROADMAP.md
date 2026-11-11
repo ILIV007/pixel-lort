@@ -1351,6 +1351,41 @@ independent decisions; executing them is NOT part of this round.
 
 ## Phase 8 — publication scheduler, edit and correction ⬜
 
+- [x] Phase 8.1 (ADR-0057; app 1.24.0, schema still 6): the publication
+      SCHEDULING POLICY layer — the roadmap bullet «Tehran-window
+      scheduling, anti-robot rules, priority classes» as FOUR pure
+      modules in src/domain/publishing/ (the blueprint §16 policy; zero
+      I/O/SQL/network/flags, schema 6 untouched): tehran-windows (twp1 —
+      the day TOTALLY partitioned into the 5 active windows + quiet +
+      5 named gaps, [start,end) boundaries, TRUE cross-midnight
+      late-night occurrences, the exhaustive 4320-minute sweep),
+      priority-classes (pcp1 — the P0–P3 descriptors with exactly the
+      blueprint facts; the documented P1 quiet pin), anti-robot (arp1 —
+      the gap bands with caller-supplied deterministic jitter validated
+      per band, the HONEST 2–4-min anti-flood pin for the unrelated-P0
+      bypass (related P0 conservatively normal), the 90-min same-game
+      cooldown with the explicit story-layer flag, the trailing-run
+      layout cap, the rolling-six category cap in exact integer math,
+      the rolling-168h mix over the CLOSED ten-category vocabulary with
+      integer-exact per-mille status), publication-schedule (psp1 — the
+      composed TOTAL decision: layout > category > mix precedence with
+      non-time-resolvable blocks as typed DEFERs carrying dueAtMs NULL;
+      P0 gap / P1 latency+8-min-floor / P2+P3 clamped-never-past time
+      computation; the cooldown shift; the window gate LAST for
+      quiet-gated classes only; every applied rule recorded; the four
+      policy versions carried; JSON-equal determinism; no randomness
+      inside the domain; mix enforcement ONLY on P3 filler discretion —
+      news advisory-only, «never forced per day» honored). RED-first
+      held (101 tests written first, real RED: 4 files
+      cannot-resolve-module, exit 1) then 101/101 GREEN with EIGHT
+      in-round findings recorded (3 REAL implementation defects: the
+      wrap-piece start bug, the midnight-split ends bug, the
+      composition's missing candidate identity — see
+      docs/reviews/PHASE_8_1_SCHEDULING_POLICY_DESIGN.md §2). HONEST
+      CARRY: the DURABLE scheduler (the publications outbox, claim/
+      lease, the ADR-0032 reconciliation) is the NEXT Phase 8 slice and
+      the GATE checkbox below stays open; every live surface stays
+      BLOCKED_LIVE (Posidon only).
 - [x] R1.19 (ADR-0047; app 1.14.0 candidate, schema still 3): the Telegram
       rich-text FOUNDATION — dependency-pulled for future editorial input and
       Phase 8/9 publishing, NOT a completion of either phase. Bounded typed
