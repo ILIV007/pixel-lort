@@ -18,11 +18,11 @@ head_sha / tree: local work branch = 2bd1833 + the 8.2 delivery commit (src/doma
 
 last_verified_sha: d67cd0e59926a371620c8ec92e4b0ee11feca32d was the last CI-verified tip (run 42981923824 completed:success 2026-11-11T07:46:15Z, observed in the previous tick and recorded in the sibling's PROJECT_STATUS; this tick's CI observation covers the pushed delivery SHA - recorded in ci_sha_and_result below)
 
-remote branch+SHA: review/r1.10.3-sql-design - the 8.2 delivery pushed this tick (FF, REAL exit 0 captured after the redirect, no pipe masking); pre-push ls-remote confirmed the tip was still the baseline 2bd1833; post-push ls-remote = the delivery SHA = local HEAD
+remote branch+SHA: review/r1.10.3-sql-design @ d94bd523f5c11b5074a019fc1eb3d9cb186f220a PUSHED THIS tick (FF 2bd1833..d94bd52, REAL exit 0 captured after the redirect with no pipe masking; pre-push ls-remote verified the tip was still the baseline 2bd1833; post-push ls-remote = the delivery SHA = local HEAD)
 
-pr: #11 open draft UNTOUCHED (no merge, no Draft change); verified via the API after the push: state=open, draft=true, head=<delivery sha>, mergeable_state clean
+pr: #11 open draft UNTOUCHED (no merge, no Draft change); verified via the API after the push: state=open, draft=true, head=d94bd52, mergeable_state=unstable (the CI run still in flight at observation time - the honest state at that moment)
 
-ci_sha_and_result: observed via the GitHub API on the DELIVERY SHA this tick (actions/runs?head_sha=<full rev-parse sha>) - the real outcome recorded in the tick report; the tick-record SHA's own CI outcome is observed in the NEXT tick report (never pre-claimed)
+ci_sha_and_result: d94bd523f5c11b5074a019fc1eb3d9cb186f220a observed QUEUED via the API (run 43070059682, created 2026-11-11T17:38:08Z) at first observation; the FINAL outcome (completed:success/failure) is observed in the NEXT tick's report against this SHA - never pre-claimed
 
 checks executed + exit codes + counts (THIS tick, ALL REAL on the delivery tree): npm run check = exit 0 (the full gate chain: lint + format:check + typecheck + vitest + telegram-setup + secrets + scan + check:versions + build); npm run test:db = exit 0 (56 files / 612 tests - the new publication-82 suite registered); the 5 NEW suites = 79 tests all green (the four unit suites 60 + the integration 19)
 
