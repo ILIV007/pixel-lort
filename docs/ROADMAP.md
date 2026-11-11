@@ -1601,17 +1601,29 @@ independent decisions; executing them is NOT part of this round.
 - [ ] Security test suite (webhook spoofing, replay, SSRF, injection).
 - [ ] Budget counters and soft-limit enforcement.
 
-## Phase 11 — shadow mode ⬜
+## Phase 11 — shadow mode ◒ (tooling DONE_ENGINEERING; the run BLOCKED_LIVE)
 
-- [ ] 7–14 day shadow run instrumentation and blueprint §25 metrics gates.
+- [x] 7–14 day shadow run instrumentation and blueprint §25 metrics gates.
+      (11.1, app 1.30.0: the shd1 pure read-layer report + the TYPED gates
+      (duplicate_pressure / parked_uncertainty / publication_throughput —
+      data, never prose) + docs/reviews/PHASE_11_SHADOW_RUNBOOK.md; the RUN
+      itself stays BLOCKED_LIVE — zero days elapsed, zero evidence.)
 
-## Phase 12 — private test channel ⬜
+## Phase 12 — private test channel ◒ (kit DONE_ENGINEERING; execution BLOCKED_LIVE)
 
-- [ ] Test-channel publication verification on real clients.
+- [ ] Test-channel publication verification on real clients. (The KIT:
+      docs/reviews/PHASE_12_PRIVATE_CHANNEL_KIT.md — the installer
+      checklist + the scenario matrix mapped to the REAL offline suites +
+      the evidence template; the real-client verification remains
+      Posidon-only, no evidence exists.)
 
-## Phase 13 — production rollout ⬜
+## Phase 13 — production rollout ◒ (READY_FOR_POSIDON)
 
 - [ ] `safe_auto` → `auto` staged rollout with final default `AUTO`.
+      (13.1/13.3: docs/reviews/PHASE_13_READINESS_MATRIX.md — the
+      per-lane state+evidence matrix, the staged plan with the typed stop
+      conditions, the honest boundaries; the ENGINEERING side is
+      READY_FOR_POSIDON, the live rollout is Posidon-only.)
 
 ## Tooling maintenance backlog ⬜
 
