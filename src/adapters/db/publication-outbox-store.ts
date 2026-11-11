@@ -591,12 +591,20 @@ export async function markWaitingPublicationDeadLetter(
 export type RecordMessageOutcome =
   { readonly kind: 'recorded' } | { readonly kind: 'duplicate_message' };
 
+/** The Bot API media-group bound (2..10 items) — the ordinal vocabulary cap. */
+export const MAX_MEDIA_GROUP_ORDINAL = 9;
+
 /**
  * Record ONE delivered message. The record happens ONLY after a parsed
  * successful send response — the ledger never records a guess. The
  * UNIQUE(chat_id, message_id) constraint is the cross-publication guard: a
  * reused/forged message id is REJECTED (duplicate_message) — the caller
  * treats that as an uncertain outcome, never as a published one.
+ *
+ * THE ALBUM WIRING (ADR-0060): the ordinal defaults to 0 (the text path's
+ * single-message record, unchanged) and the media-group path records one
+ * row PER ordinal — the PK(publication_id, ordinal) fences a duplicate
+ * per-ordinal record exactly like the text path's single row.
  */
 export async function recordPublicationMessage(
   executor: DbExecutor,
@@ -607,6 +615,8 @@ export async function recordPublicationMessage(
     readonly textHash: string | null;
     readonly nowMs: number;
     readonly mediaGroupId?: string;
+    /** The per-item ordinal (the media-group path); default 0 (the text path). */
+    readonly ordinal?: number;
   },
 ): Promise<RecordMessageOutcome> {
   if (
@@ -614,19 +624,24 @@ export async function recordPublicationMessage(
     input.chatId.length === 0 ||
     input.chatId.length > MAX_DESTINATION_LENGTH ||
     !Number.isInteger(input.messageId) ||
-    input.messageId <= 0
+    input.messageId <= 0 ||
+    (input.ordinal !== undefined &&
+      (!Number.isInteger(input.ordinal) ||
+        input.ordinal < 0 ||
+        input.ordinal > MAX_MEDIA_GROUP_ORDINAL))
   ) {
     throw new AppError('bad_request');
   }
   try {
     await executor.run({
       sql: `INSERT INTO publication_messages (publication_id, chat_id, message_id, media_group_id, ordinal, text_hash, created_at)
-            VALUES (?, ?, ?, ?, 0, ?, ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
       params: [
         input.publicationId,
         input.chatId,
         input.messageId,
         input.mediaGroupId ?? null,
+        input.ordinal ?? 0,
         input.textHash,
         input.nowMs,
       ],
@@ -635,6 +650,71 @@ export async function recordPublicationMessage(
   } catch (error) {
     if (isAppError(error) && error.code === 'db_constraint_violation') {
       return { kind: 'duplicate_message' };
+    }
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// the per-ordinal usage binding (media_usages — the album wiring, ADR-0060)
+// ---------------------------------------------------------------------------
+
+export type RecordUsagesOutcome =
+  { readonly kind: 'recorded' } | { readonly kind: 'duplicate_usage' };
+
+/**
+ * Bind the sent album's items to their LEDGER assets, one row per ordinal
+ * (the blueprint's per-publication ordinal record, finally consumed). The
+ * write is ONE atomic batch — all ordinals or none; the PK(publication_id,
+ * ordinal) fences a duplicate binding (duplicate_usage). Called AFTER the
+ * delivery records: a failure here parks the row uncertain and the NEXT
+ * scan's evidence check heals it from the recorded messages — the binding
+ * failure can never orphan a delivery proof.
+ */
+export async function recordPublicationMediaUsages(
+  executor: DbExecutor,
+  input: {
+    readonly publicationId: string;
+    readonly usages: readonly { readonly ordinal: number; readonly mediaAssetId: string }[];
+    readonly nowMs: number;
+  },
+): Promise<RecordUsagesOutcome> {
+  if (
+    typeof input?.publicationId !== 'string' ||
+    input.publicationId.length === 0 ||
+    !Number.isInteger(input.nowMs) ||
+    !Array.isArray(input.usages) ||
+    input.usages.length === 0 ||
+    input.usages.length > MAX_MEDIA_GROUP_ORDINAL + 1
+  ) {
+    throw new AppError('bad_request');
+  }
+  for (const usage of input.usages) {
+    if (
+      typeof usage !== 'object' ||
+      usage === null ||
+      !Number.isInteger(usage.ordinal) ||
+      usage.ordinal < 0 ||
+      usage.ordinal > MAX_MEDIA_GROUP_ORDINAL ||
+      typeof usage.mediaAssetId !== 'string' ||
+      usage.mediaAssetId.length === 0 ||
+      usage.mediaAssetId.length > 128
+    ) {
+      throw new AppError('bad_request');
+    }
+  }
+  try {
+    await executor.batch(
+      input.usages.map((usage) => ({
+        sql: `INSERT INTO media_usages (media_asset_id, publication_id, ordinal, created_at)
+              VALUES (?, ?, ?, ?)`,
+        params: [usage.mediaAssetId, input.publicationId, usage.ordinal, input.nowMs],
+      })),
+    );
+    return { kind: 'recorded' };
+  } catch (error) {
+    if (isAppError(error) && error.code === 'db_constraint_violation') {
+      return { kind: 'duplicate_usage' };
     }
     throw error;
   }

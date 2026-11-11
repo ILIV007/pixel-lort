@@ -65,9 +65,13 @@
 ## 3. Honest carries
 
 - **The album-post pipeline wiring** (the outbox claim/lease/approval
-  binding consuming `sendIdentityKey` + the attachments contract) is the
+  binding consuming `sendIdentityKey` + the attachments contract) was the
   documented next slice — the contracts it needs now EXIST; the wiring
   itself stays unbuilt (BLOCKED_LIVE surfaces unchanged).
+  DELIVERED since: ADR-0060 (app 1.31.0) — the outbox send path consumes
+  the contracts exactly as documented here (the shared send identity, the
+  fail-closed ledger binding, the per-ordinal records); the producing side
+  remains the carry.
 - **The uncertain-send ledger** — a `send_uncertain` durable parking for
   albums rides on the same wiring slice (the single-photo/video admin
   path already has its own outbox; the album path joins it at wiring

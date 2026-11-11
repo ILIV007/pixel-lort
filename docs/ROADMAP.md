@@ -1369,8 +1369,14 @@ independent decisions; executing them is NOT part of this round.
       the staged/sentConfirmed outcome honesty + the fetch_failed blocker.
       RED-first evidence and the carries in
       docs/reviews/PHASE_7_4_ALBUM_REVIEW_FIXES.md. The album-post pipeline
-      WIRING stays the documented carry (its contracts now exist);
-      BLOCKED_LIVE (Posidon only).
+      WIRING DELIVERED as the V4 carry (ADR-0060, app 1.31.0): the outbox
+      send path consumes the durable album document through the
+      `PublicationMediaGroupTransport` seam — the ONE shared send-identity
+      derivation both sides import, the fail-closed ledger binding BEFORE
+      any send, the per-ordinal delivery + usage records after the
+      shape-gated reply, the ADR-0032 gate intact; the PRODUCING side (an
+      editorial/admin flow that enqueues album drafts) remains the
+      documented carry; BLOCKED_LIVE (Posidon only).
 
 ## Phase 8 — publication scheduler, edit and correction ⬜
 

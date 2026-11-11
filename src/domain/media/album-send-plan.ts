@@ -1,0 +1,253 @@
+/**
+ * Phase V4-carry — the ALBUM SEND PLAN (ADR-0060): the pure, deterministic
+ * derivation from a durable album content document + destination to the
+ * media-group wire plan the publication scheduler's send path consumes.
+ *
+ * THE WIRING CONTRACT (the 7.4 honest carry, now built):
+ *  - the wire items ride the document's file_ids IN ORDINAL ORDER — the
+ *    upload already happened (the document is the upload path's ONLY legal
+ *    artifact), so a send-time album travels file_id-only;
+ *  - the attachments array is ALWAYS empty here: MediaGroupAttachmentV1
+ *    (the A5 fresh-bytes contract) belongs to the UPLOAD path, which
+ *    already consumes it; a send-time album NEVER re-fetches bytes — the
+ *    empty array is PINNED, not incidental;
+ *  - the caption rides ordinal 0 ONLY (the no-separation layer, extended
+ *    from the plan through the document to the wire);
+ *  - the send identity ('album-send:v1', the A4 scaffold) is re-derived
+ *    from the SAME inputs the upload path used (destination + the item
+ *    identities + the caption text) by the ONE shared function — the
+ *    upload service imports THIS module, so the two sides can never drift;
+ *  - the derivation is TOTAL: every malformed / out-of-bound / non-album
+ *    input fails TYPED. A text draft, a broken document or an oversized
+ *    string can never be guessed into a send plan.
+ *
+ * THE DISCRIMINATOR: `discriminateAlbumDocument` is the scheduler's cheap
+ * route check — parse failure / oversize / non-album route BACK to the
+ * text path (prior-phase behavior byte-identical); only a parseable object
+ * declaring `media: 'album'` enters the album path.
+ *
+ * BOUNDARY: pure — no I/O, no clock, no SQL, no Telegram/R2 types.
+ */
+
+import {
+  ALBUM_CONTENT_LIMITS,
+  readAlbumContentDocumentV1,
+  type AlbumContentReasonV1,
+} from './album-content';
+import type { AlbumItemKindV1 } from './album-content';
+import type { MediaGroupAttachmentV1 } from './media-ports';
+
+export const ALBUM_SEND_PLAN_VERSION = 'alsp1' as const;
+export const ALBUM_SEND_IDENTITY_VERSION = 'album-send:v1' as const;
+
+/** The destination bound (the same application cap the upload path pins). */
+const MAX_DESTINATION_UNITS = 256;
+
+export interface AlbumSendPlanItemV1 {
+  readonly ordinal: number;
+  readonly type: AlbumItemKindV1;
+  /** The Telegram file_id reference the wire item rides (file_id-only). */
+  readonly media: string;
+  /** The item's canonical source URL — the ledger-binding anchor. */
+  readonly canonicalUrl: string;
+}
+
+export interface AlbumSendPlanV1 {
+  readonly schemaVersion: 1;
+  readonly planVersion: 'alsp1';
+  readonly destination: string;
+  readonly items: readonly AlbumSendPlanItemV1[];
+  /** Present IFF the document carries a caption — rides ordinal 0 ONLY. */
+  readonly caption?: { readonly text: string; readonly entities: readonly unknown[] };
+  /**
+   * ALWAYS empty at publication-send time (pinned): the fresh-bytes
+   * attachment contract is the UPLOAD path's; a send-time album never
+   * carries bytes.
+   */
+  readonly attachments: readonly MediaGroupAttachmentV1[];
+  readonly sendIdentityKey: string;
+}
+
+export type AlbumSendPlanFailureReason =
+  | 'invalid_input'
+  | 'document_too_large'
+  | 'document_parse_failed'
+  | 'not_album_document'
+  | 'identity_derivation_failed'
+  | AlbumContentReasonV1;
+
+export type AlbumSendPlanOutcome =
+  | { readonly ok: true; readonly plan: AlbumSendPlanV1 }
+  | { readonly ok: false; readonly reason: AlbumSendPlanFailureReason };
+
+export type AlbumSendIdentityOutcome =
+  | { readonly ok: true; readonly key: string }
+  | { readonly ok: false; readonly reason: 'invalid_input' };
+
+export type AlbumDocumentDiscrimination = 'album' | 'not_album' | 'parse_failed' | 'too_large';
+
+function isValidDestination(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_DESTINATION_UNITS) {
+    return false;
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit <= 0x1f || unit === 0x7f) return false;
+  }
+  return true;
+}
+
+/**
+ * THE ONE versioned send-identity derivation (the A4 scaffold, now the
+ * shared source of truth): sha256 over the tagged, delimited serialization
+ * of (version tag, destination, every item's kind:url identity, the caption
+ * text). The upload service imports THIS function — the derived key is
+ * byte-identical on both sides by construction.
+ */
+export async function deriveAlbumSendIdentityKey(input: {
+  readonly destination: string;
+  readonly items: readonly { readonly kind: string; readonly canonicalUrl: string }[];
+  readonly captionText?: string | null;
+}): Promise<AlbumSendIdentityOutcome> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return { ok: false, reason: 'invalid_input' };
+  }
+  if (!isValidDestination(input.destination) || !Array.isArray(input.items)) {
+    return { ok: false, reason: 'invalid_input' };
+  }
+  if (
+    input.items.length < ALBUM_CONTENT_LIMITS.minItems ||
+    input.items.length > ALBUM_CONTENT_LIMITS.maxItems
+  ) {
+    return { ok: false, reason: 'invalid_input' };
+  }
+  for (const item of input.items) {
+    if (typeof item !== 'object' || item === null) return { ok: false, reason: 'invalid_input' };
+    if (item.kind !== 'photo' && item.kind !== 'video') {
+      return { ok: false, reason: 'invalid_input' };
+    }
+    if (
+      typeof item.canonicalUrl !== 'string' ||
+      item.canonicalUrl.length === 0 ||
+      item.canonicalUrl.length > ALBUM_CONTENT_LIMITS.maxUrlUnits
+    ) {
+      return { ok: false, reason: 'invalid_input' };
+    }
+  }
+  if (
+    input.captionText !== undefined &&
+    input.captionText !== null &&
+    typeof input.captionText !== 'string'
+  ) {
+    return { ok: false, reason: 'invalid_input' };
+  }
+  const parts = [
+    ALBUM_SEND_IDENTITY_VERSION,
+    input.destination,
+    ...input.items.map((item) => `${item.kind}:${item.canonicalUrl}`),
+    input.captionText ?? '',
+  ];
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(parts.join('\u001f')) as unknown as ArrayBuffer,
+  );
+  const hex: string[] = [];
+  for (const byte of new Uint8Array(digest)) {
+    hex.push(byte.toString(16).padStart(2, '0'));
+  }
+  return { ok: true, key: hex.join('') };
+}
+
+/**
+ * The TOTAL discriminator: only a parseable object declaring
+ * `media: 'album'` is the scheduler's album route; everything else (parse
+ * failure, oversize, a text document, any other shape) routes back to the
+ * text path UNCHANGED.
+ */
+export function discriminateAlbumDocument(documentJson: string): AlbumDocumentDiscrimination {
+  if (typeof documentJson !== 'string' || documentJson.length === 0) return 'not_album';
+  if (new TextEncoder().encode(documentJson).byteLength > ALBUM_CONTENT_LIMITS.maxSerializedBytes) {
+    return 'too_large';
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(documentJson);
+  } catch {
+    return 'parse_failed';
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return 'not_album';
+  return (parsed as { media?: unknown }).media === 'album' ? 'album' : 'not_album';
+}
+
+/**
+ * The ONLY legal send-plan derivation: the durable album document is
+ * re-validated by ITS OWN strict reader, then projected into the wire plan
+ * with the re-derived send identity. Failures are typed and ordered — the
+ * input gates run BEFORE any parse (the byte cap), the reader before the
+ * identity (a document that cannot be vouched for never derives a key).
+ */
+export async function deriveAlbumSendPlan(input: {
+  readonly documentJson: string;
+  readonly destination: string;
+}): Promise<AlbumSendPlanOutcome> {
+  if (
+    typeof input !== 'object' ||
+    input === null ||
+    Array.isArray(input) ||
+    !isValidDestination(input.destination)
+  ) {
+    return { ok: false, reason: 'invalid_input' };
+  }
+  if (typeof input.documentJson !== 'string' || input.documentJson.length === 0) {
+    return { ok: false, reason: 'invalid_input' };
+  }
+  // The byte cap runs BEFORE the parse: a legal album document never
+  // exceeds the serialized bound, so an over-cap string is refused without
+  // handing the parser an unbounded input.
+  if (
+    new TextEncoder().encode(input.documentJson).byteLength >
+    ALBUM_CONTENT_LIMITS.maxSerializedBytes
+  ) {
+    return { ok: false, reason: 'document_too_large' };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.documentJson);
+  } catch {
+    return { ok: false, reason: 'document_parse_failed' };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, reason: 'not_album_document' };
+  }
+  if ((parsed as { media?: unknown }).media !== 'album') {
+    return { ok: false, reason: 'not_album_document' };
+  }
+  const read = await readAlbumContentDocumentV1(parsed);
+  if (!read.ok) return { ok: false, reason: read.reason };
+
+  const document = read.document;
+  const identity = await deriveAlbumSendIdentityKey({
+    destination: input.destination,
+    items: document.items.map((item) => ({ kind: item.kind, canonicalUrl: item.canonicalUrl })),
+    captionText: document.caption?.text ?? null,
+  });
+  if (!identity.ok) return { ok: false, reason: 'identity_derivation_failed' };
+
+  const plan: AlbumSendPlanV1 = {
+    schemaVersion: 1,
+    planVersion: ALBUM_SEND_PLAN_VERSION,
+    destination: input.destination,
+    items: document.items.map((item, ordinal) => ({
+      ordinal,
+      type: item.kind,
+      media: item.fileId,
+      canonicalUrl: item.canonicalUrl,
+    })),
+    ...(document.caption !== undefined
+      ? { caption: { text: document.caption.text, entities: document.caption.entities } }
+      : {}),
+    attachments: [],
+    sendIdentityKey: identity.key,
+  };
+  return { ok: true, plan };
+}

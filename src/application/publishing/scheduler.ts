@@ -34,6 +34,19 @@
  * (zero writes); a gate disabled makes the whole scan DECISION-ONLY
  * (zero durable writes — observation, not simulation).
  *
+ * THE ALBUM WIRING (ADR-0060, the V4 carry): the send path consumes the
+ * durable album content documents (the 7.3/7.4 contracts) through the
+ * dedicated `PublicationMediaGroupTransport` seam — file_id-only (the
+ * attachments array is always empty at send time), the send identity key
+ * re-derived from the SAME shared derivation the upload path pins, the
+ * ledger binding fail-closed BEFORE any send, the per-ordinal delivery +
+ * usage records after the shape-gated reply. The gate carried over INTACT:
+ * the evidence heal is shape-blind, the uncertain family is never
+ * auto-resent, 429 retries on the same row through the same classifier.
+ * The gate-ON scan WITHOUT the media seam is a LOUD misconfiguration
+ * (zero writes) ONLY when an album is due — a text-only deployment keeps
+ * working, and the text path's byte-level behavior is unchanged.
+ *
  * The story-layer inputs (the same-game cooldown keys, the event-driven
  * bypass) are carried: no durable story-layer mapping exists yet, so the
  * context provider defaults them CONSERVATIVELY (no bypass, no cooldown
@@ -60,6 +73,7 @@ import {
   reclaimExpiredClaims,
   healFailedToPublished,
   healClaimedToPublished,
+  recordPublicationMediaUsages,
   recordPublicationMessage,
   releaseClaimed,
   type PublicationRow,
@@ -77,6 +91,8 @@ import { planPublicationTime } from '../../domain/publishing/publication-schedul
 import type { MixCategory } from '../../domain/publishing/anti-robot';
 import { renderEditorialPostText } from '../../domain/admin-post/editorial-post-render';
 import { contentTextHash } from '../../domain/publishing/publication-identity';
+import { discriminateAlbumDocument, deriveAlbumSendPlan } from '../../domain/media/album-send-plan';
+import type { MediaAssetStore, MediaGroupSendInputV1 } from '../../domain/media/media-ports';
 import { mapContentTypeToMixCategory, scanJitterForCandidate } from './scheduler-policy';
 
 /** The channel transport seam (the ONLY artificial piece in tests). */
@@ -89,6 +105,33 @@ export interface PublicationChannelTransport {
       readonly entities: readonly unknown[];
     };
   }): Promise<{ readonly messageId: number }>;
+}
+
+/** ONE message of a media-group reply, IN ORDINAL ORDER (the ADR-0060 seam). */
+export interface PublicationSentMediaGroupMessage {
+  readonly messageId: number;
+  /** The returned file_id when the reply carries one; the ledger never requires it. */
+  readonly fileId?: string;
+}
+
+/**
+ * THE ALBUM WIRING SEAM (ADR-0060): the media-group send the album send
+ * path consumes. The input IS the A5 `MediaGroupSendInputV1` contract
+ * (items + the fresh-bytes attachments — which the send-time album always
+ * leaves EMPTY, the file_id-only rule) extended with the re-derived send
+ * identity key (the A4 scaffold consumed at the send boundary). Failures
+ * THROW — the album path classifies them through the SAME sop1 classifier
+ * as the text path (one honest outcome vocabulary).
+ */
+export interface PublicationMediaGroupSendInputV1 extends MediaGroupSendInputV1 {
+  /** The versioned send identity re-derived from the durable document. */
+  readonly sendIdentityKey: string;
+}
+
+export interface PublicationMediaGroupTransport {
+  sendMediaGroup(
+    input: PublicationMediaGroupSendInputV1,
+  ): Promise<readonly PublicationSentMediaGroupMessage[]>;
 }
 
 export interface StoryLayerContext {
@@ -184,7 +227,13 @@ export interface SchedulerScanReport {
   readonly scannedAtMs: number;
   readonly gateEnabled: boolean;
   readonly decisionOnly: boolean;
-  readonly misconfigured: false | 'transport_absent';
+  /**
+   * The LOUD misconfiguration family: 'transport_absent' = the send gate
+   * enabled without the text transport; 'media_transport_absent' = the gate
+   * enabled, the text transport present, but an ALBUM publication is due
+   * while the media-group seam is absent. Both write NOTHING.
+   */
+  readonly misconfigured: false | 'transport_absent' | 'media_transport_absent';
   readonly dueCount: number;
   readonly processed: number;
   readonly reclaimed: number;
@@ -211,6 +260,14 @@ export function createPublicationScheduler(deps: {
   readonly executor: DbExecutor;
   readonly destination: string;
   readonly transport?: PublicationChannelTransport;
+  /**
+   * The album send seam (ADR-0060). OPTIONAL so a text-only deployment
+   * keeps working, but the pair rule below makes it impossible to hold a
+   * send-capable media seam without the ledger it binds to.
+   */
+  readonly mediaTransport?: PublicationMediaGroupTransport;
+  /** The ledger the album binding is verified against — REQUIRED with the media seam. */
+  readonly mediaAssets?: Pick<MediaAssetStore, 'findAssetsByUrls'>;
   readonly sendGate: { readonly enabled: boolean };
   readonly contextProvider: PublicationPolicyContextProvider;
   readonly clock: Clock;
@@ -223,6 +280,12 @@ export function createPublicationScheduler(deps: {
     destination.length === 0 ||
     destination.length > MAX_DESTINATION_LENGTH
   ) {
+    throw new AppError('config_invalid');
+  }
+  // THE PAIR RULE (fail-closed): a media-group seam without the ledger it
+  // binds to (or the reverse) is a construction-time misconfiguration —
+  // the wiring can never half-exist.
+  if ((deps.mediaTransport === undefined) !== (deps.mediaAssets === undefined)) {
     throw new AppError('config_invalid');
   }
   const scanLimit = Math.max(1, Math.min(64, Math.floor(deps.scanLimit ?? DEFAULT_SCAN_LIMIT)));
@@ -348,6 +411,7 @@ export function createPublicationScheduler(deps: {
     }
     // The pre-send evidence check: a recorded delivery from a crashed
     // earlier generation heals WITHOUT a second send (the ADR-0032 gate).
+    // It runs for BOTH content shapes — the delivery proof is shape-blind.
     const messages = await listPublicationMessages(deps.executor, row.id);
     if (messages.length > 0) {
       const healed = await healClaimedToPublished(deps.executor, {
@@ -358,6 +422,13 @@ export function createPublicationScheduler(deps: {
       return healed.kind === 'written'
         ? { publicationId: row.id, draftId: row.draft_id, outcome: 'healed_from_evidence' }
         : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+    // THE ALBUM BRANCH (ADR-0060): a durable album content document routes
+    // to the media-group send path; EVERYTHING else (a text document, an
+    // unparseable string, an oversized string) keeps the text path's exact
+    // prior-phase behavior — the discriminator never guesses.
+    if (discriminateAlbumDocument(draft.document_json) === 'album') {
+      return sendClaimedAlbum(row, generation, draft, nowMs);
     }
     const render = renderEditorialPostText(draft.document_json);
     if (!render.ok) {
@@ -524,6 +595,304 @@ export function createPublicationScheduler(deps: {
     }
   }
 
+  /**
+   * THE ALBUM SEND PATH (ADR-0060): the outbox claim consumes the durable
+   * album content document through the media-group seam, with the ADR-0032
+   * gate carried over INTACT:
+   *  - the plan derivation is typed and BEFORE any effect — a document the
+   *    strict reader refuses dead-letters with ZERO transport calls;
+   *  - the LEDGER BINDING is fail-closed: every item must resolve to an
+   *    UPLOADED asset whose telegram_file_id matches the document — a
+   *    document the ledger cannot vouch for is dead-lettered BEFORE any
+   *    send (the send identity is never accepted on faith);
+   *  - the send is file_id-only (the attachments array is empty by
+   *    construction — the fresh-bytes contract belongs to the upload path);
+   *  - the response shape gate runs BEFORE any ledger write (the A2
+   *    lesson): one message per item, in ordinal order, each id usable;
+   *  - the delivery records land per ordinal with the caption hash on
+   *    ordinal 0 ONLY; a rejected record parks the row uncertain — never a
+   *    claimed published, never a re-send;
+   *  - the usage binding lands AFTER the delivery proof: a failure parks
+   *    uncertain and the NEXT scan's evidence check heals from the
+   *    recorded messages — a binding failure can never orphan a proof;
+   *  - transport failures classify through the SAME sop1 classifier as the
+   *    text path (429 retryable with the 60s floor, 4xx hold, the rest
+   *    uncertain and never auto-resent).
+   */
+  async function sendClaimedAlbum(
+    row: PublicationRow,
+    generation: number,
+    draft: DraftRead,
+    nowMs: number,
+  ): Promise<ScanDetail> {
+    if (deps.mediaTransport === undefined || deps.mediaAssets === undefined) {
+      // Unreachable: the gate-ON path validated the media seam before any
+      // claim, and the constructor pair rule keeps the seam + ledger tied.
+      throw new AppError('config_invalid');
+    }
+    // 1. The typed send plan from the durable document.
+    const planned = await deriveAlbumSendPlan({
+      documentJson: draft.document_json,
+      destination,
+    });
+    if (!planned.ok) {
+      const code = `album_content_invalid:${planned.reason}`;
+      const deadLetter = await markClaimedDeadLetter(deps.executor, {
+        publicationId: row.id,
+        generation,
+        errorCode: code,
+        nowMs,
+      });
+      return deadLetter.kind === 'written'
+        ? { publicationId: row.id, draftId: row.draft_id, outcome: 'dead_lettered', code }
+        : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+    const plan = planned.plan;
+    // 2. The caption hash — the ordinal-0 delivery record's content anchor.
+    let captionHash: string | null = null;
+    if (plan.caption !== undefined) {
+      const hash = await contentTextHash(plan.caption.text);
+      if (!hash.ok) {
+        const deadLetter = await markClaimedDeadLetter(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: 'album_caption_hash_failed',
+          nowMs,
+        });
+        return deadLetter.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'dead_lettered',
+              code: 'album_caption_hash_failed',
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+      captionHash = hash.hash;
+    }
+    // 3. THE LEDGER BINDING — before ANY transport effect.
+    const assets = await deps.mediaAssets.findAssetsByUrls(
+      plan.items.map((item) => item.canonicalUrl),
+    );
+    const bindings: { readonly ordinal: number; readonly mediaAssetId: string }[] = [];
+    for (const item of plan.items) {
+      const match = assets.find(
+        (asset) =>
+          asset.canonicalUrl === item.canonicalUrl &&
+          asset.telegramFileId === item.media &&
+          asset.status === 'uploaded',
+      );
+      if (match === undefined) {
+        const deadLetter = await markClaimedDeadLetter(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: 'ledger_binding_unresolved',
+          nowMs,
+        });
+        return deadLetter.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'dead_lettered',
+              code: 'ledger_binding_unresolved',
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+      bindings.push({ ordinal: item.ordinal, mediaAssetId: match.id });
+    }
+    // 4. THE SEND — one media group, file_id-only, identity consumed.
+    let sentMessages: readonly PublicationSentMediaGroupMessage[];
+    try {
+      sentMessages = await deps.mediaTransport.sendMediaGroup({
+        chatId: destination,
+        items: plan.items.map((item) => ({
+          type: item.type,
+          media: item.media,
+          ...(item.ordinal === 0 && plan.caption !== undefined ? { caption: plan.caption } : {}),
+        })),
+        attachments: plan.attachments,
+        sendIdentityKey: plan.sendIdentityKey,
+      });
+    } catch (error) {
+      const outcome = classifySendOutcome(error);
+      if (outcome.kind === 'uncertain') {
+        const marked = await markClaimedUncertain(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: outcome.code,
+          nowMs,
+        });
+        return marked.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'failed_unconfirmed',
+              code: outcome.code,
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+      if (outcome.retryable) {
+        const retryPlan = planRetryAfterProvedFailure({
+          attempts: generation,
+          maxAttempts: row.max_attempts,
+          retryAfterMs: outcome.retryAfterMs,
+          nowMs,
+        });
+        if (retryPlan.ok && retryPlan.action === 'retry_wait') {
+          const marked = await markClaimedRetryWait(deps.executor, {
+            publicationId: row.id,
+            generation,
+            errorCode: outcome.code,
+            runAfterMs: retryPlan.runAfterMs,
+            nowMs,
+          });
+          return marked.kind === 'written'
+            ? {
+                publicationId: row.id,
+                draftId: row.draft_id,
+                outcome: 'retry_scheduled',
+                code: outcome.code,
+              }
+            : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+        }
+        const deadLetter = await markClaimedDeadLetter(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: 'attempt_budget_spent',
+          nowMs,
+        });
+        return deadLetter.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'dead_lettered',
+              code: 'attempt_budget_spent',
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+      const marked = await markClaimedFailed(deps.executor, {
+        publicationId: row.id,
+        generation,
+        errorCode: outcome.code,
+        nowMs,
+      });
+      return marked.kind === 'written'
+        ? {
+            publicationId: row.id,
+            draftId: row.draft_id,
+            outcome: 'failed_hold',
+            code: outcome.code,
+          }
+        : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+    // 5. THE RESPONSE SHAPE GATE — before ANY ledger write (the A2 lesson).
+    const shapeValid =
+      Array.isArray(sentMessages) &&
+      sentMessages.length === plan.items.length &&
+      sentMessages.every(
+        (message) => Number.isInteger(message?.messageId) && message.messageId > 0,
+      );
+    if (!shapeValid) {
+      // A reply without one usable id per ordinal proves nothing: uncertain,
+      // and NOTHING is recorded (the ledger never records a guess).
+      const marked = await markClaimedUncertain(deps.executor, {
+        publicationId: row.id,
+        generation,
+        errorCode: 'response_media_group_shape_invalid',
+        nowMs,
+      });
+      return marked.kind === 'written'
+        ? {
+            publicationId: row.id,
+            draftId: row.draft_id,
+            outcome: 'failed_unconfirmed',
+            code: 'response_media_group_shape_invalid',
+          }
+        : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+    // 6. THE PER-ORDINAL DELIVERY RECORDS — the at-most-once ledger.
+    for (let ordinal = 0; ordinal < sentMessages.length; ordinal += 1) {
+      const message = sentMessages[ordinal]!;
+      const recorded = await recordPublicationMessage(deps.executor, {
+        publicationId: row.id,
+        chatId: destination,
+        messageId: message.messageId,
+        textHash: ordinal === 0 ? captionHash : null,
+        nowMs,
+        ordinal,
+      });
+      if (recorded.kind === 'duplicate_message') {
+        // The ledger rejected the response's message id (reused/forged or a
+        // racing generation): the honest outcome is uncertain — the records
+        // already written stay (the evidence heal governs), never a re-send.
+        const marked = await markClaimedUncertain(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: 'delivery_record_rejected',
+          nowMs,
+        });
+        return marked.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'failed_unconfirmed',
+              code: 'delivery_record_rejected',
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+    }
+    // 7. THE USAGE BINDING — after the delivery proof; a failure parks the
+    // row uncertain and the NEXT scan's evidence check heals from the
+    // recorded messages (the binding can never orphan a proof).
+    try {
+      const usages = await recordPublicationMediaUsages(deps.executor, {
+        publicationId: row.id,
+        usages: bindings,
+        nowMs,
+      });
+      if (usages.kind === 'duplicate_usage') {
+        const marked = await markClaimedUncertain(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: 'usage_record_rejected',
+          nowMs,
+        });
+        return marked.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'failed_unconfirmed',
+              code: 'usage_record_rejected',
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+    } catch {
+      const marked = await markClaimedUncertain(deps.executor, {
+        publicationId: row.id,
+        generation,
+        errorCode: 'usage_record_failed',
+        nowMs,
+      });
+      return marked.kind === 'written'
+        ? {
+            publicationId: row.id,
+            draftId: row.draft_id,
+            outcome: 'failed_unconfirmed',
+            code: 'usage_record_failed',
+          }
+        : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+    // 8. THE TERMINAL — fenced by the claim's attempts generation.
+    const terminal = await markClaimedPublished(deps.executor, {
+      publicationId: row.id,
+      generation,
+      nowMs,
+    });
+    return terminal.kind === 'written'
+      ? { publicationId: row.id, draftId: row.draft_id, outcome: 'sent' }
+      : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+  }
+
   /** The claim plus the boundary budget dead-letter (the ADR-0037 lesson). */
   async function claimPublicationSafe(
     row: PublicationRow,
@@ -576,6 +945,43 @@ export function createPublicationScheduler(deps: {
           uncertaintyHealed: 0,
           details: [],
         };
+      }
+
+      // THE MEDIA MISCONFIGURATION CHECK (ADR-0060, the same LOUD
+      // zero-write class): a due ALBUM publication with no media-group seam
+      // can never silently stand in for a real send. The probe is a bounded
+      // read of the due drafts' documents; a text-only deployment (no album
+      // due) is unaffected — the text path keeps working without the media
+      // seam. Nothing has been written at this point: zero writes.
+      if (gateEnabled && deps.mediaTransport === undefined) {
+        const dueProbe = await listDuePublications(deps.executor, { nowMs, limit: scanLimit });
+        let albumDue = false;
+        for (const row of dueProbe) {
+          const document = await deps.executor.first<{ readonly document_json: string }>({
+            sql: `SELECT document_json FROM drafts WHERE id = ?`,
+            params: [row.draft_id],
+          });
+          if (document && discriminateAlbumDocument(document.document_json) === 'album') {
+            albumDue = true;
+            break;
+          }
+        }
+        if (albumDue) {
+          deps.logger.error('publication_scheduler.misconfigured', {
+            reason: 'media_transport_absent',
+          });
+          return {
+            scannedAtMs: nowMs,
+            gateEnabled: true,
+            decisionOnly: false,
+            misconfigured: 'media_transport_absent',
+            dueCount: await countDuePublications(deps.executor, { nowMs }),
+            processed: 0,
+            reclaimed: 0,
+            uncertaintyHealed: 0,
+            details: [],
+          };
+        }
       }
 
       // Phase A: the evidence reconciliation — runs in BOTH modes: the heal

@@ -66,6 +66,7 @@ import {
   type AlbumContentDocumentV1,
 } from '../../domain/media/album-content';
 import { RICH_TEXT_LIMITS, type RichTextEnvelope } from '../../domain/telegram/rich-text-envelope';
+import { deriveAlbumSendIdentityKey } from '../../domain/media/album-send-plan';
 import type {
   MediaFetchPort,
   MediaGroupItemWireV1,
@@ -76,7 +77,6 @@ import type {
   MediaUploadRightsPort,
 } from '../../domain/media/media-ports';
 import type { IdGenerator } from '../../shared/ids/id';
-import { sha256Hex } from '../../shared/ids/idempotency-key';
 
 const RETENTION_MS = R2_TEMPORARY_POLICY_V1.retentionHours * 60 * 60 * 1000;
 
@@ -232,23 +232,30 @@ function validateDestination(chatId: string): boolean {
 }
 
 /**
- * THE VERSIONED SEND IDENTITY (the A4 wiring scaffold): the deterministic
- * sha256 over the destination + every plan item's identity + the caption —
- * the key the outbox wiring claims before any send (ADR-0060 carry; the
- * derivation is available NOW, the durable claim is the wiring slice).
+ * THE VERSIONED SEND IDENTITY — now the SHARED derivation (ADR-0060): the
+ * upload path and the outbox send path call the ONE function in
+ * `src/domain/media/album-send-plan.ts` (byte-identical by construction —
+ * the same 'album-send:v1' tag, the same delimited serialization). The
+ * local adapter maps the upload-path input shape onto the shared one; on
+ * the validated upload path (the plan and destination gated BEFORE this
+ * point) the shared derivation's refusal is unreachable, so a refusal is
+ * the loud internal error it would honestly be.
  */
-async function deriveAlbumSendIdentityKey(input: {
+async function mapAlbumSendIdentityKey(input: {
   readonly chatId: string;
   readonly plan: MediaAlbumPlanV1;
   readonly caption?: RichTextEnvelope;
 }): Promise<string> {
-  const parts = [
-    'album-send:v1',
-    input.chatId,
-    ...input.plan.items.map((item) => `${item.candidate.kind}:${item.candidate.canonicalUrl}`),
-    input.caption?.text ?? '',
-  ];
-  return sha256Hex(parts.join('\u001f'));
+  const derived = await deriveAlbumSendIdentityKey({
+    destination: input.chatId,
+    items: input.plan.items.map((item) => ({
+      kind: item.candidate.kind,
+      canonicalUrl: item.candidate.canonicalUrl,
+    })),
+    captionText: input.caption?.text ?? null,
+  });
+  if (!derived.ok) throw new Error('album_send_identity_derivation_refused');
+  return derived.key;
 }
 
 export async function uploadAlbumMediaGroup(
@@ -560,7 +567,7 @@ export async function uploadAlbumMediaGroup(
   return {
     ok: true,
     fileIds: finalFileIds as readonly string[],
-    sendIdentityKey: await deriveAlbumSendIdentityKey({
+    sendIdentityKey: await mapAlbumSendIdentityKey({
       chatId: input.chatId,
       plan,
       caption: input.caption,
