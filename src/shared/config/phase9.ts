@@ -22,6 +22,7 @@ import { defineConfigSpec, type ConfigSpec } from './spec';
 import { validateConfig, type ConfigValidationResult } from './validate';
 
 export const ADMIN_REVIEW_FLAG_VALUES = ['true', 'false'] as const;
+export const ADMIN_QUEUE_FLAG_VALUES = ['true', 'false'] as const;
 
 export const PHASE_9A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
   {
@@ -35,11 +36,24 @@ export const PHASE_9A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
       'Read-only admin review surface gate (non-secret; ADR-0046). Gates the /drafts list/detail Telegram commands and their help advertisement only — fail-closed default false; never enables AI, editorial generation, ingestion, the relation step, or any write path.',
     phase: 9,
   },
+  {
+    name: 'ADMIN_QUEUE_ENABLED',
+    type: 'enum',
+    required: false,
+    secret: false,
+    allowed: [...ADMIN_QUEUE_FLAG_VALUES],
+    default: 'false',
+    description:
+      'Read-only publication-queue surface gate (non-secret; Phase 9A). Gates the /queue Telegram command and its help advertisement only — fail-closed default false; observation-only (two bounded SELECTs, zero writes); never enables the scheduler send path or any other behavior.',
+    phase: 9,
+  },
 ]);
 
 /** Validated Phase 9A flag state (values only; no secrets involved). */
 export interface AdminReviewConfig {
   readonly reviewEnabled: boolean;
+  /** Phase 9A: the read-only /queue surface gate (independent; default OFF). */
+  readonly queueEnabled: boolean;
 }
 
 /**
@@ -60,6 +74,7 @@ export function parseAdminReviewConfig(env: Readonly<Record<string, unknown>>): 
   return {
     config: {
       reviewEnabled: result.ok === true && result.config.ADMIN_REVIEW_ENABLED === 'true',
+      queueEnabled: result.ok === true && result.config.ADMIN_QUEUE_ENABLED === 'true',
     },
     result,
   };

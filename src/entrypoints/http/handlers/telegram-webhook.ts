@@ -58,6 +58,7 @@ import {
 import type { WorkerEnv } from '../../../shared/types/env';
 import { createTelegramIngress } from '../../../application/telegram-ingress';
 import { createEditorialReviewService } from '../../../application/editorial/draft-review-view';
+import { createAdminQueueViewService } from '../../../application/publishing/queue-view-service';
 import { createAdminPostService } from '../../../application/admin-post/admin-post-service';
 import { createAuthorizationService } from '../../../admin/authorization';
 import { createCommandRouter } from '../../../admin/command-router';
@@ -236,6 +237,9 @@ export async function handleTelegramWebhook(
     }
   }
   const reviewEnabled = review.config.reviewEnabled;
+  // Phase 9A: the read-only queue gate is parsed by the SAME fail-closed
+  // phase9 config (independent flag; default false).
+  const queueEnabled = review.config.queueEnabled;
 
   // R1.20-R: the admin post pipeline gates are parsed fail-closed —
   // absent/false AND any invalid-present value both DISABLE (the invalid
@@ -285,10 +289,26 @@ export async function handleTelegramWebhook(
       // R1.22 Phase A: the editorial→post bridge gate (fail-closed, default
       // false) — gates ONLY the /post_from_draft conversion command.
       editorialToPostEnabled: adminPostFlags.config.editorialToPostEnabled,
+      // Phase 9A: the read-only /queue gate (fail-closed, default false) —
+      // gates ONLY that observation command.
+      queueEnabled,
     }),
     // R1.18: the read-only review service is wired ONLY while the gate is
     // ON — the SAME production factory the offline demo shares.
     editorialReview: reviewEnabled ? createEditorialReviewService({ executor }) : undefined,
+    // Phase 9A: the queue view service is wired ONLY while the gate is ON;
+    // the send-gate note on the screen reads the parsed scheduler gate so
+    // the observation NEVER pretends a live scheduler exists.
+    adminQueueView: queueEnabled
+      ? createAdminQueueViewService({
+          executor,
+          // NO scheduler send-gate config exists yet (the LIVE scheduler
+          // wiring is BLOCKED_LIVE — ADR-0058): the screen reads the honest
+          // constant false — decision-only observation, never a pretend
+          // live scheduler.
+          sendGateEnabled: false,
+        })
+      : undefined,
     // R1.20-R: the admin post service is wired ONLY while its gate is ON;
     // R1.20-R1: the transport is the SAME real Bot API client instance built
     // above (direct-entity send), and the destination is the

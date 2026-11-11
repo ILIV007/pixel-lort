@@ -41,6 +41,8 @@ import type { DbExecutor } from './db-executor';
 import { AppError, isAppError } from '../../shared/errors/app-error';
 import { derivePublicationIdempotencyKey } from '../../domain/publishing/publication-identity';
 import {
+  isPublicationStatus,
+  PUBLICATION_STATUSES,
   publicationMaxAttempts,
   transitionPublication,
   type PublicationStatus,
@@ -771,4 +773,89 @@ export async function listRecentPublishedHistory(
     layout: row.layout,
     contentType: row.content_type,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9 read-only queue views (the /queue admin surface — ADR-0046 shape)
+// ---------------------------------------------------------------------------
+
+export type PublicationStatusCounts = Readonly<Record<PublicationStatus, number>>;
+
+/**
+ * The bounded status histogram over the publications outbox — ONE
+ * aggregate SELECT, zero content reads. The /queue screen's summary line.
+ */
+export async function countPublicationsByStatus(
+  executor: DbExecutor,
+): Promise<PublicationStatusCounts> {
+  const counts = Object.fromEntries(PUBLICATION_STATUSES.map((status) => [status, 0])) as Record<
+    PublicationStatus,
+    number
+  >;
+  const rows = await executor.query<{ readonly status: string; readonly total: number }>({
+    sql: `SELECT status, COUNT(*) AS total FROM publications GROUP BY status`,
+    params: [],
+  });
+  for (const row of rows.rows) {
+    if (isPublicationStatus(row.status) && Number.isInteger(row.total) && row.total >= 0) {
+      counts[row.status] = row.total;
+    }
+  }
+  return counts;
+}
+
+export interface PublicationQueueRow {
+  readonly id: string;
+  readonly status: PublicationStatus;
+  readonly priority: number;
+  readonly attempts: number;
+  readonly maxAttempts: number;
+  /** The classifier's stable code (never raw provider content). */
+  readonly lastError: string | null;
+  readonly updatedAt: number;
+}
+
+/**
+ * The bounded most-recent rows of the outbox (oldest-updated LAST order,
+ * capped) — identity/status/priority/attempt counters and the stable
+ * last_error code only. NEVER draft content, never destination values.
+ */
+export async function listRecentPublications(
+  executor: DbExecutor,
+  input: { readonly limit: number },
+): Promise<readonly PublicationQueueRow[]> {
+  const limit = Math.max(1, Math.min(16, Math.floor(input.limit)));
+  const rows = await executor.query<{
+    readonly id: string;
+    readonly status: string;
+    readonly priority: number;
+    readonly attempts: number;
+    readonly max_attempts: number;
+    readonly last_error: string | null;
+    readonly updated_at: number;
+  }>({
+    sql: `SELECT id, status, priority, attempts, max_attempts, last_error, updated_at
+          FROM publications ORDER BY updated_at DESC LIMIT ?`,
+    params: [limit],
+  });
+  return rows.rows
+    .filter(
+      (row) =>
+        typeof row.id === 'string' &&
+        row.id.length > 0 &&
+        isPublicationStatus(row.status) &&
+        Number.isInteger(row.priority) &&
+        Number.isInteger(row.attempts) &&
+        Number.isInteger(row.max_attempts) &&
+        Number.isInteger(row.updated_at),
+    )
+    .map((row) => ({
+      id: row.id,
+      status: row.status as PublicationStatus,
+      priority: row.priority,
+      attempts: row.attempts,
+      maxAttempts: row.max_attempts,
+      lastError: row.last_error,
+      updatedAt: row.updated_at,
+    }));
 }

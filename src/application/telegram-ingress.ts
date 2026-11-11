@@ -126,6 +126,7 @@ import { AppError, toAppError, type AppErrorCode } from '../shared/errors/app-er
 import type { Clock } from '../shared/time/clock';
 import type { Logger } from '../observability/logger';
 import type { EditorialReviewService } from './editorial/draft-review-view';
+import type { AdminQueueViewService } from './publishing/queue-view-service';
 import type { AdminPostButtons, AdminPostService } from './admin-post/admin-post-service';
 import type { PostContentDocument } from '../domain/admin-post/post-content';
 
@@ -197,6 +198,14 @@ export interface TelegramIngressDeps {
    */
   readonly editorialReview?: EditorialReviewService;
   /**
+   * Phase 9A: the injected read-only publication-queue view service that
+   * executes the typed `queue_view` action the router emits while the
+   * `ADMIN_QUEUE_ENABLED` gate is ON. The router NEVER queries D1; when
+   * the service is absent the action fails retryably (honest
+   * service_unavailable — never silently skipped).
+   */
+  readonly adminQueueView?: AdminQueueViewService;
+  /**
    * R1.20-R: the injected admin post pipeline service that executes the
    * typed `admin_post_*` actions the router emits while the
    * `ADMIN_POST_ENABLED` gate is ON. Absent = retryable wiring failure,
@@ -227,6 +236,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     commandRouter,
     botApi,
     editorialReview,
+    adminQueueView,
     adminPost,
     clock,
     logger,
@@ -474,6 +484,18 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         }
         const view = await editorialReview.draftsDetail(action.draftId, action.uiLanguage);
         await sendSafely(action.chatId, view, 'drafts_detail');
+        return;
+      }
+      case 'queue_view': {
+        // Phase 9A read-only queue: the reads happen in the injected
+        // service; a missing service is a retryable wiring failure, never
+        // a silent skip and never a fabricated empty reply.
+        if (adminQueueView === undefined) {
+          logger.warn('telegram.action.queue_unavailable', { action: action.type });
+          throw new AppError('service_unavailable');
+        }
+        const view = await adminQueueView.queueView(action.uiLanguage);
+        await sendSafely(action.chatId, view, 'queue_view');
         return;
       }
       case 'set_admin_ui_language': {

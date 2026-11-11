@@ -227,6 +227,7 @@ export interface WorkerEnv {
    * the relation step, the Telegram ingress itself, or any write path.
    */
   readonly ADMIN_REVIEW_ENABLED?: string;
+  readonly ADMIN_QUEUE_ENABLED?: string;
   /**
    * NON-SECRET admin post pipeline gate ('true' | 'false'; default 'false';
    * R1.20-R). INDEPENDENT fail-closed flag for the authorized admin post

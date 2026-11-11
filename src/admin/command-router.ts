@@ -62,6 +62,8 @@ import {
 import { roleHasPermission } from './roles';
 import { parseDraftsArgument, type DraftsArgumentParse } from './review-command';
 import { ADMIN_REVIEW_STRINGS, REVIEW_COMMAND } from './review-strings';
+import { ADMIN_QUEUE_STRINGS, QUEUE_COMMAND } from './queue-strings';
+import { parseQueueArgument } from './queue-command';
 import type {
   ParsedMediaAttachment,
   ParsedRichTextExtraction,
@@ -110,6 +112,8 @@ export type NoopReason =
   | 'language_missing_ordering_metadata'
   | 'review_not_private_chat'
   | 'review_edited_message'
+  | 'queue_not_private_chat'
+  | 'queue_edited_message'
   | 'post_not_private_chat'
   | 'post_edited_message';
 
@@ -150,6 +154,17 @@ export type TelegramAction =
       readonly type: 'drafts_detail';
       readonly chatId: number;
       readonly draftId: string;
+      readonly uiLanguage: AdminUiLanguage;
+    }
+  | {
+      /**
+       * Phase 9A read-only queue: show the bounded publication-outbox
+       * status view (the histogram + the capped recent list). Executed by
+       * the ingress through the injected queue-view service — the router
+       * NEVER queries D1.
+       */
+      readonly type: 'queue_view';
+      readonly chatId: number;
       readonly uiLanguage: AdminUiLanguage;
     }
   | {
@@ -323,6 +338,15 @@ export interface CommandRouteContext {
    * widens capture, preview, approval, or any send behavior.
    */
   readonly editorialToPostEnabled?: boolean;
+  /**
+   * Phase 9A: whether the READ-ONLY publication-queue surface is enabled
+   * (the `ADMIN_QUEUE_ENABLED` fail-closed flag, parsed by the caller).
+   * Default/absent = DISABLED: `/queue` keeps the exact unknown-command
+   * noop semantics and /help never advertises it. It gates ONLY that
+   * command — it never widens any send behavior (the screen is
+   * observation-only and carries the honest gate note).
+   */
+  readonly queueEnabled?: boolean;
 }
 
 export interface CommandRouter {
@@ -398,7 +422,11 @@ function startResponse(ui: AdminUiLanguage): TelegramSafeHtml {
   ]);
 }
 
-function helpResponse(ui: AdminUiLanguage, draftsLine: string | null): TelegramSafeHtml {
+function helpResponse(
+  ui: AdminUiLanguage,
+  draftsLine: string | null,
+  queueLine: string | null,
+): TelegramSafeHtml {
   const s = ADMIN_UI_STRINGS[ui];
   return composeTelegramHtml([
     telegramBold(s.helpTitle),
@@ -410,6 +438,7 @@ function helpResponse(ui: AdminUiLanguage, draftsLine: string | null): TelegramS
     // R1.18: advertised ONLY when the review gate is ON and the actor's
     // role holds `draft.view` (the caller passes null otherwise).
     ...(draftsLine !== null ? [escapeTelegramHtml(draftsLine)] : []),
+    ...(queueLine !== null ? [escapeTelegramHtml(queueLine)] : []),
   ]);
 }
 
@@ -449,17 +478,20 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
   // R1.22 Phase A: the editorial→post bridge gate is fail-closed —
   // absent/false both DISABLE the /post_from_draft command only.
   const editorialToPostEnabled = context.editorialToPostEnabled === true;
+  // Phase 9A: the queue gate is fail-closed — absent/false both DISABLE.
+  const queueEnabled = context.queueEnabled === true;
 
   function respond(
     command: InitialAdminCommand,
     ui: AdminUiLanguage,
     draftsHelpLine: string | null = null,
+    queueHelpLine: string | null = null,
   ): TelegramSafeHtml {
     switch (command) {
       case 'start':
         return startResponse(ui);
       case 'help':
-        return helpResponse(ui, draftsHelpLine);
+        return helpResponse(ui, draftsHelpLine, queueHelpLine);
       case 'status':
         return statusResponse(ui, applicationVersion);
       case 'version':
@@ -841,6 +873,57 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
       };
     }
 
+    // ---- Phase 9A read-only queue (`/queue`) ------------------------------
+    // The R1.18 shape: gated by its OWN fail-closed flag; while OFF the
+    // command falls through to the SAME unknown-command noop — zero
+    // feedback and ZERO outbox queries. The router validates the
+    // no-argument grammar and emits the typed action; the reads happen in
+    // the injected queue-view service (TWO bounded SELECTs, ZERO writes).
+    if (command === QUEUE_COMMAND) {
+      if (!queueEnabled) {
+        return { type: 'noop', reason: 'command_not_allowlisted' };
+      }
+      if (actor.kind === 'unauthorized') {
+        if (chatId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        return { type: 'denied', chatId, reason: 'unauthorized', text: denialText() };
+      }
+      const queueUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
+      if (!roleHasPermission(actor.role, 'publication.view')) {
+        if (chatId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        return {
+          type: 'denied',
+          chatId,
+          reason: 'insufficient_permission',
+          text: escapeTelegramHtml(ADMIN_QUEUE_STRINGS[queueUi].permissionDenied),
+        };
+      }
+      if (update.chatType !== 'private') {
+        return { type: 'noop', reason: 'queue_not_private_chat' };
+      }
+      if (update.kind !== 'message') {
+        return { type: 'noop', reason: 'queue_edited_message' };
+      }
+      if (chatId === undefined) {
+        return { type: 'noop', reason: 'unroutable_message' };
+      }
+      const remainder = commandRemainder(update.text);
+      const parsedQueueArgument = parseQueueArgument(
+        remainder.kind === 'remainder' ? remainder.text : undefined,
+      );
+      if (parsedQueueArgument.kind === 'list') {
+        return { type: 'queue_view', chatId, uiLanguage: queueUi };
+      }
+      return {
+        type: 'send_message',
+        chatId,
+        text: escapeTelegramHtml(ADMIN_QUEUE_STRINGS[queueUi].invalidUsage),
+      };
+    }
+
     if (!isInitialAdminCommand(command)) {
       // Ignored for every sender — no feedback for command probing.
       return { type: 'noop', reason: 'command_not_allowlisted' };
@@ -866,7 +949,15 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         reviewEnabled && roleHasPermission(actor.role, 'draft.view')
           ? ADMIN_REVIEW_STRINGS[ui].helpDraftsLine
           : null;
-      return { type: 'send_message', chatId, text: respond(command, ui, draftsHelpLine) };
+      const queueHelpLine =
+        queueEnabled && roleHasPermission(actor.role, 'publication.view')
+          ? ADMIN_QUEUE_STRINGS[ui].helpQueueLine
+          : null;
+      return {
+        type: 'send_message',
+        chatId,
+        text: respond(command, ui, draftsHelpLine, queueHelpLine),
+      };
     }
 
     // /language — the whole command (status AND change) is a per-admin

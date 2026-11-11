@@ -18,7 +18,7 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.27.0",
+    "APP_VERSION": "1.28.0",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
@@ -84,6 +84,7 @@
     // editorial queries. It NEVER implies AI/EDITORIAL/ingestion/relation
     // gates, the Telegram ingress itself, or any write path.
     "ADMIN_REVIEW_ENABLED": "false",
+    "ADMIN_QUEUE_ENABLED": "false",
     // R1.20-R admin post pipeline gates (non-secret). FAIL-CLOSED defaults:
     // ADMIN_POST_ENABLED gates the authorized admin post capture/preview/
     // approve/callback surface; ADMIN_POST_LIVE_PUBLISH_ENABLED gates ONLY
@@ -171,7 +172,7 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.27.0",
+        "APP_VERSION": "1.28.0",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",

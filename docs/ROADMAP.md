@@ -1557,6 +1557,26 @@ independent decisions; executing them is NOT part of this round.
       C1 stored conflicts rendered verbatim, distinct from reasons, with
       honest omission/truncation signals; original probes kept verbatim in
       `admin-review-originals.test.ts`.
+- [x] Phase 9A (app 1.28.0, schema still 6 — ZERO DDL): the read-only
+      publication-queue screen (`/queue`) in the EXACT R1.18 shape — the
+      fail-closed `ADMIN_QUEUE_ENABLED` flag (independent, default false,
+      invalid-present = disabled) gating ONLY that command and its /help
+      advertisement; the router stays PURE (the no-argument grammar
+      validated before any query; the typed `queue_view` action), the
+      injected queue-view service performs exactly TWO bounded read-only
+      SELECTs (the TOTAL status histogram over the pol1 vocabulary — a
+      zero is information; the capped recent list of identity/status/
+      priority/attempt-counters/stable-error-codes only — never draft
+      content, never destinations); the honest send-gate note (no wired
+      scheduler gate exists — the screen says decision-only, never a
+      pretend live scheduler); RBAC `publication.view` with the honest
+      role matrix (viewer included; the localized denial; the fixed
+      English denial for unknown actors; private-only; edited noop); ZERO
+      publication writes on the whole flow (asserted on the SQL texts);
+      the wiring failure stays a retryable service_unavailable. 17
+      REAL-D1 tests registered in test:db. Opaque action tokens and the
+      multi-step sessions pre-exist (R1.20-R/R1.21); the story screen and
+      the write-capable queue dispositions remain.
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ⬜

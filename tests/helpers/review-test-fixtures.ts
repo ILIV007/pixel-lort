@@ -3,6 +3,7 @@ import { applyMigrations } from './migrations';
 import { createTelegramIngress } from '../../src/application/telegram-ingress';
 import type { TelegramIngressDeps } from '../../src/application/telegram-ingress';
 import { createEditorialReviewService } from '../../src/application/editorial/draft-review-view';
+import { createAdminQueueViewService } from '../../src/application/publishing/queue-view-service';
 import { createAuthorizationService } from '../../src/admin/authorization';
 import { createCommandRouter } from '../../src/admin/command-router';
 import { createAdminRoleLookup } from '../../src/adapters/telegram/admin-lookup';
@@ -113,8 +114,12 @@ export function captureLogger() {
 export interface ReviewHarnessOptions {
   /** Override the ADMIN_REVIEW_ENABLED parsing result (default: enabled). */
   readonly reviewEnabled?: boolean;
+  /** Override the ADMIN_QUEUE_ENABLED parsing result (default: disabled). */
+  readonly queueEnabled?: boolean;
   /** Omit the editorial review service (wiring-failure tests). */
   readonly omitReviewService?: boolean;
+  /** Omit the queue view service (wiring-failure tests). */
+  readonly omitQueueService?: boolean;
   readonly botApi?: TelegramBotApiClient;
   readonly executor?: CountingExecutor;
 }
@@ -149,10 +154,14 @@ export function buildReviewHarness(options: ReviewHarnessOptions = {}): ReviewHa
     commandRouter: createCommandRouter({
       applicationVersion: APPLICATION_VERSION,
       reviewEnabled,
+      queueEnabled: options.queueEnabled ?? false,
     }),
     ...(options.omitReviewService
       ? {}
       : { editorialReview: createEditorialReviewService({ executor }) }),
+    ...(options.queueEnabled === true && !options.omitQueueService
+      ? { adminQueueView: createAdminQueueViewService({ executor, sendGateEnabled: false }) }
+      : {}),
     botApi: client,
     clock: fixedClock(NOW),
     logger,
@@ -254,6 +263,8 @@ export async function freshDb(): Promise<void> {
   await executor.run({ sql: 'DELETE FROM settings' });
   await executor.run({ sql: 'DELETE FROM admins' });
   await executor.run({ sql: 'DELETE FROM draft_revisions' });
+  await executor.run({ sql: 'DELETE FROM publication_messages' });
+  await executor.run({ sql: 'DELETE FROM publications' });
   await executor.run({ sql: 'DELETE FROM drafts' });
   await executor.run({ sql: 'DELETE FROM stories' });
   await executor.run({ sql: 'DELETE FROM source_items' });
