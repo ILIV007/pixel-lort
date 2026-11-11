@@ -1438,6 +1438,33 @@ independent decisions; executing them is NOT part of this round.
       exists; the audit_events per-outcome integration is deferred to a
       dedicated slice; edit/correction (Phase 8.4's supersede consumption)
       and the carried album-post pipeline integration remain.
+- [x] Phase 8.4 (ADR-0059; app 1.26.0, schema still 6 — ZERO DDL): the
+      EDIT/CORRECTION workflows — the roadmap bullet «Edit/correction
+      workflows» consuming the blueprint §15 scenarios as the PURE ecl1
+      decision layer (the five correction classes × materiality × edit
+      reachability × denial follow-up desire over the pinned 48h EDIT REACH
+      WINDOW; TOTAL, deterministic, JSON-equal), the machine-legal
+      supersede over exactly pending/retry_wait/published/failed (pol1
+      authority — the reserved transition CONSUMED), the DRAFT supersede as
+      the crash-safe route for in-flight rows (the 8.2 scheduler's own
+      eligibility check dead-letters without a send — the queued-on-supersede
+      behavior proven by test), the deterministic caid1 audit id claimed
+      BEFORE the transport (the blueprint §7 «revision ID + target message
+      ID unique in audit» by construction, NO new table) with the
+      compare-and-set outcome finalization, the sop1 classification reused
+      for edits (429 recorded retryable with NO auto-retry; timeout/5xx/
+      unknown recorded uncertain, never re-applied), and the house gate
+      pattern (OFF = decision-only zero writes; ON without transport = the
+      LOUD refusal; an edit disposition without payloads = the typed
+      edits_absent refusal). RED-first held (2 suites written FIRST, real
+      RED: 2 files cannot-resolve-module) then 55/55 GREEN (30 unit + 25
+      REAL-D1 registered in test:db); the FIVE in-round findings recorded in
+      docs/reviews/PHASE_8_4_EDIT_CORRECTION_DESIGN.md §2. HONEST CARRY:
+      the correction CONTENT rendering (label prepend, version binding) is
+      an editorial-domain slice; the whole-story sweep reports other active
+      priors for a later orchestration slice; the LIVE wiring stays
+      BLOCKED_LIVE (Posidon only). «Failed-publication idempotency» was
+      delivered by Phase 8.2 (pidek1 + the ledger).
 - [x] R1.19 (ADR-0047; app 1.14.0 candidate, schema still 3): the Telegram
       rich-text FOUNDATION — dependency-pulled for future editorial input and
       Phase 8/9 publishing, NOT a completion of either phase. Bounded typed
@@ -1476,7 +1503,9 @@ independent decisions; executing them is NOT part of this round.
       d175b53 → GREEN 4/4); F1 was already green and is retained. NO new
       capability, endpoint, engine, media workflow or DDL; no live sending.
 - [ ] Tehran-window scheduling, anti-robot rules, priority classes.
-- [ ] Edit/correction workflows; failed-publication idempotency.
+- [x] Edit/correction workflows; failed-publication idempotency. (8.4:
+      the ecl1 workflows — ADR-0059; failed-publication idempotency: 8.2's
+      pidek1 + the at-most-once ledger.)
 - [ ] GATE (ADR-0032): publishing-side duplicate mitigation and
       reconciliation (outbox-style per-publication/per-message
       reconciliation over `publications` / `publication_messages`) MUST be
