@@ -202,6 +202,31 @@ export function readMediaAssetRecordV1(
   };
 }
 
+/**
+ * THE PUBLICATION RIGHTS GATE (the independent review d65d811, P1-3 fix):
+ * the durable rights echo a CHANNEL PUBLICATION may ride. mrp1's allow is
+ * STRICTLY SCOPED to `r2_temporary_only` — a staging-time clearance never
+ * granted a publish — so the send-time gate consumes THIS affirmative
+ * allowlist against the asset's DURABLE echo, re-read from the ledger at
+ * the moment of use and publication:
+ *  - `blocked` = a recorded REVOCATION — never passes;
+ *  - `unknown` = no affirmative clearance was ever recorded — never passes
+ *    (the source being "official" alone is not a republish license; the
+ *    honest echo distinguishes official / licensed / attribution_required
+ *    and this gate accepts exactly those);
+ *  - anything outside the vocabulary fails closed with the rest.
+ */
+export const PUBLICATION_MEDIA_RIGHTS_V1: readonly MediaRightsStatusV1[] = [
+  'official',
+  'licensed',
+  'attribution_required',
+] as const;
+
+/** The typed send-time verdict over ONE asset's durable rights echo. */
+export function isPublishableRightsStatus(rightsStatus: MediaRightsStatusV1): boolean {
+  return (PUBLICATION_MEDIA_RIGHTS_V1 as readonly string[]).includes(rightsStatus);
+}
+
 export type ReuseResolutionV1 =
   /** An UPLOADED asset already holds this media: reuse the file_id, stage NOTHING. */
   | {
@@ -231,14 +256,17 @@ export interface ReuseResolvableItem {
  *
  * THE 7.4 A1 GUARDS: a row is reusable ONLY when its durable state still
  * supports it — `status === 'uploaded'` (a blocked/failed/candidate row
- * holds no trusted file_id), a NON-blocked rightsStatus (a rights-revoked
- * asset is never re-sent), and — when the caller names a kind — the SAME
+ * holds no trusted file_id), an AFFIRMATIVE rights clearance
+ * (PUBLICATION_MEDIA_RIGHTS_V1 — a `blocked` revocation and an `unknown`
+ * never-cleared state are never re-sent; the independent review d65d811
+ * P1-3 fix: the old predicate rejected only `blocked`, so an `unknown`
+ * echo rode back into use), and — when the caller names a kind — the SAME
  * type (a video slot cannot ride a photo's id).
  */
 function isReusableRow(row: MediaAssetRecordV1, item: ReuseResolvableItem): boolean {
   if (row.telegramFileId === undefined) return false;
   if (row.status !== 'uploaded') return false;
-  if (row.rightsStatus === 'blocked') return false;
+  if (!isPublishableRightsStatus(row.rightsStatus)) return false;
   if (item.kind !== undefined && row.type !== item.kind) return false;
   return true;
 }

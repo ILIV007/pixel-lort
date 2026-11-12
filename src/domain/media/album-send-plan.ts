@@ -251,3 +251,110 @@ export async function deriveAlbumSendPlan(input: {
   };
   return { ok: true, plan };
 }
+
+// ---------------------------------------------------------------------------
+// THE DELIVERY-EVIDENCE COMPLETENESS PROOF (the independent review d65d811,
+// P1-2 fix): ONE recorded witness proves AT LEAST ONE message was delivered
+// — never that the WHOLE album was. The healable proof is the COMPLETE set.
+// ---------------------------------------------------------------------------
+
+/** The ledger's per-ordinal delivery view the evaluator consumes. */
+export interface AlbumDeliveryMessageViewV1 {
+  readonly ordinal: number;
+  readonly chatId: string;
+}
+
+export type AlbumDeliveryEvidenceVerdict =
+  | { readonly kind: 'complete' }
+  | {
+      readonly kind: 'incomplete';
+      /**
+       * `foreign_destination` — a record points at a different destination;
+       * `missing_ordinals` — the recorded ordinal set does not cover the
+       * plan exactly; `unbound_usages` — every ordinal is proven but the
+       * media_usages binding is not complete yet (the heal reconciles it).
+       */
+      readonly reason: 'foreign_destination' | 'missing_ordinals' | 'unbound_usages';
+      /** The missing plan ordinals (empty for the non-ordinal reasons). */
+      readonly missingOrdinals: readonly number[];
+    };
+
+const MAX_EXPECTED_ORDINALS = 10; // the Bot API media-group bound (2..10)
+
+/**
+ * The TOTAL, deterministic completeness verdict over ONE album
+ * publication's delivery evidence:
+ *  1. every recorded message must point at the CONFIGURED destination (a
+ *     record to another chat is not this publication's proof);
+ *  2. the recorded ordinal set must be EXACTLY {0..n-1} over the plan's
+ *     item count — the count AND the set, not merely a non-empty ledger;
+ *  3. the bound media_usages must cover the same set (the honest durable
+ *     reconciliation the review demands).
+ * An out-of-range expectation (0 or beyond the media-group bound) proves
+ * nothing: incomplete with every ordinal missing. Pure: no I/O, no clock.
+ */
+export function evaluateAlbumDeliveryEvidence(input: {
+  readonly expectedOrdinals: number;
+  readonly destination: string;
+  readonly messages: readonly AlbumDeliveryMessageViewV1[];
+  readonly boundUsageOrdinals: readonly number[];
+}): AlbumDeliveryEvidenceVerdict {
+  const inputValid =
+    typeof input === 'object' &&
+    input !== null &&
+    Number.isInteger(input.expectedOrdinals) &&
+    input.expectedOrdinals >= 1 &&
+    input.expectedOrdinals <= MAX_EXPECTED_ORDINALS &&
+    typeof input.destination === 'string' &&
+    input.destination.length > 0 &&
+    Array.isArray(input.messages) &&
+    Array.isArray(input.boundUsageOrdinals);
+  if (!inputValid) {
+    // An unusable expectation can never be verified: prove nothing (the
+    // caller treats the evidence as incomplete — never as a proof).
+    return { kind: 'incomplete', reason: 'missing_ordinals', missingOrdinals: [] };
+  }
+  const expected = input.expectedOrdinals;
+  const allOrdinals = Array.from({ length: expected }, (_unused, ordinal) => ordinal);
+
+  const foreign = input.messages.some(
+    (message) =>
+      message === null ||
+      typeof message !== 'object' ||
+      typeof message.chatId !== 'string' ||
+      message.chatId !== input.destination,
+  );
+  if (foreign) {
+    return { kind: 'incomplete', reason: 'foreign_destination', missingOrdinals: [] };
+  }
+
+  const recorded = new Set<number>();
+  for (const message of input.messages) {
+    if (
+      message === null ||
+      typeof message !== 'object' ||
+      !Number.isInteger(message.ordinal) ||
+      (message.ordinal as number) < 0 ||
+      (message.ordinal as number) >= expected
+    ) {
+      continue;
+    }
+    recorded.add(message.ordinal);
+  }
+  const missingOrdinals = allOrdinals.filter((ordinal) => !recorded.has(ordinal));
+  if (missingOrdinals.length > 0) {
+    return { kind: 'incomplete', reason: 'missing_ordinals', missingOrdinals };
+  }
+
+  const bound = new Set<number>();
+  for (const ordinal of input.boundUsageOrdinals) {
+    if (Number.isInteger(ordinal) && (ordinal as number) >= 0 && (ordinal as number) < expected) {
+      bound.add(ordinal);
+    }
+  }
+  const unbound = allOrdinals.filter((ordinal) => !bound.has(ordinal));
+  if (unbound.length > 0) {
+    return { kind: 'incomplete', reason: 'unbound_usages', missingOrdinals: [] };
+  }
+  return { kind: 'complete' };
+}

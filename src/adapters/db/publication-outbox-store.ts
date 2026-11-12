@@ -400,6 +400,48 @@ export async function claimPublication(
 export type FencedWriteOutcome = { readonly kind: 'written' } | { readonly kind: 'fence_rejected' };
 
 /**
+ * The fenced terminal write shared by the SEND-PATH exits. The send starts
+ * in 'claimed' and crosses into 'publishing' at the send-started marker
+ * (the independent review d65d811 P1-1 fix), so a generation's terminal
+ * must fence over BOTH source statuses. The machine is consulted for BOTH:
+ * a (from, reason) pair the machine rejects — or two rows that disagree on
+ * the target — is a bug: it throws typed and nothing is written.
+ */
+async function writeClaimedTerminal(
+  executor: DbExecutor,
+  input: {
+    readonly publicationId: string;
+    readonly generation: number;
+    readonly reason: 'publish' | 'fail_hold' | 'mark_uncertain' | 'schedule_retry' | 'dead_letter';
+    readonly errorCode?: string;
+    readonly runAfterMs?: number;
+    readonly nowMs: number;
+  },
+): Promise<FencedWriteOutcome> {
+  const machineClaimed = transitionPublication('claimed', input.reason);
+  const machinePublishing = transitionPublication('publishing', input.reason);
+  if (!machineClaimed.ok || !machinePublishing.ok || machineClaimed.to !== machinePublishing.to) {
+    throw new AppError('internal_error');
+  }
+  const meta = await executor.run({
+    sql: `UPDATE publications
+            SET status = ?, lease_until = NULL, claimed_at = NULL, published_at = ?, last_error = ?,
+                run_after = ?, updated_at = ?
+          WHERE id = ? AND status IN ('claimed', 'publishing') AND attempts = ?`,
+    params: [
+      machineClaimed.to,
+      input.reason === 'publish' ? input.nowMs : null,
+      clampErrorCode(input.errorCode),
+      input.runAfterMs ?? 0,
+      input.nowMs,
+      input.publicationId,
+      input.generation,
+    ],
+  });
+  return meta.changes === 1 ? { kind: 'written' } : { kind: 'fence_rejected' };
+}
+
+/**
  * The policy-defer release: claimed -> pending with the attempt generation
  * RESTORED (no send was attempted — no attempt was consumed) and the
  * durable deferral recorded (run_after, and scheduled_at only when a time
@@ -415,6 +457,10 @@ export async function releaseClaimed(
     readonly nowMs: number;
   },
 ): Promise<FencedWriteOutcome> {
+  const machine = transitionPublication('claimed', 'release');
+  if (!machine.ok) {
+    throw new AppError('internal_error');
+  }
   const meta = await executor.run({
     sql: `UPDATE publications
             SET status = 'pending', attempts = attempts - 1, lease_until = NULL, claimed_at = NULL,
@@ -431,42 +477,88 @@ export async function releaseClaimed(
   return meta.changes === 1 ? { kind: 'written' } : { kind: 'fence_rejected' };
 }
 
+// ---------------------------------------------------------------------------
+// THE DURABLE SEND-STARTED STATE (the independent review d65d811, P1-1 fix)
+// ---------------------------------------------------------------------------
+
 /**
- * The fenced terminal write shared by the claimed-status exits. The machine
- * is consulted FIRST: a (from, reason) pair the machine rejects is a bug —
- * it throws typed and nothing is written.
+ * The honest parking code for the AMBIGUOUS in-flight window: a generation
+ * marked the send started (the transport MAY have been reached) and its
+ * lease expired without a terminal — the outcome is UNKNOWN, the row is
+ * held for the human dispositions, and a recorded delivery proof still
+ * heals it (Phase A). It is NEVER auto-resent on the absence of a ledger
+ * record.
  */
-async function writeClaimedTerminal(
+export const SEND_MAY_HAVE_STARTED_ERROR = 'send_may_have_started';
+
+export type SendStartOutcome = { readonly kind: 'marked' } | { readonly kind: 'fence_rejected' };
+
+/**
+ * Mark the claimed generation's send STARTED, durably, BEFORE any network
+ * effect: the machine's `mark_send_started` transition (claimed ->
+ * publishing) fenced by the attempts generation, with the lease EXTENDED
+ * to cover the in-flight window (a healthy send is never reclaimed
+ * mid-flight). After this write the row can only exit through the
+ * generation's own fenced terminals — a concurrent scan can neither claim
+ * it ('publishing' is outside the claim WHERE) nor reclaim it while the
+ * extended lease holds. A crash here leaves the row in the ambiguous
+ * window the parking path holds for the human dispositions.
+ */
+export async function markClaimedSendStarted(
   executor: DbExecutor,
   input: {
     readonly publicationId: string;
     readonly generation: number;
-    readonly reason: 'publish' | 'fail_hold' | 'mark_uncertain' | 'schedule_retry' | 'dead_letter';
-    readonly errorCode?: string;
-    readonly runAfterMs?: number;
     readonly nowMs: number;
+    readonly leaseMs: number;
   },
-): Promise<FencedWriteOutcome> {
-  const machine = transitionPublication('claimed', input.reason);
-  if (!machine.ok) {
+): Promise<SendStartOutcome> {
+  const machine = transitionPublication('claimed', 'mark_send_started');
+  if (!machine.ok || machine.to !== 'publishing') {
+    throw new AppError('internal_error');
+  }
+  const leaseMs = Number.isInteger(input.leaseMs) && input.leaseMs > 0 ? input.leaseMs : 0;
+  if (leaseMs === 0) {
+    throw new AppError('bad_request');
+  }
+  const meta = await executor.run({
+    sql: `UPDATE publications
+            SET status = 'publishing', lease_until = ?, updated_at = ?
+          WHERE id = ? AND status = 'claimed' AND attempts = ?`,
+    params: [input.nowMs + leaseMs, input.nowMs, input.publicationId, input.generation],
+  });
+  return meta.changes === 1 ? { kind: 'marked' } : { kind: 'fence_rejected' };
+}
+
+export type PublishParkOutcome = { readonly parked: number };
+
+/**
+ * The ambiguous-window parking: a 'publishing' row whose EXTENDED in-flight
+ * lease expired without a terminal — the generation crashed (or hung) with
+ * the send MAYBE started. The write is the machine's `mark_uncertain`
+ * transition (publishing -> failed, the schema's honest parking state) with
+ * SEND_MAY_HAVE_STARTED_ERROR in last_error; the row is NEVER auto-resent:
+ * Phase A's evidence heal is its only proof-backed exit, otherwise it waits
+ * for the human dispositions. Rows still 'claimed' with an expired lease
+ * are NOT touched here — the send-started marker never landed for them, so
+ * the reclaim's re-send is provably safe (the stale-lease reclaim).
+ */
+export async function parkExpiredPublishingUncertain(
+  executor: DbExecutor,
+  input: { readonly nowMs: number },
+): Promise<PublishParkOutcome> {
+  const machine = transitionPublication('publishing', 'mark_uncertain');
+  if (!machine.ok || machine.to !== 'failed') {
     throw new AppError('internal_error');
   }
   const meta = await executor.run({
     sql: `UPDATE publications
-            SET status = ?, lease_until = NULL, claimed_at = NULL, published_at = ?, last_error = ?,
-                run_after = ?, updated_at = ?
-          WHERE id = ? AND status = 'claimed' AND attempts = ?`,
-    params: [
-      machine.to,
-      input.reason === 'publish' ? input.nowMs : null,
-      clampErrorCode(input.errorCode),
-      input.runAfterMs ?? 0,
-      input.nowMs,
-      input.publicationId,
-      input.generation,
-    ],
+            SET status = 'failed', lease_until = NULL, claimed_at = NULL,
+                last_error = ?, run_after = 0, updated_at = ?
+          WHERE status = 'publishing' AND lease_until IS NOT NULL AND lease_until < ?`,
+    params: [SEND_MAY_HAVE_STARTED_ERROR, input.nowMs, input.nowMs],
   });
-  return meta.changes === 1 ? { kind: 'written' } : { kind: 'fence_rejected' };
+  return { parked: meta.changes };
 }
 
 export async function markClaimedPublished(
@@ -727,6 +819,28 @@ export async function listPublicationMessages(
   const rows = await executor.query<PublicationMessageRow>({
     sql: `SELECT publication_id, chat_id, message_id, media_group_id, ordinal, text_hash, created_at
           FROM publication_messages WHERE publication_id = ? ORDER BY ordinal ASC`,
+    params: [publicationId],
+  });
+  return rows.rows;
+}
+
+/** The bound per-ordinal usage view (the evidence-completeness reconcile). */
+export interface PublicationUsageRow {
+  readonly ordinal: number;
+  readonly media_asset_id: string;
+}
+
+/**
+ * The bounded per-ordinal usage read for ONE publication (the PK covers
+ * publication_id + ordinal). The evidence-completeness evaluator consumes
+ * the ordinals; the ids ride along for the honest heal-time rebinding.
+ */
+export async function listPublicationMediaUsages(
+  executor: DbExecutor,
+  publicationId: string,
+): Promise<readonly PublicationUsageRow[]> {
+  const rows = await executor.query<PublicationUsageRow>({
+    sql: `SELECT ordinal, media_asset_id FROM media_usages WHERE publication_id = ? ORDER BY ordinal ASC`,
     params: [publicationId],
   });
   return rows.rows;

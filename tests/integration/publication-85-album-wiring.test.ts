@@ -388,20 +388,39 @@ describe('publication-85 album wiring: the send path', () => {
 });
 
 describe('publication-85 album wiring: the ADR-0032 gate over albums', () => {
-  it('a recorded delivery heals the album WITHOUT any media send', async () => {
+  it('a COMPLETE delivery proof (every ordinal + usages) heals the album WITHOUT any media send', async () => {
     await insertStory('s1');
     await insertAlbumDraft('d1', 's1', albumDocument(TWO_ITEMS));
     await seedTwoAssetAlbum();
     await enqueueAlbumPublication('pub-1', 'd1');
-    const recorded = await recordPublicationMessage(executor, {
+    // The independent review d65d811 (P1-2) correction: the heal asserts
+    // the COMPLETE delivery — EVERY ordinal recorded to the destination
+    // AND the usages bound. One witness proves one message, never the
+    // album; the old shape-blind heal on a partial witness was the defect
+    // the probe demonstrated (published with messages=1, usages=0).
+    for (const [ordinal, messageId] of [
+      [0, 555],
+      [1, 556],
+    ] as const) {
+      const recorded = await recordPublicationMessage(executor, {
+        publicationId: 'pub-1',
+        chatId: DESTINATION,
+        messageId,
+        textHash: null,
+        nowMs: clock.now(),
+        ordinal,
+      });
+      expect(recorded.kind).toBe('recorded');
+    }
+    const bound = await recordPublicationMediaUsages(executor, {
       publicationId: 'pub-1',
-      chatId: DESTINATION,
-      messageId: 555,
-      textHash: null,
+      usages: [
+        { ordinal: 0, mediaAssetId: 'a1' },
+        { ordinal: 1, mediaAssetId: 'a2' },
+      ],
       nowMs: clock.now(),
-      ordinal: 0,
     });
-    expect(recorded.kind).toBe('recorded');
+    expect(bound.kind).toBe('recorded');
 
     const media = makeMediaTransport();
     const scheduler = buildScheduler({
@@ -417,6 +436,54 @@ describe('publication-85 album wiring: the ADR-0032 gate over albums', () => {
       params: [],
     });
     expect(row?.status).toBe('published');
+  });
+
+  it('a PARTIAL delivery proof (one ordinal of two) parks uncertain — no heal, no send, no re-send', async () => {
+    await insertStory('s1b');
+    await insertAlbumDraft('d1b', 's1b', albumDocument(TWO_ITEMS));
+    await seedTwoAssetAlbum();
+    await enqueueAlbumPublication('pub-1b', 'd1b');
+    // The crashed-mid-album shape: only ordinal 0 was ever recorded.
+    const recorded = await recordPublicationMessage(executor, {
+      publicationId: 'pub-1b',
+      chatId: DESTINATION,
+      messageId: 555,
+      textHash: null,
+      nowMs: clock.now(),
+      ordinal: 0,
+    });
+    expect(recorded.kind).toBe('recorded');
+
+    const media = makeMediaTransport();
+    const scheduler = buildScheduler({
+      transport: makeTextTransport(),
+      mediaTransport: media,
+      gateEnabled: true,
+    });
+    const report = await scheduler.scanDuePublications();
+    expect(report.details[0]!).toMatchObject({
+      publicationId: 'pub-1b',
+      outcome: 'failed_unconfirmed',
+      code: 'album_evidence_incomplete',
+    });
+    expect(media.calls).toHaveLength(0);
+    const row = await executor.first<{ status: string }>({
+      sql: `SELECT status FROM publications WHERE id = 'pub-1b'`,
+      params: [],
+    });
+    expect(row?.status).toBe('failed');
+    // The partial records stay (the evidence heal governs them later):
+    const messages = await listPublicationMessages(executor, 'pub-1b');
+    expect(messages).toHaveLength(1);
+    // And a later scan NEVER auto-resends the partial album:
+    clock.advance(60 * 60_000);
+    const later = await buildScheduler({
+      transport: makeTextTransport(),
+      mediaTransport: media,
+      gateEnabled: true,
+    }).scanDuePublications();
+    expect(media.calls).toHaveLength(0);
+    expect(later.details.map((detail) => detail.publicationId)).not.toContain('pub-1b');
   });
 
   it('an invalid response shape parks uncertain with ZERO ledger records and NEVER auto-resends', async () => {

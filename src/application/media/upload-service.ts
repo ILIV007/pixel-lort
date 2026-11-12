@@ -65,7 +65,11 @@ import {
   createAlbumContentDocument,
   type AlbumContentDocumentV1,
 } from '../../domain/media/album-content';
-import { RICH_TEXT_LIMITS, type RichTextEnvelope } from '../../domain/telegram/rich-text-envelope';
+import {
+  RICH_TEXT_LIMITS,
+  readRichTextEnvelopeValue,
+  type RichTextEnvelope,
+} from '../../domain/telegram/rich-text-envelope';
 import { deriveAlbumSendIdentityKey } from '../../domain/media/album-send-plan';
 import type {
   MediaFetchPort,
@@ -205,15 +209,24 @@ function rightsStatusFor(state: MediaRightsStateV1): MediaAssetRecordV1['rightsS
 }
 
 /**
- * THE PRE-SEND CAPTION GATE (the A4 fix): the caption envelope is
- * validated BEFORE any rights decision, fetch, staging or channel effect —
- * an invalid caption can never reach the transport.
+ * THE PRE-SEND CAPTION GATE (the A4 fix, DEEPENED by the independent
+ * review d65d811 P1-4 fix): the caption envelope is validated BEFORE any
+ * rights decision, fetch, staging or channel effect — an invalid caption
+ * can never reach the transport, and a failed document build can never
+ * follow a successful send (`send_failed`/`sentConfirmed=true` was the
+ * old shape). The validation is the REAL strict reader —
+ * `readRichTextEnvelopeValue` — not a shallow re-implementation: the
+ * schemaVersion gate, the kind, the caption unit cap, the entity types,
+ * metadata discipline, nesting/crossing/duplicate rules and the UTF-16
+ * entity-range contract (an offset beyond the text or splitting a
+ * surrogate pair is typed-invalid) all re-derive here.
  */
 function validateAlbumCaption(caption: RichTextEnvelope | undefined): { ok: true } | { ok: false } {
   if (caption === undefined) return { ok: true };
-  if (typeof caption.text !== 'string') return { ok: false };
-  if (caption.text.length > RICH_TEXT_LIMITS.maxCaptionUnits) return { ok: false };
-  if (!Array.isArray(caption.entities)) return { ok: false };
+  const read = readRichTextEnvelopeValue(caption as unknown);
+  if (!read.ok) return { ok: false };
+  if (read.envelope.kind !== 'caption') return { ok: false };
+  if (read.envelope.text.length > RICH_TEXT_LIMITS.maxCaptionUnits) return { ok: false };
   return { ok: true };
 }
 

@@ -62,14 +62,17 @@ import {
   countDuePublications,
   listDuePublications,
   listFailedPublications,
+  listPublicationMediaUsages,
   listPublicationMessages,
   listRecentPublishedHistory,
   markClaimedDeadLetter,
   markClaimedFailed,
   markClaimedPublished,
   markClaimedRetryWait,
+  markClaimedSendStarted,
   markClaimedUncertain,
   markWaitingPublicationDeadLetter,
+  parkExpiredPublishingUncertain,
   reclaimExpiredClaims,
   healFailedToPublished,
   healClaimedToPublished,
@@ -91,8 +94,14 @@ import { planPublicationTime } from '../../domain/publishing/publication-schedul
 import type { MixCategory } from '../../domain/publishing/anti-robot';
 import { renderEditorialPostText } from '../../domain/admin-post/editorial-post-render';
 import { contentTextHash } from '../../domain/publishing/publication-identity';
-import { discriminateAlbumDocument, deriveAlbumSendPlan } from '../../domain/media/album-send-plan';
+import {
+  discriminateAlbumDocument,
+  deriveAlbumSendPlan,
+  evaluateAlbumDeliveryEvidence,
+  type AlbumSendPlanV1,
+} from '../../domain/media/album-send-plan';
 import type { MediaAssetStore, MediaGroupSendInputV1 } from '../../domain/media/media-ports';
+import { isPublishableRightsStatus } from '../../domain/media/media-usage';
 import { mapContentTypeToMixCategory, scanJitterForCandidate } from './scheduler-policy';
 
 /** The channel transport seam (the ONLY artificial piece in tests). */
@@ -200,6 +209,15 @@ const MAX_LAYOUT_HISTORY = 64;
 const MAX_CATEGORY_HISTORY = 512;
 const MIX_WINDOW_MS = 168 * 3_600_000;
 const PUBLISH_LEASE_MS = 60_000;
+/**
+ * THE IN-FLIGHT SEND LEASE (the independent review d65d811 P1-1 fix): the
+ * lease EXTENSION written durably at the send-started marker — far longer
+ * than any honest Bot API send, so a healthy in-flight send is never
+ * reclaimed mid-flight; a generation that dies inside the window parks in
+ * the ambiguous family after the extension expires (bounded recovery),
+ * never an auto-resend.
+ */
+const SEND_IN_FLIGHT_LEASE_MS = 600_000;
 const MAX_DESTINATION_LENGTH = 256;
 
 export interface ScanDetail {
@@ -237,6 +255,13 @@ export interface SchedulerScanReport {
   readonly dueCount: number;
   readonly processed: number;
   readonly reclaimed: number;
+  /**
+   * The ambiguous in-flight windows parked this scan (the send-started
+   * generations whose extended lease expired without a terminal — the
+   * `send_may_have_started` family; NEVER auto-resent, healed only by
+   * recorded evidence or the human dispositions).
+   */
+  readonly uncertainParked: number;
   readonly uncertaintyHealed: number;
   readonly details: readonly ScanDetail[];
 }
@@ -290,6 +315,141 @@ export function createPublicationScheduler(deps: {
   }
   const scanLimit = Math.max(1, Math.min(64, Math.floor(deps.scanLimit ?? DEFAULT_SCAN_LIMIT)));
 
+  /**
+   * THE LEDGER BINDING + THE SEND-TIME RIGHTS GATE (the ADR-0060 binding,
+   * extended by the independent review d65d811 P1-3 fix): every plan item
+   * must resolve to an UPLOADED ledger asset whose telegram_file_id matches
+   * the document AND whose DURABLE rights echo is an affirmative clearance
+   * (PUBLICATION_MEDIA_RIGHTS_V1). The rights are re-read from the ledger
+   * HERE — at the moment of use and publication: a `blocked` revocation or
+   * a never-cleared `unknown` fails closed BEFORE any transport effect (a
+   * source being "official" was never, by itself, a republish license —
+   * the gate trusts the honest durable echo, never the source's name).
+   */
+  async function resolveAlbumLedgerBindings(plan: AlbumSendPlanV1): Promise<
+    | {
+        readonly ok: true;
+        readonly bindings: readonly { readonly ordinal: number; readonly mediaAssetId: string }[];
+      }
+    | {
+        readonly ok: false;
+        readonly reason: 'ledger_binding_unresolved' | 'media_rights_not_publishable';
+      }
+  > {
+    if (deps.mediaAssets === undefined) {
+      // Unreachable on the gate-ON album path (the LOUD per-shape
+      // misconfiguration check runs before any claim); typed for safety.
+      return { ok: false, reason: 'ledger_binding_unresolved' };
+    }
+    const assets = await deps.mediaAssets.findAssetsByUrls(
+      plan.items.map((item) => item.canonicalUrl),
+    );
+    const bindings: { readonly ordinal: number; readonly mediaAssetId: string }[] = [];
+    for (const item of plan.items) {
+      const match = assets.find(
+        (asset) =>
+          asset.canonicalUrl === item.canonicalUrl &&
+          asset.telegramFileId === item.media &&
+          asset.status === 'uploaded',
+      );
+      if (match === undefined) {
+        return { ok: false, reason: 'ledger_binding_unresolved' };
+      }
+      if (!isPublishableRightsStatus(match.rightsStatus)) {
+        return { ok: false, reason: 'media_rights_not_publishable' };
+      }
+      bindings.push({ ordinal: item.ordinal, mediaAssetId: match.id });
+    }
+    return { ok: true, bindings };
+  }
+
+  /**
+   * The album binding dead-letter shared by the send and evidence paths —
+   * a document the ledger cannot vouch for (or the rights gate refuses)
+   * never reaches a transport.
+   */
+  async function deadLetterAlbumBinding(
+    row: PublicationRow,
+    generation: number,
+    code: 'ledger_binding_unresolved' | 'media_rights_not_publishable',
+    nowMs: number,
+  ): Promise<ScanDetail> {
+    const deadLetter = await markClaimedDeadLetter(deps.executor, {
+      publicationId: row.id,
+      generation,
+      errorCode: code,
+      nowMs,
+    });
+    return deadLetter.kind === 'written'
+      ? { publicationId: row.id, draftId: row.draft_id, outcome: 'dead_lettered', code }
+      : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+  }
+
+  /** The bounded PK draft read (the shape discriminator's input). */
+  async function readDraftOf(draftId: string): Promise<DraftRead | null> {
+    return deps.executor.first<DraftRead>({
+      sql: `SELECT id, status, layout, document_json FROM drafts WHERE id = ?`,
+      params: [draftId],
+    });
+  }
+
+  /**
+   * THE ALBUM EVIDENCE VERDICT (the independent review d65d811 P1-2 fix):
+   * the completeness proof is evaluated over the PLAN's ordinal count — a
+   * partial witness parks uncertain and NEVER heals, NEVER re-sends.
+   * Returns the action the caller must take.
+   */
+  async function evaluateAlbumEvidenceAction(
+    row: PublicationRow,
+    plan: AlbumSendPlanV1,
+    messages: readonly { readonly ordinal: number; readonly chat_id: string }[],
+    nowMs: number,
+  ): Promise<
+    | { readonly action: 'heal' }
+    | { readonly action: 'park'; readonly code: string }
+    | {
+        readonly action: 'dead_letter';
+        readonly code: 'ledger_binding_unresolved' | 'media_rights_not_publishable';
+      }
+  > {
+    const usages = await listPublicationMediaUsages(deps.executor, row.id);
+    const verdict = evaluateAlbumDeliveryEvidence({
+      expectedOrdinals: plan.items.length,
+      destination,
+      messages: messages.map((message) => ({ ordinal: message.ordinal, chatId: message.chat_id })),
+      boundUsageOrdinals: usages.map((usage) => usage.ordinal),
+    });
+    if (verdict.kind === 'complete') {
+      return { action: 'heal' };
+    }
+    if (verdict.reason === 'unbound_usages') {
+      // Every ordinal is PROVEN — the missing piece is the durable usage
+      // binding. Reconcile it from the ledger (the honest rebinding); a
+      // binding the ledger can no longer vouch for parks uncertain.
+      const binding = await resolveAlbumLedgerBindings(plan);
+      if (!binding.ok) {
+        return { action: 'dead_letter', code: binding.reason };
+      }
+      try {
+        const written = await recordPublicationMediaUsages(deps.executor, {
+          publicationId: row.id,
+          usages: binding.bindings,
+          nowMs,
+        });
+        if (written.kind !== 'recorded') {
+          return { action: 'park', code: 'usage_record_rejected' };
+        }
+      } catch {
+        return { action: 'park', code: 'usage_record_failed' };
+      }
+      return { action: 'heal' };
+    }
+    // A PARTIAL or foreign-destination proof: the ambiguous family — the
+    // recorded ordinals may already be in the channel; a re-send would
+    // duplicate them. Park for the human dispositions, records intact.
+    return { action: 'park', code: 'album_evidence_incomplete' };
+  }
+
   async function reconcileFailedWithEvidence(nowMs: number): Promise<number> {
     const parked = await listFailedPublications(deps.executor, {
       limit: RECONCILIATION_LIMIT,
@@ -298,6 +458,31 @@ export function createPublicationScheduler(deps: {
     for (const row of parked) {
       const messages = await listPublicationMessages(deps.executor, row.id);
       if (messages.length === 0) {
+        continue;
+      }
+      // THE SHAPE-AWARE HEAL (the d65d811 P1-2 fix): the proof must match
+      // the content shape — a text publication proves with its ONE record
+      // to THIS destination; an album proves only with EVERY ordinal to
+      // THIS destination AND the usages bound (the unbound-usages family
+      // reconciles its binding here, then heals). Anything else stays
+      // parked for the human dispositions (never auto-resent).
+      const draft = await readDraftOf(row.draft_id);
+      if (!draft) {
+        continue;
+      }
+      if (discriminateAlbumDocument(draft.document_json) === 'album') {
+        const planned = await deriveAlbumSendPlan({
+          documentJson: draft.document_json,
+          destination,
+        });
+        if (!planned.ok) {
+          continue;
+        }
+        const action = await evaluateAlbumEvidenceAction(row, planned.plan, messages, nowMs);
+        if (action.action !== 'heal') {
+          continue;
+        }
+      } else if (messages.length !== 1 || messages[0]!.chat_id !== destination) {
         continue;
       }
       const outcome = await healFailedToPublished(deps.executor, {
@@ -411,9 +596,71 @@ export function createPublicationScheduler(deps: {
     }
     // The pre-send evidence check: a recorded delivery from a crashed
     // earlier generation heals WITHOUT a second send (the ADR-0032 gate).
-    // It runs for BOTH content shapes — the delivery proof is shape-blind.
+    // THE SHAPE-AWARE PROOF (the d65d811 P1-2 fix): the heal asserts the
+    // COMPLETE delivery — a text publication proves with its ONE record to
+    // THIS destination; an album proves only with EVERY ordinal recorded
+    // here AND the usages bound. A partial album witness parks uncertain
+    // (the recorded ordinals may already be in the channel — a re-send
+    // would duplicate them); it is NEVER healed on a non-empty ledger and
+    // NEVER auto-resent.
     const messages = await listPublicationMessages(deps.executor, row.id);
     if (messages.length > 0) {
+      if (discriminateAlbumDocument(draft.document_json) === 'album') {
+        const planned = await deriveAlbumSendPlan({
+          documentJson: draft.document_json,
+          destination,
+        });
+        if (!planned.ok) {
+          const code = `album_content_invalid:${planned.reason}`;
+          const deadLetter = await markClaimedDeadLetter(deps.executor, {
+            publicationId: row.id,
+            generation,
+            errorCode: code,
+            nowMs,
+          });
+          return deadLetter.kind === 'written'
+            ? { publicationId: row.id, draftId: row.draft_id, outcome: 'dead_lettered', code }
+            : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+        }
+        const action = await evaluateAlbumEvidenceAction(row, planned.plan, messages, nowMs);
+        if (action.action === 'dead_letter') {
+          return deadLetterAlbumBinding(row, generation, action.code, nowMs);
+        }
+        if (action.action === 'park') {
+          const marked = await markClaimedUncertain(deps.executor, {
+            publicationId: row.id,
+            generation,
+            errorCode: action.code,
+            nowMs,
+          });
+          return marked.kind === 'written'
+            ? {
+                publicationId: row.id,
+                draftId: row.draft_id,
+                outcome: 'failed_unconfirmed',
+                code: action.code,
+              }
+            : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+        }
+      } else if (messages.length !== 1 || messages[0]!.chat_id !== destination) {
+        // A text publication's ledger shows more than its single record (or
+        // a record to another chat): a ledger anomaly is never a proof —
+        // park uncertain for the human reconciliation, never re-send.
+        const marked = await markClaimedUncertain(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: 'evidence_shape_anomalous',
+          nowMs,
+        });
+        return marked.kind === 'written'
+          ? {
+              publicationId: row.id,
+              draftId: row.draft_id,
+              outcome: 'failed_unconfirmed',
+              code: 'evidence_shape_anomalous',
+            }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
       const healed = await healClaimedToPublished(deps.executor, {
         publicationId: row.id,
         generation,
@@ -428,7 +675,23 @@ export function createPublicationScheduler(deps: {
     // unparseable string, an oversized string) keeps the text path's exact
     // prior-phase behavior — the discriminator never guesses.
     if (discriminateAlbumDocument(draft.document_json) === 'album') {
-      return sendClaimedAlbum(row, generation, draft, nowMs);
+      const planned = await deriveAlbumSendPlan({
+        documentJson: draft.document_json,
+        destination,
+      });
+      if (!planned.ok) {
+        const code = `album_content_invalid:${planned.reason}`;
+        const deadLetter = await markClaimedDeadLetter(deps.executor, {
+          publicationId: row.id,
+          generation,
+          errorCode: code,
+          nowMs,
+        });
+        return deadLetter.kind === 'written'
+          ? { publicationId: row.id, draftId: row.draft_id, outcome: 'dead_lettered', code }
+          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+      }
+      return sendClaimedAlbum(row, generation, draft, nowMs, planned.plan);
     }
     const render = renderEditorialPostText(draft.document_json);
     if (!render.ok) {
@@ -463,6 +726,24 @@ export function createPublicationScheduler(deps: {
             code: 'content_hash_failed',
           }
         : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+    // THE DURABLE SEND-STARTED MARKER (the d65d811 P1-1 fix): the last
+    // write BEFORE any network effect — the machine's `mark_send_started`
+    // (claimed -> publishing) with the in-flight lease extension. From
+    // here the row can only exit through THIS generation's fenced
+    // terminals: a concurrent scan can neither claim nor reclaim it, so a
+    // lease expiry mid-flight can never become a second send. A generation
+    // that dies inside the window parks in the `send_may_have_started`
+    // family (the ambiguous window — held for the human dispositions,
+    // healed only by recorded evidence).
+    const started = await markClaimedSendStarted(deps.executor, {
+      publicationId: row.id,
+      generation,
+      nowMs,
+      leaseMs: SEND_IN_FLIGHT_LEASE_MS,
+    });
+    if (started.kind !== 'marked') {
+      return { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
     }
     try {
       const sent = await deps.transport.sendMessageRich({
@@ -624,30 +905,14 @@ export function createPublicationScheduler(deps: {
     generation: number,
     draft: DraftRead,
     nowMs: number,
+    plan: AlbumSendPlanV1,
   ): Promise<ScanDetail> {
     if (deps.mediaTransport === undefined || deps.mediaAssets === undefined) {
       // Unreachable: the gate-ON path validated the media seam before any
-      // claim, and the constructor pair rule keeps the seam + ledger tied.
+      // claim (and derived the plan), and the constructor pair rule keeps
+      // the seam + ledger tied.
       throw new AppError('config_invalid');
     }
-    // 1. The typed send plan from the durable document.
-    const planned = await deriveAlbumSendPlan({
-      documentJson: draft.document_json,
-      destination,
-    });
-    if (!planned.ok) {
-      const code = `album_content_invalid:${planned.reason}`;
-      const deadLetter = await markClaimedDeadLetter(deps.executor, {
-        publicationId: row.id,
-        generation,
-        errorCode: code,
-        nowMs,
-      });
-      return deadLetter.kind === 'written'
-        ? { publicationId: row.id, draftId: row.draft_id, outcome: 'dead_lettered', code }
-        : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
-    }
-    const plan = planned.plan;
     // 2. The caption hash — the ordinal-0 delivery record's content anchor.
     let captionHash: string | null = null;
     if (plan.caption !== undefined) {
@@ -670,37 +935,28 @@ export function createPublicationScheduler(deps: {
       }
       captionHash = hash.hash;
     }
-    // 3. THE LEDGER BINDING — before ANY transport effect.
-    const assets = await deps.mediaAssets.findAssetsByUrls(
-      plan.items.map((item) => item.canonicalUrl),
-    );
-    const bindings: { readonly ordinal: number; readonly mediaAssetId: string }[] = [];
-    for (const item of plan.items) {
-      const match = assets.find(
-        (asset) =>
-          asset.canonicalUrl === item.canonicalUrl &&
-          asset.telegramFileId === item.media &&
-          asset.status === 'uploaded',
-      );
-      if (match === undefined) {
-        const deadLetter = await markClaimedDeadLetter(deps.executor, {
-          publicationId: row.id,
-          generation,
-          errorCode: 'ledger_binding_unresolved',
-          nowMs,
-        });
-        return deadLetter.kind === 'written'
-          ? {
-              publicationId: row.id,
-              draftId: row.draft_id,
-              outcome: 'dead_lettered',
-              code: 'ledger_binding_unresolved',
-            }
-          : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
-      }
-      bindings.push({ ordinal: item.ordinal, mediaAssetId: match.id });
+    // 3. THE LEDGER BINDING + THE SEND-TIME RIGHTS GATE — before ANY
+    // transport effect. The rights are re-read from the ledger HERE (the
+    // d65d811 P1-3 fix): a blocked revocation or an unknown never-cleared
+    // state dead-letters typed with ZERO transport calls.
+    const binding = await resolveAlbumLedgerBindings(plan);
+    if (!binding.ok) {
+      return deadLetterAlbumBinding(row, generation, binding.reason, nowMs);
     }
-    // 4. THE SEND — one media group, file_id-only, identity consumed.
+    const bindings = binding.bindings;
+    // 4. THE DURABLE SEND-STARTED MARKER (the d65d811 P1-1 fix) — the same
+    // in-flight guard as the text path: claimed -> publishing, the lease
+    // extended; a mid-flight lease expiry can never become a second send.
+    const started = await markClaimedSendStarted(deps.executor, {
+      publicationId: row.id,
+      generation,
+      nowMs,
+      leaseMs: SEND_IN_FLIGHT_LEASE_MS,
+    });
+    if (started.kind !== 'marked') {
+      return { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
+    }
+    // 5. THE SEND — one media group, file_id-only, identity consumed.
     let sentMessages: readonly PublicationSentMediaGroupMessage[];
     try {
       sentMessages = await deps.mediaTransport.sendMediaGroup({
@@ -785,7 +1041,7 @@ export function createPublicationScheduler(deps: {
           }
         : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
     }
-    // 5. THE RESPONSE SHAPE GATE — before ANY ledger write (the A2 lesson).
+    // 6. THE RESPONSE SHAPE GATE — before ANY ledger write (the A2 lesson).
     const shapeValid =
       Array.isArray(sentMessages) &&
       sentMessages.length === plan.items.length &&
@@ -810,7 +1066,7 @@ export function createPublicationScheduler(deps: {
           }
         : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
     }
-    // 6. THE PER-ORDINAL DELIVERY RECORDS — the at-most-once ledger.
+    // 7. THE PER-ORDINAL DELIVERY RECORDS — the at-most-once ledger.
     for (let ordinal = 0; ordinal < sentMessages.length; ordinal += 1) {
       const message = sentMessages[ordinal]!;
       const recorded = await recordPublicationMessage(deps.executor, {
@@ -841,7 +1097,7 @@ export function createPublicationScheduler(deps: {
           : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
       }
     }
-    // 7. THE USAGE BINDING — after the delivery proof; a failure parks the
+    // 8. THE USAGE BINDING — after the delivery proof; a failure parks the
     // row uncertain and the NEXT scan's evidence check heals from the
     // recorded messages (the binding can never orphan a proof).
     try {
@@ -882,7 +1138,7 @@ export function createPublicationScheduler(deps: {
           }
         : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
     }
-    // 8. THE TERMINAL — fenced by the claim's attempts generation.
+    // 9. THE TERMINAL — fenced by the claim's attempts generation.
     const terminal = await markClaimedPublished(deps.executor, {
       publicationId: row.id,
       generation,
@@ -942,6 +1198,7 @@ export function createPublicationScheduler(deps: {
           dueCount: 0,
           processed: 0,
           reclaimed: 0,
+          uncertainParked: 0,
           uncertaintyHealed: 0,
           details: [],
         };
@@ -978,15 +1235,29 @@ export function createPublicationScheduler(deps: {
             dueCount: await countDuePublications(deps.executor, { nowMs }),
             processed: 0,
             reclaimed: 0,
+            uncertainParked: 0,
             uncertaintyHealed: 0,
             details: [],
           };
         }
       }
 
-      // Phase A: the evidence reconciliation — runs in BOTH modes: the heal
-      // asserts a recorded PROOF (the delivery happened), never a send
-      // decision; an observe-only scan still reconciles the ledger's facts.
+      // Phase A (the d65d811 P1-1 fix, ORDER MATTERS): the ambiguous
+      // in-flight windows park FIRST — the send-started generations whose
+      // EXTENDED lease expired without a terminal become failed
+      // (`send_may_have_started`) for the human dispositions. The same
+      // reconciliation family as the heal below: it asserts the honest
+      // UNKNOWN, never a send decision; the parked rows are NEVER
+      // auto-resent (a parked 'failed' row is outside the claim WHERE
+      // forever), and their recorded evidence heals in Phase A2 — the SAME
+      // scan, the honest sequence.
+      const uncertainParked = (await parkExpiredPublishingUncertain(deps.executor, { nowMs }))
+        .parked;
+
+      // Phase A2: the evidence reconciliation — runs in BOTH modes: the
+      // heal asserts a recorded PROOF (the delivery happened), never a
+      // send decision; an observe-only scan still reconciles the ledger's
+      // facts.
       const uncertaintyHealed = await reconcileFailedWithEvidence(nowMs);
 
       if (!gateEnabled) {
@@ -1047,6 +1318,7 @@ export function createPublicationScheduler(deps: {
           dueCount,
           processed: details.length,
           reclaimed: 0,
+          uncertainParked,
           uncertaintyHealed,
           details,
         };
@@ -1218,6 +1490,7 @@ export function createPublicationScheduler(deps: {
         dueCount,
         processed: details.length,
         reclaimed,
+        uncertainParked,
         uncertaintyHealed,
         details,
       };
