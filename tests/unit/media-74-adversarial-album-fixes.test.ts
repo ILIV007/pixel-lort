@@ -201,7 +201,7 @@ describe('A1 — the rights fabrication is closed (fail-closed mapping + honest 
     expect(env.state().rows).toHaveLength(0);
   });
 
-  it('an official_api candidate is allowed and stored as official', async () => {
+  it('an official_api candidate is allowed for STAGING and stored with the honest `unknown` echo (the a279e13 review: no publish clearance is minted from provenance)', async () => {
     const plan = makeTwoCandidatePlan('official_api', 'official');
     const env = makePorts();
     const outcome = await uploadAlbumMediaGroup(
@@ -210,10 +210,14 @@ describe('A1 — the rights fabrication is closed (fail-closed mapping + honest 
     );
     expect(outcome.ok).toBe(true);
     expect(env.state().observedRightsInputs.every((state) => state === 'official_api')).toBe(true);
-    expect(env.state().rows.every((row) => row.rightsStatus === 'official')).toBe(true);
+    // THE a279e13 CORRECTION (formerly pinned `official`): the durable
+    // echo never claims a publish clearance the provenance does not
+    // carry — the machine-staged row is `unknown` until an explicit,
+    // evidence-backed owner action records an affirmative status.
+    expect(env.state().rows.every((row) => row.rightsStatus === 'unknown')).toBe(true);
   });
 
-  it('a source_metadata candidate with official metadata is cleared and stored as attribution_required', async () => {
+  it('a source_metadata candidate with official metadata is cleared for STAGING and stored with the honest `unknown` echo', async () => {
     const plan = makeTwoCandidatePlan('source_metadata', 'official');
     const env = makePorts();
     const outcome = await uploadAlbumMediaGroup(
@@ -224,10 +228,13 @@ describe('A1 — the rights fabrication is closed (fail-closed mapping + honest 
     expect(
       env.state().observedRightsInputs.every((state) => state === 'source_metadata_cleared'),
     ).toBe(true);
-    expect(env.state().rows.every((row) => row.rightsStatus === 'attribution_required')).toBe(true);
+    // THE a279e13 CORRECTION (formerly pinned `attribution_required`):
+    // source metadata naming an official source is not an attribution
+    // license either — the durable echo stays `unknown`.
+    expect(env.state().rows.every((row) => row.rightsStatus === 'unknown')).toBe(true);
   });
 
-  it('a verified_source metadata candidate is cleared too (a named source, not an anonymous claim)', async () => {
+  it('a verified_source metadata candidate is cleared for staging too (a named source, not an anonymous claim) — the echo stays `unknown`', async () => {
     const plan = makeTwoCandidatePlan('source_metadata', 'verified_source');
     const env = makePorts();
     const outcome = await uploadAlbumMediaGroup(
@@ -235,7 +242,8 @@ describe('A1 — the rights fabrication is closed (fail-closed mapping + honest 
       env.ports,
     );
     expect(outcome.ok).toBe(true);
-    expect(env.state().rows.every((row) => row.rightsStatus === 'attribution_required')).toBe(true);
+    // THE a279e13 CORRECTION (formerly pinned `attribution_required`).
+    expect(env.state().rows.every((row) => row.rightsStatus === 'unknown')).toBe(true);
   });
 });
 

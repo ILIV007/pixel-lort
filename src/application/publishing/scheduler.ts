@@ -394,9 +394,16 @@ export function createPublicationScheduler(deps: {
   }
 
   /**
-   * THE ALBUM EVIDENCE VERDICT (the independent review d65d811 P1-2 fix):
-   * the completeness proof is evaluated over the PLAN's ordinal count — a
-   * partial witness parks uncertain and NEVER heals, NEVER re-sends.
+   * THE ALBUM EVIDENCE VERDICT (the independent review d65d811 P1-2 fix,
+   * DEEPENED by the independent review a279e13 finding 1): the
+   * completeness proof is evaluated over the PLAN's ordinal count — a
+   * partial witness parks uncertain and NEVER heals, NEVER re-sends — AND
+   * the per-ordinal usage bindings must match the plan-resolved assets
+   * EXACTLY: a swapped/foreign binding parks `album_usage_mismatch`, the
+   * evidence stays intact, nothing is rewritten, nothing is re-sent. The
+   * expected bindings come from the SAME ledger resolution the send path
+   * uses — so the rights gate re-reads the durable echo HERE, at the
+   * verification/heal moment, exactly as it does at the send moment.
    * Returns the action the caller must take.
    */
   async function evaluateAlbumEvidenceAction(
@@ -412,24 +419,43 @@ export function createPublicationScheduler(deps: {
         readonly code: 'ledger_binding_unresolved' | 'media_rights_not_publishable';
       }
   > {
+    // THE PLAN-RESOLVED EXPECTATION (the a279e13 fix): the bindings the
+    // ledger must show are derived from the plan + the ledger AT THIS
+    // moment — unresolved provenance or a non-publishable rights echo
+    // (blocked/unknown) dead-letters BEFORE any heal, the F3 gate at the
+    // verification moment.
+    const binding = await resolveAlbumLedgerBindings(plan);
+    if (!binding.ok) {
+      return { action: 'dead_letter', code: binding.reason };
+    }
     const usages = await listPublicationMediaUsages(deps.executor, row.id);
     const verdict = evaluateAlbumDeliveryEvidence({
       expectedOrdinals: plan.items.length,
       destination,
       messages: messages.map((message) => ({ ordinal: message.ordinal, chatId: message.chat_id })),
       boundUsageOrdinals: usages.map((usage) => usage.ordinal),
+      boundUsages: usages.map((usage) => ({
+        ordinal: usage.ordinal,
+        mediaAssetId: usage.media_asset_id,
+      })),
+      expectedBindings: binding.bindings,
     });
     if (verdict.kind === 'complete') {
       return { action: 'heal' };
     }
+    if (verdict.reason === 'usage_binding_mismatch') {
+      // The durable usages CONTRADICT the plan (a swap, a foreign asset,
+      // a malformed row): the recorded evidence may not match what the
+      // channel actually received. Park for the human dispositions — the
+      // records AND the wrong bindings stay EXACTLY as recorded (never
+      // rewritten into a story), ZERO sends, never auto-resent.
+      return { action: 'park', code: 'album_usage_mismatch' };
+    }
     if (verdict.reason === 'unbound_usages') {
-      // Every ordinal is PROVEN — the missing piece is the durable usage
-      // binding. Reconcile it from the ledger (the honest rebinding); a
-      // binding the ledger can no longer vouch for parks uncertain.
-      const binding = await resolveAlbumLedgerBindings(plan);
-      if (!binding.ok) {
-        return { action: 'dead_letter', code: binding.reason };
-      }
+      // Every ordinal is PROVEN and every bound usage MATCHES the plan —
+      // the missing piece is the durable usage binding itself. Reconcile
+      // it from the resolved expectation (the honest rebinding); a
+      // binding write failure parks uncertain.
       try {
         const written = await recordPublicationMediaUsages(deps.executor, {
           publicationId: row.id,

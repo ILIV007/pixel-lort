@@ -181,6 +181,15 @@ export function stagingObjectKey(assetId: string): string {
  * source; EVERYTHING else (an UNOFFICIAL metadata claim above all) maps
  * to `unknown` — the mrp1 decision then REJECTS it typed. The old mapping
  * fabricated `source_metadata_cleared` for every non-official origin.
+ *
+ * THE a279e13 SCOPING (the independent review, item 3): this mapping
+ * feeds ONLY the mrp1 STAGING decision — an allow was always strictly
+ * scoped `r2_temporary_only` (fetch + stage into the 72h temporary
+ * store), never a publish grant. The PUBLISH-side truth lives in the
+ * DURABLE echo (`rightsStatusFor` below), which — also since a279e13 —
+ * never mints a publishable status from provenance: officialness of a
+ * source proves neither a republication license, nor its scope, nor an
+ * expiry, nor attribution compliance.
  */
 function rightsStateFor(candidate: MediaCandidateV1): MediaRightsStateV1 {
   if (candidate.origin === 'official_api') return 'official_api';
@@ -191,21 +200,21 @@ function rightsStateFor(candidate: MediaCandidateV1): MediaRightsStateV1 {
 }
 
 /**
- * THE HONEST DURABLE RIGHTS ECHO (the A1 fix): the stored rightsStatus
- * names WHICH clearance was actually asserted — never a blanket
- * `official` for every allow.
+ * THE HONEST DURABLE RIGHTS ECHO (the A1 fix, DEEPENED by the independent
+ * review a279e13 item 3): the machine NEVER mints a publish clearance.
+ * The old echo promoted provenance to `official`/`attribution_required` —
+ * statuses the publication allowlist accepts — i.e. a republication
+ * permission INVENTED from the source's name or metadata. Being official
+ * proves neither a license, nor its scope/destination, nor an expiry, nor
+ * attribution compliance. EVERY machine-staged asset therefore echoes
+ * `unknown`: the publication gate (PUBLICATION_MEDIA_RIGHTS_V1) and the
+ * reuse predicate both refuse it until an EXPLICIT, evidence-backed
+ * owner action records an affirmative status (the owner decision is
+ * documented in docs/OPEN_DECISIONS.md — the rights-EVIDENCE model:
+ * scope/destination, expiry, attribution — stays an OPEN carry).
  */
-function rightsStatusFor(state: MediaRightsStateV1): MediaAssetRecordV1['rightsStatus'] {
-  switch (state) {
-    case 'official_api':
-      return 'official';
-    case 'owner_granted':
-      return 'licensed';
-    case 'source_metadata_cleared':
-      return 'attribution_required';
-    default:
-      return 'unknown';
-  }
+function rightsStatusFor(_state: MediaRightsStateV1): MediaAssetRecordV1['rightsStatus'] {
+  return 'unknown';
 }
 
 /**
@@ -438,8 +447,10 @@ export async function uploadAlbumMediaGroup(
   }
 
   // 5. staging: the durable 'candidate' row FIRST (r2_key + the 72h
-  // deadline), then the R2 put (deterministic key). The rights echo is the
-  // REAL asserted state (the A1 fix) — never a blanket 'official'.
+  // deadline), then the R2 put (deterministic key). The rights echo is
+  // the HONEST state (the A1 fix, deepened a279e13): the machine-staged
+  // row echoes `unknown` — no publish clearance is minted from
+  // provenance; an affirmative status is owner-evidence only.
   const fresh = resolved.filter((item) => item.outcome === 'staged' && item.bytes !== undefined);
   const stagedIds = new Map<number, string>();
   for (const item of fresh) {

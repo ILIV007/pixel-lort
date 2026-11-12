@@ -217,12 +217,16 @@ describe('Phase 7.3 — the upload path over REAL D1 (faked fetch/storage/telegr
       expect(row.telegram_file_id).not.toBeNull();
       expect(row.r2_key).toBeNull();
       expect(row.expires_at).toBeNull();
-      expect(row.rights_status).toBe('official');
+      // THE a279e13 CORRECTION (formerly pinned 'official'): the durable
+      // echo of a machine-staged asset is `unknown` — no publish
+      // clearance is minted from the official_api provenance; an
+      // affirmative status is an explicit, evidence-backed owner action.
+      expect(row.rights_status).toBe('unknown');
       expect(row.sha256).not.toBeNull();
     }
   });
 
-  it('the ECONOMY rule: a replay reuses EVERY file_id with ZERO fetch/storage cost (the group still sends via file_id references)', async () => {
+  it('the ECONOMY rule, a279e13-corrected: an `unknown`-echo row is NEVER reused — the replay RE-STAGES (the reuse economy applies to evidence-cleared rows only)', async () => {
     const planResult = threePhotoPlan();
     if (!planResult.ok) return expect.unreachable();
     const first = recordingPorts();
@@ -239,17 +243,30 @@ describe('Phase 7.3 — the upload path over REAL D1 (faked fetch/storage/telegr
     );
     expect(secondOutcome.ok).toBe(true);
     if (!secondOutcome.ok) return;
-    expect(secondOutcome.reusedCount).toBe(3);
-    expect(secondOutcome.uploadedCount).toBe(0);
-    expect(second.calls.fetchUrls).toHaveLength(0);
-    expect(second.calls.putKeys).toHaveLength(0);
-    // The GROUP still sends (the album must be delivered) — but via the
-    // REUSED file_id references: zero upload cost, zero re-download.
+    // THE a279e13 CORRECTION (formerly pinned reuse-all/zero-fetch): the
+    // first round's rows echo `unknown` — the A1 reuse guard refuses an
+    // uncleared file_id (re-sending it would republish media the ledger
+    // holds no affirmative rights evidence for), so the replay re-fetches
+    // and re-stages. The honest cost of the fail-closed rights posture.
+    expect(secondOutcome.reusedCount).toBe(0);
+    expect(secondOutcome.uploadedCount).toBe(3);
+    expect(second.calls.fetchUrls).toHaveLength(3);
+    expect(second.calls.putKeys).toHaveLength(3);
+    // The GROUP still sends (the album must be delivered) — via the
+    // freshly staged items; the ledger never claimed a clearance the
+    // provenance did not carry.
     expect(second.calls.sendGroups).toBe(1);
-    expect(secondOutcome.fileIds).toEqual(firstOutcome.ok ? firstOutcome.fileIds : []);
+    // The two rounds are INDEPENDENT staging rounds: the fake transport
+    // names ids per-instance, so the durable ledger is the honest witness
+    // — six rows total (two rounds x three items), every echo `unknown`.
+    const allRows = await executor.query<{ readonly rights_status: string }>({
+      sql: `SELECT rights_status FROM media_assets`,
+    });
+    expect(allRows.rows).toHaveLength(6);
+    expect(allRows.rows.every((row) => row.rights_status === 'unknown')).toBe(true);
   });
 
-  it('the hash-level reuse: the same bytes under a DIFFERENT URL reuse their file_id', async () => {
+  it('the hash-level reuse, a279e13-corrected: the same bytes under a DIFFERENT URL re-stage while the echo stays `unknown`', async () => {
     const planResult = threePhotoPlan();
     if (!planResult.ok) return expect.unreachable();
     const first = recordingPorts();
@@ -276,9 +293,12 @@ describe('Phase 7.3 — the upload path over REAL D1 (faked fetch/storage/telegr
     );
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.reusedCount).toBe(3);
-    expect(second.calls.putKeys).toHaveLength(0);
-    // The group sends with the REUSED file_ids (no upload cost).
+    // THE a279e13 CORRECTION (formerly pinned hash-reuse): the hash hit
+    // meets an `unknown`-echo row — the A1 guard refuses it, the item
+    // re-stages. Hash identity never substitutes for rights evidence.
+    expect(outcome.reusedCount).toBe(0);
+    expect(second.calls.putKeys).toHaveLength(3);
+    // The group sends with the FRESH file_ids (no reused uncleared id).
     expect(second.calls.sendGroups).toBe(1);
   });
 

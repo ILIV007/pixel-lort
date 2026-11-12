@@ -935,11 +935,19 @@ export interface PublishedHistoryEntry {
 }
 
 /**
- * The recent published history (OLDEST FIRST), bounded, JOINed over the
- * approved tables only: the layout trail (the run cap), the category trail
- * (the rolling six + the 168h mix) and the previous send (the gap rules).
- * The 168h mix window filter is applied by the CALLER (the service) — this
- * read returns the bounded recent trail.
+ * The recent published history — the NEWEST `limit` published records,
+ * returned OLDEST-FIRST (the consumer's expected order: the trail's last
+ * entry IS the previous send). THE SELECTION WINDOW (the independent
+ * review a279e13 fix): the old query ordered ASC and THEN applied LIMIT —
+ * after 512 publications the window held the OLDEST rows and every new
+ * send fell outside it, feeding the cooldown/mix/layout policy stale
+ * data. The selection now orders `published_at DESC, id DESC` (the
+ * deterministic tie-break at equal timestamps) with the LIMIT, and the
+ * chosen window is REVERSED to oldest-first for the return. The 168h mix
+ * window filter is applied by the CALLER (the service) — this read
+ * returns the bounded recent trail. The bounded-read boundary is honest:
+ * no index covers published_at (schema 6 — ZERO DDL), so the engine
+ * sorts; the LIMIT keeps the returned window bounded exactly as before.
  */
 export async function listRecentPublishedHistory(
   executor: DbExecutor,
@@ -957,16 +965,23 @@ export async function listRecentPublishedHistory(
           JOIN drafts d ON d.id = p.draft_id
           JOIN stories s ON s.id = p.story_id
           WHERE p.status = 'published' AND p.published_at IS NOT NULL AND p.published_at <= ?
-          ORDER BY p.published_at ASC
+          ORDER BY p.published_at DESC, p.id DESC
           LIMIT ?`,
     params: [input.nowMs, limit],
   });
-  return rows.rows.map((row) => ({
-    publishedAtMs: row.published_at,
-    priority: row.priority,
-    layout: row.layout,
-    contentType: row.content_type,
-  }));
+  return (
+    rows.rows
+      .map((row) => ({
+        publishedAtMs: row.published_at,
+        priority: row.priority,
+        layout: row.layout,
+        contentType: row.content_type,
+      }))
+      // The newest-first selection window, returned oldest-first: the
+      // consumer reads the trail chronologically (the last entry is the
+      // previous send).
+      .reverse()
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -236,3 +236,52 @@ decision, consistent with every other gate in the project.
 
 **Decision:** none yet — **Open**. No ADR filed; this entry records the
 options only.
+
+## OD-010 — The media rights-EVIDENCE model (scope / expiry / attribution) — **OPEN**
+
+**Opened:** the a279e13 review round (1.35.0). **Status:** Open — owner
+decision required BEFORE any live media publication.
+
+**Context.** The independent review of a279e13 (item 3) re-confirmed: the
+officialness of a source (`official_api` origin, or official/verified
+source metadata) proves neither a republication license, nor its
+scope/destination, nor an expiry, nor attribution compliance. The code now
+holds the fail-closed posture end-to-end: `rightsStateFor` feeds ONLY the
+mrp1 staging decision (an allow was always strictly scoped
+`r2_temporary_only` — fetch + stage into the 72h temporary store, never a
+publish grant), and the durable echo of every machine-staged asset is
+`unknown` — the publication allowlist (PUBLICATION_MEDIA_RIGHTS_V1:
+official / licensed / attribution_required) and the reuse predicate both
+refuse it. The machine INVENTS no permission: an affirmative status can
+only be recorded by an explicit, evidence-backed owner action (no such
+write surface exists yet — deliberately).
+
+**The consequence (honest, by design).** Until the owner records an
+affirmative status for a specific asset, NOTHING the machine staged can be
+published or reused: the scheduler's send-time/evidence-time rights gate
+dead-letters typed (`media_rights_not_publishable`) and the upload path
+re-stages instead of reusing. The reuse economy (zero-fetch replays)
+applies ONLY to evidence-cleared rows.
+
+**Decision required from the owner (before any live activation):**
+
+1. The evidence model: WHICH records establish `official` / `licensed` /
+   `attribution_required` for a specific asset (license text, written
+   permission, platform ToS analysis, attribution obligations), and WHERE
+   the evidence is stored (schema 6 is frozen — likely a new migration).
+2. The scope discipline: per-destination? per-campaign? time-bounded
+   (expiry) or perpetual?
+3. The attribution workflow: which statuses demand an attribution line,
+   and how it is rendered into the caption envelope.
+4. The write surface: who records affirmative statuses (owner-only? an
+   admin command?), with what audit trail.
+5. Whether the upload path's own group send (currently BLOCKED_LIVE with
+   no production caller) must consume the same evidence model before any
+   live activation — recommended: yes.
+
+**Recommendation recorded for the owner:** keep the fail-closed default
+(`unknown` refuses everything) until 1–4 exist; do NOT widen the
+allowlist as a shortcut; do NOT map provenance to clearance again.
+
+**Decision:** none yet — **Open**. No ADR filed; this entry records the
+required decision only.

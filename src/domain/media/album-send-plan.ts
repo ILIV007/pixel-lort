@@ -264,6 +264,12 @@ export interface AlbumDeliveryMessageViewV1 {
   readonly chatId: string;
 }
 
+/** The ledger's per-ordinal USAGE binding view (ordinal -> media asset). */
+export interface AlbumDeliveryUsageViewV1 {
+  readonly ordinal: number;
+  readonly mediaAssetId: string;
+}
+
 export type AlbumDeliveryEvidenceVerdict =
   | { readonly kind: 'complete' }
   | {
@@ -272,9 +278,15 @@ export type AlbumDeliveryEvidenceVerdict =
        * `foreign_destination` — a record points at a different destination;
        * `missing_ordinals` — the recorded ordinal set does not cover the
        * plan exactly; `unbound_usages` — every ordinal is proven but the
-       * media_usages binding is not complete yet (the heal reconciles it).
+       * media_usages binding is not complete yet (the heal reconciles it);
+       * `usage_binding_mismatch` — a bound usage CONTRADICTS the plan's
+       * expected asset for its ordinal (the a279e13 review: a swapped
+       * binding satisfied the counts and healed with wrong provenance —
+       * the exact per-ordinal match is now part of the proof; a mismatch
+       * parks uncertain, keeps the evidence intact, never rewrites it).
        */
-      readonly reason: 'foreign_destination' | 'missing_ordinals' | 'unbound_usages';
+      readonly reason:
+        'foreign_destination' | 'missing_ordinals' | 'unbound_usages' | 'usage_binding_mismatch';
       /** The missing plan ordinals (empty for the non-ordinal reasons). */
       readonly missingOrdinals: readonly number[];
     };
@@ -282,22 +294,33 @@ export type AlbumDeliveryEvidenceVerdict =
 const MAX_EXPECTED_ORDINALS = 10; // the Bot API media-group bound (2..10)
 
 /**
- * The TOTAL, deterministic completeness verdict over ONE album
- * publication's delivery evidence:
+ * The TOTAL, deterministic completeness-and-correctness verdict over ONE
+ * album publication's delivery evidence:
  *  1. every recorded message must point at the CONFIGURED destination (a
  *     record to another chat is not this publication's proof);
  *  2. the recorded ordinal set must be EXACTLY {0..n-1} over the plan's
  *     item count — the count AND the set, not merely a non-empty ledger;
  *  3. the bound media_usages must cover the same set (the honest durable
- *     reconciliation the review demands).
+ *     reconciliation the review demands) AND — when the binding views are
+ *     supplied (the a279e13 review) — every bound usage must reference
+ *     EXACTLY the plan-resolved asset for its ordinal: a SWAPPED or
+ *     foreign binding is `usage_binding_mismatch`, never a proof.
  * An out-of-range expectation (0 or beyond the media-group bound) proves
- * nothing: incomplete with every ordinal missing. Pure: no I/O, no clock.
+ * nothing: incomplete with every ordinal missing. An unusable binding
+ * view (a non-array, a malformed row, a duplicated or out-of-range
+ * expected binding) proves nothing the same way. The binding views are
+ * OPTIONAL for the pre-a279 callers: absent, the verdict is the exact
+ * count-only contract (never a silent behavior change). Pure: no I/O.
  */
 export function evaluateAlbumDeliveryEvidence(input: {
   readonly expectedOrdinals: number;
   readonly destination: string;
   readonly messages: readonly AlbumDeliveryMessageViewV1[];
   readonly boundUsageOrdinals: readonly number[];
+  /** The bound usages WITH their asset ids (the correctness view). */
+  readonly boundUsages?: readonly AlbumDeliveryUsageViewV1[];
+  /** The plan-resolved expected bindings (ordinal -> asset id). */
+  readonly expectedBindings?: readonly AlbumDeliveryUsageViewV1[];
 }): AlbumDeliveryEvidenceVerdict {
   const inputValid =
     typeof input === 'object' &&
@@ -308,7 +331,9 @@ export function evaluateAlbumDeliveryEvidence(input: {
     typeof input.destination === 'string' &&
     input.destination.length > 0 &&
     Array.isArray(input.messages) &&
-    Array.isArray(input.boundUsageOrdinals);
+    Array.isArray(input.boundUsageOrdinals) &&
+    (input.boundUsages === undefined || Array.isArray(input.boundUsages)) &&
+    (input.expectedBindings === undefined || Array.isArray(input.expectedBindings));
   if (!inputValid) {
     // An unusable expectation can never be verified: prove nothing (the
     // caller treats the evidence as incomplete — never as a proof).
@@ -352,6 +377,69 @@ export function evaluateAlbumDeliveryEvidence(input: {
       bound.add(ordinal);
     }
   }
+
+  // THE BINDING-CORRECTNESS PROOF (the a279e13 review): when the binding
+  // views are supplied, the bound (ordinal -> asset) mapping must EQUAL
+  // the plan-resolved expectation — exact pairs, no extras, no swaps.
+  // Checked BEFORE the unbound reconciliation: a wrong binding must never
+  // be silently rewritten by the reconcile path (the evidence stays for
+  // the human dispositions). An unusable view proves nothing.
+  if (input.boundUsages !== undefined && input.expectedBindings !== undefined) {
+    const expectedMap = new Map<number, string>();
+    let expectationUsable = true;
+    for (const entry of input.expectedBindings) {
+      if (
+        entry === null ||
+        typeof entry !== 'object' ||
+        !Number.isInteger(entry.ordinal) ||
+        (entry.ordinal as number) < 0 ||
+        (entry.ordinal as number) >= expected ||
+        typeof entry.mediaAssetId !== 'string' ||
+        entry.mediaAssetId.length === 0 ||
+        expectedMap.has(entry.ordinal)
+      ) {
+        expectationUsable = false;
+        break;
+      }
+      expectedMap.set(entry.ordinal, entry.mediaAssetId);
+    }
+    if (!expectationUsable || expectedMap.size !== expected) {
+      return { kind: 'incomplete', reason: 'missing_ordinals', missingOrdinals: [] };
+    }
+    const boundMap = new Map<number, string>();
+    for (const usage of input.boundUsages) {
+      if (
+        usage === null ||
+        typeof usage !== 'object' ||
+        !Number.isInteger(usage.ordinal) ||
+        (usage.ordinal as number) < 0 ||
+        (usage.ordinal as number) >= expected ||
+        typeof usage.mediaAssetId !== 'string' ||
+        usage.mediaAssetId.length === 0
+      ) {
+        return { kind: 'incomplete', reason: 'usage_binding_mismatch', missingOrdinals: [] };
+      }
+      if (boundMap.has(usage.ordinal)) {
+        return { kind: 'incomplete', reason: 'usage_binding_mismatch', missingOrdinals: [] };
+      }
+      boundMap.set(usage.ordinal, usage.mediaAssetId);
+    }
+    for (const [ordinal, expectedAsset] of expectedMap) {
+      const boundAsset = boundMap.get(ordinal);
+      if (boundAsset === undefined) {
+        continue; // not bound yet — the unbound reconciliation decides below
+      }
+      if (boundAsset !== expectedAsset) {
+        return { kind: 'incomplete', reason: 'usage_binding_mismatch', missingOrdinals: [] };
+      }
+    }
+    for (const ordinal of boundMap.keys()) {
+      if (!expectedMap.has(ordinal)) {
+        return { kind: 'incomplete', reason: 'usage_binding_mismatch', missingOrdinals: [] };
+      }
+    }
+  }
+
   const unbound = allOrdinals.filter((ordinal) => !bound.has(ordinal));
   if (unbound.length > 0) {
     return { kind: 'incomplete', reason: 'unbound_usages', missingOrdinals: [] };
