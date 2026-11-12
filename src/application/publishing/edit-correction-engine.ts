@@ -43,6 +43,7 @@ import {
 } from '../../adapters/db/publication-outbox-store';
 import {
   finalizeCorrectionAuditEvent,
+  findCorrectionAuditEvent,
   listActivePublicationsForStory,
   markDraftSuperseded,
   recordCorrectionAuditEvent,
@@ -50,11 +51,25 @@ import {
 } from '../../adapters/db/publication-correction-store';
 import {
   deriveCorrectionAuditEventId,
+  isCorrectionClass,
   planCorrectionDisposition,
   type CorrectionClass,
   type CorrectionDisposition,
 } from '../../domain/publishing/edit-correction';
 import { classifySendOutcome } from '../../domain/publishing/send-outcome';
+import {
+  deriveCorrectionEdits,
+  CORRECTION_STATEMENT_MAX_UNITS,
+  type CorrectionEditSourceMessage,
+} from '../../domain/publishing/correction-render';
+import {
+  readAlbumContentDocumentV1,
+  type AlbumContentDocumentV1,
+} from '../../domain/media/album-content';
+import { contentTextHash } from '../../domain/publishing/publication-identity';
+import { serializeRichTextEnvelope } from '../../domain/telegram/rich-text-envelope';
+import { renderEditorialPostText } from '../../domain/admin-post/editorial-post-render';
+import { discriminateAlbumDocument } from '../../domain/media/album-send-plan';
 
 /** The edit transport seam (the ONLY artificial piece in tests). */
 export interface PublicationEditTransport {
@@ -116,6 +131,13 @@ export type ApplyCorrectionReport = {
 
 /** The bounded number of in-place edits per apply pass. */
 const MAX_EDITS_PER_PASS = 16;
+
+/**
+ * The bounded number of priors one sweep pass drives: beyond the cap the
+ * WHOLE sweep refuses typed with zero writes (the human drives the
+ * remainder one prior at a time — a sweep is never an unbounded fan-out).
+ */
+const MAX_SWEEP_PRIORS = 16;
 
 interface RecordedMessage {
   readonly chat_id: string;
@@ -445,5 +467,338 @@ export function createEditCorrectionEngine(deps: {
     };
   }
 
-  return { applyCorrection };
+  /**
+   * The WHOLE-STORY CORRECTION SWEEP: ONE revision drives EVERY active
+   * prior publication of the story through `applyCorrection`, one prior at
+   * a time (the 8.4 documented carry — the engine's own report listed the
+   * other active priors for a "later orchestration slice"; this is it).
+   *
+   * THE SAFETY CONTRACT:
+   *  - the sweep-level gates refuse typed with ZERO writes: an unknown
+   *    class, the minor-detail class (the ecl1 machine never edits a
+   *    minor detail — such a payload can only be an abuse), and an
+   *    unbounded prior set (the 16-prior cap — the human drives the
+   *    remainder);
+   *  - the per-prior AT-MOST-ONCE anchor is the deterministic caid1 LINK
+   *    audit id (revision, prior): a prior the revision already drove is
+   *    skipped (`already_swept`) with ZERO channel effects — a re-sweep
+   *    can never re-edit a message;
+   *  - the ORIGINAL envelope is re-derived per prior from the STORED
+   *    draft document and VERIFIED against the ledger's exact-bytes
+   *    text_hash BEFORE the edits are derived — a document altered after
+   *    publication refuses that prior (`content_changed_after_publication`),
+   *    never silently re-interpreted;
+   *  - PER-PRIOR ISOLATION: one refused prior never blocks the others —
+   *    the aggregate reports every prior honestly;
+   *  - the gate is the engine's own: OFF = per-prior decision-only plans,
+   *    ZERO writes, ZERO transport calls.
+   */
+  async function applyCorrectionSweep(input: CorrectionSweepInput): Promise<CorrectionSweepReport> {
+    // 1. The sweep-level gates (fail-closed, before ANY read).
+    if (
+      typeof input !== 'object' ||
+      input === null ||
+      typeof input.storyId !== 'string' ||
+      input.storyId.length === 0 ||
+      input.storyId.length > 128 ||
+      typeof input.revisionId !== 'string' ||
+      input.revisionId.length === 0 ||
+      input.revisionId.length > 256 ||
+      !isCorrectionClass(input.correctionClass)
+    ) {
+      return { ok: false, reason: 'invalid_input' };
+    }
+    if (
+      typeof input.statement !== 'string' ||
+      input.statement.length === 0 ||
+      input.statement.length > CORRECTION_STATEMENT_MAX_UNITS
+    ) {
+      return { ok: false, reason: 'invalid_input' };
+    }
+    const correctionClass = input.correctionClass as CorrectionClass;
+    if (correctionClass === 'minor_detail') {
+      return { ok: false, reason: 'minor_detail_not_editable' };
+    }
+
+    // 2. The story's active priors (the supersedable rows, oldest first).
+    //    The sweep owns no publication of its own: the exclusion parameter
+    //    is the empty sentinel — every id is non-empty, so nothing is
+    //    excluded (documented at the store's contract).
+    const priors = await listActivePublicationsForStory(deps.executor, {
+      storyId: input.storyId,
+      excludePublicationId: '',
+    });
+    if (priors.length > MAX_SWEEP_PRIORS) {
+      return { ok: false, reason: 'too_many_priors' };
+    }
+
+    // 3. One prior at a time — the deterministic store order, isolated.
+    const outcomes: SweepPriorOutcome[] = [];
+    for (const prior of priors) {
+      // 3a. The at-most-once anchor: the deterministic LINK audit id this
+      //     revision wrote when it drove THIS prior. Recorded => skip.
+      const anchor = await deriveCorrectionAuditEventId({
+        action: 'link',
+        revisionId: input.revisionId,
+        chatId: prior.id,
+        messageId: 1,
+      });
+      if (anchor.ok) {
+        const existing = await findCorrectionAuditEvent(deps.executor, anchor.id);
+        if (existing !== null) {
+          outcomes.push({ outcome: 'already_swept', publicationId: prior.id });
+          continue;
+        }
+      }
+
+      // 3b. The ledger + the verified original envelopes.
+      const messages = await listPublicationMessages(deps.executor, prior.id);
+      const envelopes = await derivePriorOriginalEnvelopes(deps.executor, prior, messages);
+      if (!envelopes.ok) {
+        deps.logger.warn('correction_sweep.prior_refused', {
+          publicationId: prior.id,
+          reason: envelopes.reason,
+        });
+        outcomes.push({ outcome: 'refused', publicationId: prior.id, reason: envelopes.reason });
+        continue;
+      }
+
+      // 3c. The per-message render — ONLY the ledger messages whose
+      //     envelope the derivation vouched for (a photo ordinal is not
+      //     text-editable; the follow-up route remains). The kind rides
+      //     the derivation (the album's ordinal 0 is the CAPTION seam).
+      const editableByOrdinal = new Map(
+        envelopes.envelopes.map((envelope) => [envelope.ordinal, envelope]),
+      );
+      const sourceMessages: CorrectionEditSourceMessage[] = messages
+        .filter((message) => editableByOrdinal.has(message.ordinal))
+        .map((message) => ({
+          chatId: message.chat_id,
+          messageId: message.message_id,
+          ordinal: message.ordinal,
+          kind: editableByOrdinal.get(message.ordinal)!.kind,
+          originalEnvelopeJson: editableByOrdinal.get(message.ordinal)!.envelopeJson,
+        }));
+      const derived = deriveCorrectionEdits({
+        correctionClass,
+        statement: input.statement,
+        messages: sourceMessages,
+      });
+      if (!derived.ok) {
+        const reason =
+          derived.reason === 'too_many_messages'
+            ? 'edits_too_many_messages'
+            : `edits_derivation_failed:${derived.reason}`;
+        outcomes.push({ outcome: 'refused', publicationId: prior.id, reason });
+        continue;
+      }
+
+      // 3d. The engine's own apply path (the gate, the plan, the supersede,
+      //     the audit, the transport, the outcomes — one contract, reused).
+      const applied = await applyCorrection({
+        storyId: input.storyId,
+        priorPublicationId: prior.id,
+        revisionId: input.revisionId,
+        correctionClass,
+        followUpMaterial: input.followUpMaterial,
+        correctionFollowUpDesired: input.correctionFollowUpDesired,
+        edits: derived.edits.map((edit) => ({
+          chatId: edit.chatId,
+          messageId: edit.messageId,
+          shape: edit.shape,
+          content: edit.content,
+        })),
+      });
+      if (!applied.applied) {
+        if (applied.refusal === undefined) {
+          // The gate-OFF decision-only shape: the plan without effects.
+          outcomes.push({
+            outcome: 'decision_only',
+            publicationId: prior.id,
+            disposition: applied.disposition,
+            planReasons: applied.planReasons,
+          });
+          continue;
+        }
+        outcomes.push({
+          outcome: 'refused',
+          publicationId: prior.id,
+          reason: applied.refusal,
+        });
+        continue;
+      }
+      outcomes.push({
+        outcome: 'applied',
+        publicationId: prior.id,
+        disposition: applied.disposition as CorrectionDisposition,
+        planReasons: applied.planReasons,
+        supersededPublications: applied.supersededPublications,
+        auditLinkEventId: applied.auditLinkEventId,
+        edits: applied.edits,
+      });
+    }
+
+    const totals = {
+      priors: outcomes.length,
+      applied: outcomes.filter((entry) => entry.outcome === 'applied').length,
+      skipped: outcomes.filter((entry) => entry.outcome === 'already_swept').length,
+      refused: outcomes.filter((entry) => entry.outcome === 'refused').length,
+      decisionOnly: outcomes.filter((entry) => entry.outcome === 'decision_only').length,
+    };
+    deps.logger.info('correction_sweep.completed', {
+      storyId: input.storyId,
+      revisionId: input.revisionId,
+      ...totals,
+    });
+    return {
+      ok: true,
+      storyId: input.storyId,
+      revisionId: input.revisionId,
+      priors: outcomes,
+      totals,
+    };
+  }
+
+  return { applyCorrection, applyCorrectionSweep };
+}
+
+// ---------------------------------------------------------------------------
+// the WHOLE-STORY CORRECTION SWEEP (the 8.4 documented carry, closed)
+// ---------------------------------------------------------------------------
+
+/** The per-prior sweep outcome (the honest aggregate, one entry per prior). */
+export type SweepPriorOutcome =
+  | {
+      readonly outcome: 'applied';
+      readonly publicationId: string;
+      readonly disposition: CorrectionDisposition;
+      readonly planReasons: readonly string[];
+      readonly supersededPublications: readonly string[];
+      readonly auditLinkEventId: string;
+      readonly edits: readonly {
+        readonly messageId: number;
+        readonly outcome: CorrectionEditOutcome;
+        readonly auditEventId: string;
+        readonly code?: string;
+      }[];
+    }
+  | { readonly outcome: 'already_swept'; readonly publicationId: string }
+  | {
+      readonly outcome: 'decision_only';
+      readonly publicationId: string;
+      readonly disposition: CorrectionDisposition | null;
+      readonly planReasons: readonly string[];
+    }
+  | { readonly outcome: 'refused'; readonly publicationId: string; readonly reason: string };
+
+export type CorrectionSweepReport =
+  | {
+      readonly ok: true;
+      readonly storyId: string;
+      readonly revisionId: string;
+      readonly priors: readonly SweepPriorOutcome[];
+      readonly totals: {
+        readonly priors: number;
+        readonly applied: number;
+        readonly skipped: number;
+        readonly refused: number;
+        readonly decisionOnly: number;
+      };
+    }
+  | {
+      readonly ok: false;
+      readonly reason: 'invalid_input' | 'minor_detail_not_editable' | 'too_many_priors';
+    };
+
+export interface CorrectionSweepInput {
+  readonly storyId: string;
+  /** The correction revision identity (determines the at-most-once anchor). */
+  readonly revisionId: string;
+  readonly correctionClass: string;
+  readonly statement: string;
+  readonly followUpMaterial: boolean;
+  readonly correctionFollowUpDesired: boolean;
+}
+
+/**
+ * The per-prior ORIGINAL envelope derivation: the exact bytes the readers
+ * saw, re-derived from the STORED draft document and VERIFIED against the
+ * ledger's exact-bytes text_hash BEFORE any edit is derived.
+ *
+ *  - a TEXT prior: the scheduler's own render (`renderEditorialPostText`)
+ *    — ONE envelope for the ledger's ordinal 0;
+ *  - an ALBUM prior: the ordinal-0 CAPTION envelope only (a photo is not
+ *    text-editable — the other ordinals are honestly untouched by a text
+ *    correction; the follow-up publication is the route for deeper
+ *    corrections).
+ *
+ * A mismatch between the re-derived text and the ledger's recorded hash
+ * (`content_changed_after_publication`) refuses the prior — the correction
+ * is never prepended onto text the readers did not actually see.
+ */
+type PriorEnvelopeDerivation =
+  | {
+      readonly ok: true;
+      readonly envelopes: readonly {
+        readonly ordinal: number;
+        readonly envelopeJson: string;
+        readonly kind: 'text' | 'caption';
+      }[];
+    }
+  | { readonly ok: false; readonly reason: string };
+
+async function derivePriorOriginalEnvelopes(
+  executor: DbExecutor,
+  prior: PublicationRow,
+  messages: readonly { readonly ordinal: number; readonly text_hash: string | null }[],
+): Promise<PriorEnvelopeDerivation> {
+  const draftRow = await executor.first<{ readonly document_json: string }>({
+    sql: `SELECT document_json FROM drafts WHERE id = ?`,
+    params: [prior.draft_id],
+  });
+  if (!draftRow) return { ok: false, reason: 'prior_draft_missing' };
+
+  const ordinalZero = messages.find((message) => message.ordinal === 0);
+  if (!ordinalZero) return { ok: false, reason: 'prior_ledger_ordinal_zero_missing' };
+  if (ordinalZero.text_hash === null || ordinalZero.text_hash.length === 0) {
+    return { ok: false, reason: 'ledger_text_hash_absent' };
+  }
+
+  // The ALBUM route: the ordinal-0 caption is the ONLY editable envelope.
+  if (discriminateAlbumDocument(draftRow.document_json) === 'album') {
+    const parsed: unknown = JSON.parse(draftRow.document_json) as unknown;
+    const read = await readAlbumContentDocumentV1(parsed);
+    if (!read.ok) return { ok: false, reason: 'prior_document_unreadable' };
+    const album: AlbumContentDocumentV1 = read.document;
+    if (album.caption === undefined) {
+      // An album without a caption has no text a correction could edit
+      // in place — the honest no-target refusal (the follow-up route
+      // remains for the story).
+      return { ok: false, reason: 'no_edit_target' };
+    }
+    const hash = await contentTextHash(album.caption.text);
+    if (!hash.ok || hash.hash !== ordinalZero.text_hash) {
+      return { ok: false, reason: 'content_changed_after_publication' };
+    }
+    const serialized = serializeRichTextEnvelope(album.caption);
+    if (!serialized.ok) return { ok: false, reason: 'prior_document_unreadable' };
+    return {
+      ok: true,
+      envelopes: [{ ordinal: 0, envelopeJson: serialized.json, kind: 'caption' as const }],
+    };
+  }
+
+  // The TEXT route: the scheduler's own render of the stored document.
+  const rendered = renderEditorialPostText(draftRow.document_json);
+  if (!rendered.ok) return { ok: false, reason: 'prior_document_unreadable' };
+  const hash = await contentTextHash(rendered.text);
+  if (!hash.ok || hash.hash !== ordinalZero.text_hash) {
+    return { ok: false, reason: 'content_changed_after_publication' };
+  }
+  const serialized = serializeRichTextEnvelope(rendered.envelope);
+  if (!serialized.ok) return { ok: false, reason: 'prior_document_unreadable' };
+  return {
+    ok: true,
+    envelopes: [{ ordinal: 0, envelopeJson: serialized.json, kind: 'text' as const }],
+  };
 }

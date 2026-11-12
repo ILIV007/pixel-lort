@@ -1494,6 +1494,45 @@ independent decisions; executing them is NOT part of this round.
       priors for a later orchestration slice; the LIVE wiring stays
       BLOCKED_LIVE (Posidon only). «Failed-publication idempotency» was
       delivered by Phase 8.2 (pidek1 + the ledger).
+- [x] Phase 8.5 (ADR-0062; app 1.36.0, schema still 6 — ZERO DDL): the TWO
+      documented carries of the plan's slice 2 closed — the album DRAFT
+      PRODUCER and the WHOLE-STORY correction sweep. (1) The producer (the
+      ADR-0060 carry): the LEDGER-BOUND editorial flow
+      (`produceAlbumDraft` + `enqueueAlbumDraft` over the NEW
+      `album-draft-store`) — the plan from the pure 7.2 planner (the ONLY
+      legal plan path), every item resolved to an UPLOADED media_assets row
+      through the SAME `resolveAssetReuse` predicate the send/evidence
+      paths enforce (uploaded + PUBLICATION_MEDIA_RIGHTS_V1 + the kind
+      match; NO fetch, NO staging, NO transport, NO license minted — an
+      unknown echo refuses exactly like the send gate, OD-010 stands),
+      ALL-OR-NOTHING with the per-item reasons distinguished
+      (no_uploaded_asset / rights_not_publishable / kind_mismatch) and
+      ZERO durable writes on a refusal, the document from the ONLY legal
+      construction path, the draft ships 'ready' (the machine mints no
+      approval) with the version fence + the honest duplicate/conflict
+      mapping, and the enqueue gated by the ADR-0060 discriminator (a text
+      draft can never ride the album enqueuer) riding the existing
+      idempotent enqueuePublication — an explicit approval transition is
+      the ONLY route a publication row is created. (2) The sweep (the 8.4
+      carry): `engine.applyCorrectionSweep` — ONE revision drives EVERY
+      active prior through the engine's own applyCorrection one prior at a
+      time, the deterministic caid1 LINK audit as the per-(revision, prior)
+      at-most-once skip anchor (a re-sweep = already_swept, ZERO channel
+      effects), the original envelope re-derived from the STORED draft
+      document and VERIFIED against the ledger's exact-bytes text_hash
+      BEFORE the edits are derived (content_changed_after_publication
+      refuses that prior — the readers' seen text is never re-interpreted),
+      an album prior corrects ONLY its ordinal-0 caption through the
+      caption seam, the 16-prior bounded cap refusing typed with zero
+      writes, per-prior isolation with the honest aggregate
+      (applied/already_swept/decision_only/refused), the gate is the
+      engine's own. RED-first held: the producer suite real RED
+      (cannot-resolve-module) + the sweep suite 11/11 behavioral RED on the
+      unfixed tree, then GREEN 16+11 (both registered in test:db); the
+      publication-84/85/86 regressions green UNMODIFIED. HONEST CARRY: the
+      album-draft CAPTURING side (the admin surface that gathers a media
+      group from real Telegram updates) and the write-capable queue
+      dispositions stay carried; LIVE surfaces BLOCKED_LIVE (Posidon only).
 - [x] R1.19 (ADR-0047; app 1.14.0 candidate, schema still 3): the Telegram
       rich-text FOUNDATION — dependency-pulled for future editorial input and
       Phase 8/9 publishing, NOT a completion of either phase. Bounded typed
