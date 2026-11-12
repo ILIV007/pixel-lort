@@ -59,6 +59,7 @@ import type { WorkerEnv } from '../../../shared/types/env';
 import { createTelegramIngress } from '../../../application/telegram-ingress';
 import { createEditorialReviewService } from '../../../application/editorial/draft-review-view';
 import { createAdminQueueViewService } from '../../../application/publishing/queue-view-service';
+import { createAdminStoryViewService } from '../../../application/publishing/story-view-service';
 import { createAdminPostService } from '../../../application/admin-post/admin-post-service';
 import { createAuthorizationService } from '../../../admin/authorization';
 import { createCommandRouter } from '../../../admin/command-router';
@@ -240,6 +241,9 @@ export async function handleTelegramWebhook(
   // Phase 9A: the read-only queue gate is parsed by the SAME fail-closed
   // phase9 config (independent flag; default false).
   const queueEnabled = review.config.queueEnabled;
+  // Phase 9B: the read-only story gate is parsed by the SAME fail-closed
+  // phase9 config (independent flag; default false).
+  const storyEnabled = review.config.storyEnabled;
 
   // R1.20-R: the admin post pipeline gates are parsed fail-closed —
   // absent/false AND any invalid-present value both DISABLE (the invalid
@@ -292,6 +296,9 @@ export async function handleTelegramWebhook(
       // Phase 9A: the read-only /queue gate (fail-closed, default false) —
       // gates ONLY that observation command.
       queueEnabled,
+      // Phase 9B: the read-only /story gate (fail-closed, default false) —
+      // gates ONLY that observation command.
+      storyEnabled,
     }),
     // R1.18: the read-only review service is wired ONLY while the gate is
     // ON — the SAME production factory the offline demo shares.
@@ -306,6 +313,15 @@ export async function handleTelegramWebhook(
           // wiring is BLOCKED_LIVE — ADR-0058): the screen reads the honest
           // constant false — decision-only observation, never a pretend
           // live scheduler.
+          sendGateEnabled: false,
+        })
+      : undefined,
+    // Phase 9B: the story view service is wired ONLY while its gate is ON;
+    // the SAME honest send-gate note applies (the screen is observation-
+    // only and never pretends a live scheduler exists).
+    adminStoryView: storyEnabled
+      ? createAdminStoryViewService({
+          executor,
           sendGateEnabled: false,
         })
       : undefined,

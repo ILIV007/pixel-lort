@@ -127,6 +127,7 @@ import type { Clock } from '../shared/time/clock';
 import type { Logger } from '../observability/logger';
 import type { EditorialReviewService } from './editorial/draft-review-view';
 import type { AdminQueueViewService } from './publishing/queue-view-service';
+import type { AdminStoryViewService } from './publishing/story-view-service';
 import type { AdminPostButtons, AdminPostService } from './admin-post/admin-post-service';
 import type { PostContentDocument } from '../domain/admin-post/post-content';
 
@@ -206,6 +207,14 @@ export interface TelegramIngressDeps {
    */
   readonly adminQueueView?: AdminQueueViewService;
   /**
+   * Phase 9B: the injected read-only story view service that executes the
+   * typed `story_view` action the router emits while the
+   * `ADMIN_STORY_ENABLED` gate is ON. The router NEVER queries D1; when
+   * the service is absent the action fails retryably (honest
+   * service_unavailable — never silently skipped).
+   */
+  readonly adminStoryView?: AdminStoryViewService;
+  /**
    * R1.20-R: the injected admin post pipeline service that executes the
    * typed `admin_post_*` actions the router emits while the
    * `ADMIN_POST_ENABLED` gate is ON. Absent = retryable wiring failure,
@@ -237,6 +246,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     botApi,
     editorialReview,
     adminQueueView,
+    adminStoryView,
     adminPost,
     clock,
     logger,
@@ -496,6 +506,18 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         }
         const view = await adminQueueView.queueView(action.uiLanguage);
         await sendSafely(action.chatId, view, 'queue_view');
+        return;
+      }
+      case 'story_view': {
+        // Phase 9B read-only story surface: the reads happen in the
+        // injected service; a missing service is a retryable wiring
+        // failure, never a silent skip and never a fabricated empty reply.
+        if (adminStoryView === undefined) {
+          logger.warn('telegram.action.story_unavailable', { action: action.type });
+          throw new AppError('service_unavailable');
+        }
+        const view = await adminStoryView.storyView(action.storyId, action.uiLanguage);
+        await sendSafely(action.chatId, view, 'story_view');
         return;
       }
       case 'set_admin_ui_language': {

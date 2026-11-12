@@ -4,6 +4,7 @@ import { createTelegramIngress } from '../../src/application/telegram-ingress';
 import type { TelegramIngressDeps } from '../../src/application/telegram-ingress';
 import { createEditorialReviewService } from '../../src/application/editorial/draft-review-view';
 import { createAdminQueueViewService } from '../../src/application/publishing/queue-view-service';
+import { createAdminStoryViewService } from '../../src/application/publishing/story-view-service';
 import { createAuthorizationService } from '../../src/admin/authorization';
 import { createCommandRouter } from '../../src/admin/command-router';
 import { createAdminRoleLookup } from '../../src/adapters/telegram/admin-lookup';
@@ -116,10 +117,14 @@ export interface ReviewHarnessOptions {
   readonly reviewEnabled?: boolean;
   /** Override the ADMIN_QUEUE_ENABLED parsing result (default: disabled). */
   readonly queueEnabled?: boolean;
+  /** Override the ADMIN_STORY_ENABLED parsing result (default: disabled). */
+  readonly storyEnabled?: boolean;
   /** Omit the editorial review service (wiring-failure tests). */
   readonly omitReviewService?: boolean;
   /** Omit the queue view service (wiring-failure tests). */
   readonly omitQueueService?: boolean;
+  /** Omit the story view service (wiring-failure tests). */
+  readonly omitStoryService?: boolean;
   readonly botApi?: TelegramBotApiClient;
   readonly executor?: CountingExecutor;
 }
@@ -155,12 +160,16 @@ export function buildReviewHarness(options: ReviewHarnessOptions = {}): ReviewHa
       applicationVersion: APPLICATION_VERSION,
       reviewEnabled,
       queueEnabled: options.queueEnabled ?? false,
+      storyEnabled: options.storyEnabled ?? false,
     }),
     ...(options.omitReviewService
       ? {}
       : { editorialReview: createEditorialReviewService({ executor }) }),
     ...(options.queueEnabled === true && !options.omitQueueService
       ? { adminQueueView: createAdminQueueViewService({ executor, sendGateEnabled: false }) }
+      : {}),
+    ...(options.storyEnabled === true && !options.omitStoryService
+      ? { adminStoryView: createAdminStoryViewService({ executor, sendGateEnabled: false }) }
       : {}),
     botApi: client,
     clock: fixedClock(NOW),

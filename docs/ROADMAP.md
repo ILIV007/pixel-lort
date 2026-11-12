@@ -1583,6 +1583,28 @@ independent decisions; executing them is NOT part of this round.
       REAL-D1 tests registered in test:db. Opaque action tokens and the
       multi-step sessions pre-exist (R1.20-R/R1.21); the story screen and
       the write-capable queue dispositions remain.
+- [x] Phase 9B (app 1.33.0, schema still 6 — ZERO DDL): the read-only
+      story-identity screen (`/story <storyId>`) in the EXACT R1.18/9A
+      shape — the independent fail-closed `ADMIN_STORY_ENABLED` flag
+      (default false, invalid-present = disabled) gating ONLY that command
+      and its /help advertisement; the router stays PURE (the
+      REQUIRED one-opaque-token grammar — no list form — validated before
+      any query; the typed `story_view` action), the injected story-view
+      service performs exactly TWO bounded read-only SELECTs (the story
+      identity PK lookup with the bounded headline projection + the capped
+      per-story publication history over `idx_publications_story`, LIMIT
+      9 = 8 visible + 1 probe; identity/status/counters/stable codes only
+      — never draft content, never destinations); the HONEST boundary: NO
+      drafts/corrections reads exist because NO index covers
+      `drafts.story_id`/`corrections.story_id` — a per-story listing there
+      would be a full scan (pinned by the ZERO `FROM drafts` assertion);
+      the reserved-skeleton renderer with the honest empty/not-found/
+      merged states and the honest send-gate note; RBAC `story.view` (the
+      TOTAL blueprint map pinned — every non-owner role holds it); 32
+      tests (grammar/flag/renderer/routing + the REAL EXPLAIN QUERY PLAN
+      family) registered in test:db. docs/reviews/PHASE_9B_STORY_SCREEN.md
+      records the design and the three in-round findings. The
+      write-capable queue dispositions remain.
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ⬜
