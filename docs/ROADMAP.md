@@ -1533,6 +1533,65 @@ independent decisions; executing them is NOT part of this round.
       album-draft CAPTURING side (the admin surface that gathers a media
       group from real Telegram updates) and the write-capable queue
       dispositions stay carried; LIVE surfaces BLOCKED_LIVE (Posidon only).
+- [x] Phase 8.6 (ADR-0063; app 1.37.0, schema still 6 — ZERO DDL): the
+      plan's SLICE 3 delivered — the measurable fail-closed AUTO gates and
+      the CONNECTED end-to-end chain (source → story/evidence → draft →
+      review → scheduling demonstrated over REAL D1 with the provider PORT
+      and the Telegram TRANSPORT the only artificial pieces). (1) The PURE
+      candidate gate `ag1` (`evaluateAutoPublishGate`, src/domain/publishing/
+      auto-gate.ts) over the STORED draft bytes only: the document re-read
+      through the send path's own strict reader (`renderEditorialPostText` —
+      a refused shape, a laundered claim status or a composition over the
+      send caps can never be AUTO-approved; a doomed publication is never
+      created quietly); the fact-guard report REQUIRED present +
+      well-formed + v1 + snapshot-bound (absence — the flag-off historical
+      shape — is the fail-closed refusal, never a pass); the report TOTAL
+      over the document's own claim indices; ANY non-benign finding on ANY
+      claim ⇒ `requires_review` with the per-claim finding CODES (the
+      injection containment is measurable and bounded — injection text is
+      INERT DATA never interpreted nor obeyed; a claim it generated has no
+      lexical basis in the stored excerpt and refuses BY CODE, never by a
+      semantic-detection claim); zero findings ⇒ `eligible_auto` carrying
+      the report's limitation labels VERBATIM (`lexical_presence_not_truth`
+      rides every verdict — references alone are never semantic proof).
+      (2) The FENCED durable transition `approveDraftForAutoPublication`
+      (src/adapters/db/auto-approval-store.ts): ELIGIBILITY IS NOT
+      ACTIVATION (the eligible verdict AND the independent enablement flag
+      both required; either missing = ZERO writes); the fence
+      `UPDATE drafts SET status='auto_approved' WHERE id = ? AND
+status = 'ready'` (the rowcount the authority; the post-fence re-read
+      distinguishes the honest `already_auto_approved` idempotent
+      absorption from `not_ready` — a HUMAN approval never flipped); a
+      non-eligible verdict refuses BEFORE any write; ONE system audit event
+      (`draft_auto_approved`, actor `auto_gate:ag1`) carrying the measured
+      data (gate version, claim count, fact-guard version, limitation
+      labels) — never document content, never secrets; the `auto_approved`
+      value the outbox `MODE_STATUS_MATRIX` already accepted for the
+      `auto`/`safe_auto` modes finally has its producer — the AUTO lane
+      reachable end-to-end while every activation stays Posidon's.
+      (3) The connected demonstration (tests/integration/
+      editorial-94-auto-gate-e2e.test.ts, 6 REAL-D1 registered in test:db):
+      REAL snapshot → durable job → prepare-draft (fake provider port) →
+      budget authority + fenced commit (the fact-guard report riding the
+      SAME commit) → the gate over the STORED bytes → the fenced
+      transition → idempotent `enqueuePublication` (auto mode; the
+      duplicate absorbed) → the scheduler scan/claim/psp1 → the rendered
+      send through the FAKE transport → the at-most-once ledger (one
+      ordinal-0 record with the content hash) → published — with the
+      refusal family pinned at the SAME chain (requires_review keeps the
+      ungrounded number on the HUMAN path; report_absent;
+      document_unreadable; gate_disabled with an eligible verdict = ZERO
+      writes; the fence never flipping a human decision). RED-first held:
+      tests/unit/auto-gate.test.ts (15) + the integration suite (6)
+      written FIRST with real RED (cannot-resolve-module on both) then
+      GREEN; the four defect suites (publication-90/91/92, media-93) and
+      the d65d811 families (publication-85/87/88/89,
+      publication-send-safety) plus editorial-64 and publication-82 green
+      UNMODIFIED. HONEST CARRY: the album-draft CAPTURING side (the admin
+      surface that gathers a media group from real Telegram updates), the
+      write-capable queue dispositions, the zod v4 TRACKED migration and
+      the rights-EVIDENCE model (OD-010: scope/expiry/attribution/write
+      surface) stay carried; LIVE surfaces BLOCKED_LIVE (Posidon only).
 - [x] R1.19 (ADR-0047; app 1.14.0 candidate, schema still 3): the Telegram
       rich-text FOUNDATION — dependency-pulled for future editorial input and
       Phase 8/9 publishing, NOT a completion of either phase. Bounded typed
