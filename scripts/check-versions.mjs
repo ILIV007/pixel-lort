@@ -212,6 +212,56 @@ if (versionJson !== null) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The zod runtime dependency gate (Phase 10 tracked carry — the zod v4
+// migration for GHSA-mrhx-c7xc-m3w5, "memory exhaustion while validating
+// oversized constrained collections", fixed in 4.6.6; house pin >= 4.6.7).
+// Both the DECLARED range (package.json) and the INSTALLED version
+// (node_modules) must be the fixed v4 — a downgrade or a stale install
+// fails the gate exactly like a version drift.
+// ---------------------------------------------------------------------------
+
+const ZOD_MIN = [4, 6, 7];
+
+/** @param {string} version @param {number[]} min */
+function versionAtLeast(version, min) {
+  const parts = version.split('.').map((n) => Number.parseInt(n, 10));
+  for (let i = 0; i < min.length; i += 1) {
+    const p = Number.isNaN(parts[i]) ? 0 : parts[i];
+    if (p > min[i]) return true;
+    if (p < min[i]) return false;
+  }
+  return true;
+}
+
+const declaredZod = packageJson?.dependencies?.zod;
+if (typeof declaredZod !== 'string' || !/^\^?(\d+)\.(\d+)\.(\d+)/.test(declaredZod)) {
+  failures.push(
+    `package.json: dependencies.zod missing or unparseable ("${declaredZod ?? ''}") — the v4 migration contract expects ^4.6.7 or higher`,
+  );
+} else if (!versionAtLeast(declaredZod.replace(/^\^/, ''), ZOD_MIN)) {
+  failures.push(
+    `package.json: dependencies.zod ("${declaredZod}") must be >= ${ZOD_MIN.join('.')} (GHSA-mrhx-c7xc-m3w5 fix)`,
+  );
+}
+
+let installedZod = null;
+try {
+  installedZod = JSON.parse(read('node_modules/zod/package.json'));
+} catch {
+  failures.push(
+    'node_modules/zod/package.json: unreadable — run npm install (the zod gate needs the installed dependency)',
+  );
+}
+if (installedZod !== null) {
+  const installedVersion = installedZod?.version;
+  if (typeof installedVersion !== 'string' || !versionAtLeast(installedVersion, ZOD_MIN)) {
+    failures.push(
+      `node_modules/zod: installed version ("${installedVersion ?? ''}") must be >= ${ZOD_MIN.join('.')} (GHSA-mrhx-c7xc-m3w5 fix) — run npm install`,
+    );
+  }
+}
+
 if (failures.length > 0) {
   console.error(`VERSION CONSISTENCY FAILED: ${failures.length} drift finding(s).`);
   for (const failure of failures) {

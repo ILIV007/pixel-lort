@@ -76,7 +76,7 @@ export type EditorialPrepareDraftPayload = z.infer<typeof EditorialPrepareDraftP
  * LOSSLESSLY (ADR-0040 semantics, ADR-0042 §3) — schema-known, never the
  * unknown-type poison class.
  */
-export const PAYLOAD_SCHEMAS: ReadonlyMap<string, z.ZodTypeAny> = new Map<string, z.ZodTypeAny>([
+export const PAYLOAD_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>([
   ['jobs.maintenance_heartbeat', MaintenanceHeartbeatPayloadSchema],
   ['sources.fetch_poll', SourcesPollPayloadSchema],
   ['editorial.prepare_draft', EditorialPrepareDraftPayloadSchema],

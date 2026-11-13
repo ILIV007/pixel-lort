@@ -1774,6 +1774,36 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       as the existing pinned machinery (ingestion/ai/budget-authority/
       attempt-budget). The budget-soft-limit bullet stays carried to the
       Free activation (BLOCKED_LIVE data).
+- [x] Phase 10.2 (app 1.40.0, schema still 6 — ZERO DDL; ADR-0064): the
+      zod v4 MIGRATION — the Phase 10 tracked carry closed (the plan slice
+      5 discipline: compatibility and regression tests, never a blind
+      forced upgrade). The ONLY runtime dependency moves
+      `zod 3.25.76 -> ^4.6.7` closing GHSA-mrhx-c7xc-m3w5
+      ("Zod can exhaust memory while validating oversized constrained
+      collections", fixed 4.6.6) at the RUNTIME layer. RED-first adapted
+      to a dependency migration: the NEW contract suite
+      `tests/unit/zod-v4-contract.test.ts` (19 tests) written FIRST on the
+      pre-migration tree — 2 REAL RED markers (the installed-version gate;
+      the v4 canonical issue-message shape vs the v3 "Required") + 17
+      preservation pins locking the parse contracts of every zod surface
+      (the queue envelope incl. the strict smuggled-field refusal and the
+      `unsupported_version` outcome, the durable payload schemas incl. the
+      map identity, the AI output classifier stable codes, the source
+      registry incl. the custom-issue code `custom` at the
+      config/autoPublishThreshold paths) — and the NEW zod gate in
+      `scripts/check-versions.mjs` (declared range AND installed version >= 4.6.7) recorded exit 1 BEFORE the install. The migration: the
+      minimal 3-site v4 API-form change (`z.record` 2-arg — the key schema
+      now required, compile-pinned; `z.ZodIssueCode.custom` -> the string
+      literal `'custom'`; `z.ZodTypeAny` -> `z.ZodType`). The
+      behavior-preservation proof: the contract suite 19/19 GREEN
+      post-migration (both markers flipped; the observed v4 message
+      matched the pinned shape) + the FULL unit suite 205 files/2807
+      tests GREEN UNMODIFIED (zero behavioral fallout, zero weakened
+      assertions). The honest dependency inventory: the nested dev-chain
+      zod 4.4.3 inside @cloudflare/vitest-pool-workers is UPSTREAM-pinned
+      (even pool-workers 0.23.0 depends on zod 4.4.3) — TEST-RUNNER-ONLY,
+      no Worker-runtime path, a tracked carry with the other dev-chain
+      advisories (sharp/undici/minimatch); NO `audit fix --force`.
 - [ ] Security test suite (webhook spoofing, replay, SSRF, injection).
 - [ ] Budget counters and soft-limit enforcement.
 

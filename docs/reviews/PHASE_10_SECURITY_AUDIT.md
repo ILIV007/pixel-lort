@@ -67,6 +67,16 @@ vite family advisories cleared (16 → 13). NO `audit fix --force` was run
   is the zod@4 MAJOR migration (an API-semantics change across the job/
   ai/registry/connector schemas) — scheduled as a tracked maintenance
   item, NOT blind-forced mid-round. Residual risk: bounded-low.
+  **UPDATE (1.40.0, ADR-0064): CLOSED at the runtime layer** — the direct
+  dependency moved to `zod@^4.6.7` with the migration proven
+  behavior-preserving (a RED-first contract suite: 2 real RED markers on
+  the pre-migration tree, then 19/19 GREEN + the FULL suite
+  205 files/2807 tests green UNMODIFIED; the new zod gate in
+  `scripts/check-versions.mjs` requires both the declared range and the
+  installed version >= 4.6.7). The nested dev-chain zod 4.4.3 inside
+  `@cloudflare/vitest-pool-workers` remains upstream-pinned (even
+  pool-workers 0.23.0 depends on zod 4.4.3): TEST-RUNNER-ONLY, no
+  Worker-runtime path, still a tracked carry.
 - **sharp (high, via @cloudflare/vitest-pool-workers)**: test-infra
   ONLY (no runtime path exists — the Worker never imports sharp). The
   fix is a breaking pool-workers downgrade: rejected (it would trade a
