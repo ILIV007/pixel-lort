@@ -42,6 +42,7 @@ import { AppError, isAppError } from '../../shared/errors/app-error';
 import { derivePublicationIdempotencyKey } from '../../domain/publishing/publication-identity';
 import {
   isPublicationStatus,
+  OUTBOX_LIFECYCLE_VERSION,
   PUBLICATION_STATUSES,
   publicationMaxAttempts,
   transitionPublication,
@@ -50,6 +51,65 @@ import {
 
 const MAX_DESTINATION_LENGTH = 256;
 const MAX_LAST_ERROR_LENGTH = 128;
+
+// ---------------------------------------------------------------------------
+// The per-outcome audit integration (po1 — the ADR-0058 deferred carry):
+// every generation-CONSUMING terminal write and every evidence heal records
+// exactly ONE audit_events row with a DETERMINISTIC id, so the operator's
+// one-place ledger carries the honest per-attempt story of the ADR-0032
+// gate (what was confirmed, what parked uncertain, what dead-lettered, what
+// a recorded proof healed). The metadata carries the MEASURED data only —
+// never the destination, never document content, never a chat id. The
+// duplicate audit id is absorbed (the cancel house shape): the same logical
+// outcome is written once even across crash retries, and an audit failure
+// never rolls back the status write (the status is the authority).
+// ---------------------------------------------------------------------------
+
+export const PUBLICATION_OUTCOME_AUDIT_VERSION = 'po1' as const;
+export const PUBLICATION_OUTCOME_AUDIT_ACTOR_TYPE = 'system' as const;
+export const PUBLICATION_OUTCOME_AUDIT_ACTOR_ID =
+  `publication_scheduler:${OUTBOX_LIFECYCLE_VERSION}` as const;
+export const PUBLICATION_OUTCOME_ACTIONS = {
+  publish: 'publication_sent_confirmed',
+  mark_uncertain: 'publication_uncertain_parked',
+  dead_letter: 'publication_dead_lettered',
+  fail_hold: 'publication_failed_held',
+  schedule_retry: 'publication_retry_scheduled',
+  healed: 'publication_evidence_healed',
+} as const;
+
+async function recordOutcomeAudit(
+  executor: DbExecutor,
+  input: {
+    readonly id: string;
+    readonly action: string;
+    readonly publicationId: string;
+    readonly metadata: Record<string, unknown>;
+    readonly nowMs: number;
+  },
+): Promise<void> {
+  try {
+    await executor.run({
+      sql: `INSERT INTO audit_events (id, actor_type, actor_id, action, target_type,
+              target_id, trace_id, metadata_json, created_at)
+            VALUES (?, ?, ?, ?, 'publication', ?, NULL, ?, ?)`,
+      params: [
+        input.id,
+        PUBLICATION_OUTCOME_AUDIT_ACTOR_TYPE,
+        PUBLICATION_OUTCOME_AUDIT_ACTOR_ID,
+        input.action,
+        input.publicationId,
+        JSON.stringify(input.metadata),
+        input.nowMs,
+      ],
+    });
+  } catch (error) {
+    if (!(isAppError(error) && error.code === 'db_constraint_violation')) {
+      throw error;
+    }
+    // The duplicate audit id absorption (see the block comment above).
+  }
+}
 
 export interface PublicationRow {
   readonly id: string;
@@ -438,7 +498,30 @@ async function writeClaimedTerminal(
       input.generation,
     ],
   });
-  return meta.changes === 1 ? { kind: 'written' } : { kind: 'fence_rejected' };
+  if (meta.changes !== 1) {
+    return { kind: 'fence_rejected' };
+  }
+  // The per-outcome audit (po1): the fenced generation WON — ONE row with
+  // the deterministic id (the metadata is the measured data only).
+  const auditMetadata: Record<string, unknown> = {
+    outcomeVersion: PUBLICATION_OUTCOME_AUDIT_VERSION,
+    reason: input.reason,
+    attempts: input.generation,
+  };
+  if (input.errorCode !== undefined) {
+    auditMetadata['errorCode'] = clampErrorCode(input.errorCode);
+  }
+  if (input.runAfterMs !== undefined) {
+    auditMetadata['runAfterMs'] = input.runAfterMs;
+  }
+  await recordOutcomeAudit(executor, {
+    id: `publication-outcome:${input.publicationId}:${input.generation}:${input.reason}`,
+    action: PUBLICATION_OUTCOME_ACTIONS[input.reason],
+    publicationId: input.publicationId,
+    metadata: auditMetadata,
+    nowMs: input.nowMs,
+  });
+  return { kind: 'written' };
 }
 
 /**
@@ -673,7 +756,22 @@ export async function markWaitingPublicationDeadLetter(
           WHERE id = ? AND status IN ('pending', 'retry_wait') AND attempts >= max_attempts`,
     params: [input.nowMs, input.publicationId],
   });
-  return meta.changes === 1 ? { kind: 'dead_lettered' } : { kind: 'not_dead_letterable' };
+  if (meta.changes !== 1) {
+    return { kind: 'not_dead_letterable' };
+  }
+  await recordOutcomeAudit(executor, {
+    id: `publication-outcome:${input.publicationId}:boundary:dead_letter`,
+    action: PUBLICATION_OUTCOME_ACTIONS.dead_letter,
+    publicationId: input.publicationId,
+    metadata: {
+      outcomeVersion: PUBLICATION_OUTCOME_AUDIT_VERSION,
+      reason: 'dead_letter',
+      boundary: true,
+      errorCode: 'attempt_budget_spent',
+    },
+    nowMs: input.nowMs,
+  });
+  return { kind: 'dead_lettered' };
 }
 
 // ---------------------------------------------------------------------------
@@ -962,7 +1060,25 @@ export async function healFailedToPublished(
           WHERE id = ? AND status = 'failed'`,
     params: [input.nowMs, input.nowMs, input.publicationId],
   });
-  return meta.changes === 1 ? { kind: 'healed' } : { kind: 'no_heal' };
+  if (meta.changes !== 1) {
+    return { kind: 'no_heal' };
+  }
+  // The per-outcome audit (po1): the recorded-evidence exit of the honest
+  // parking — the proof outranked the earlier inference. The heal happens
+  // at most once per row (published is terminal), so the id has no
+  // generation component.
+  await recordOutcomeAudit(executor, {
+    id: `publication-outcome:${input.publicationId}:healed`,
+    action: PUBLICATION_OUTCOME_ACTIONS.healed,
+    publicationId: input.publicationId,
+    metadata: {
+      outcomeVersion: PUBLICATION_OUTCOME_AUDIT_VERSION,
+      reason: 'publish',
+      heal: 'reconciliation',
+    },
+    nowMs: input.nowMs,
+  });
+  return { kind: 'healed' };
 }
 
 /**
@@ -988,7 +1104,24 @@ export async function healClaimedToPublished(
           WHERE id = ? AND status = 'claimed' AND attempts = ?`,
     params: [input.nowMs, input.nowMs, input.publicationId, input.generation],
   });
-  return meta.changes === 1 ? { kind: 'written' } : { kind: 'fence_rejected' };
+  if (meta.changes !== 1) {
+    return { kind: 'fence_rejected' };
+  }
+  // The per-outcome audit (po1): the pre-send heal inside a fresh claim —
+  // the crashed earlier generation's delivery proof closes the recorded
+  // sub-window. Mutually exclusive with the reconciliation heal's pre-state.
+  await recordOutcomeAudit(executor, {
+    id: `publication-outcome:${input.publicationId}:healed`,
+    action: PUBLICATION_OUTCOME_ACTIONS.healed,
+    publicationId: input.publicationId,
+    metadata: {
+      outcomeVersion: PUBLICATION_OUTCOME_AUDIT_VERSION,
+      reason: 'publish',
+      heal: 'pre_send',
+    },
+    nowMs: input.nowMs,
+  });
+  return { kind: 'written' };
 }
 
 export type ReclaimOutcome = { readonly reclaimed: number };

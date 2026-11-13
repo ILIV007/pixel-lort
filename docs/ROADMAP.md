@@ -1464,9 +1464,17 @@ independent decisions; executing them is NOT part of this round.
       the real transport, the enablement flag + owner decision) stays
       BLOCKED_LIVE (Posidon only); the story-layer inputs (game keys,
       event-driven) default conservatively until the producing pipeline
-      exists; the audit_events per-outcome integration is deferred to a
-      dedicated slice; edit/correction (Phase 8.4's supersede consumption)
-      and the carried album-post pipeline integration remain.
+      exists; the audit_events per-outcome integration was deferred to a
+      dedicated slice — CLOSED by Phase 8.2B (ADR-0065, app 1.41.0: every
+      generation-CONSUMING terminal write and every evidence heal records
+      exactly ONE audit_events row with a deterministic id — the five
+      fenced terminals, the boundary budget dead-letter and the two
+      evidence heals under the system actor publication_scheduler:pol1,
+      the measured-metadata-only privacy pin, the fence-rejected NO-audit
+      pin, the no-attempt writes deliberately unaudited — the 8 REAL-D1
+      publication-95 suite RED-first then GREEN with the FULL suite 206
+      files/2815 green UNMODIFIED); edit/correction (Phase 8.4's supersede
+      consumption) and the carried album-post pipeline integration remain.
 - [x] Phase 8.4 (ADR-0059; app 1.26.0, schema still 6 — ZERO DDL): the
       EDIT/CORRECTION workflows — the roadmap bullet «Edit/correction
       workflows» consuming the blueprint §15 scenarios as the PURE ecl1
