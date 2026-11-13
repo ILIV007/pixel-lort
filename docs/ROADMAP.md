@@ -1742,8 +1742,7 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       step 'active', the 15-minute TTL; the rowcount is the authority);
       the finish: the 2..10 bound checked BEFORE any write, then ONE batch
       commits the N `media_assets` candidate rows (status 'candidate',
-      rights_status 'unknown' — OD-010: the machine invents NO permission)
-      + the capture-only canonical identity
+      rights_status 'unknown' — OD-010: the machine invents NO permission) + the capture-only canonical identity
       `album-capture:<sessionId>/<ordinal>` + the session completion, and
       ONE deterministic audit row; the OD-010 boundary PROVEN END-TO-END:
       the REAL producer over the REAL captured rows refuses TYPED at the
