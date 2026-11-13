@@ -50,7 +50,7 @@ describe('Phase 2 format patterns', () => {
 
   it('enforces the safe public-channel username format', () => {
     expect(TARGET_CHANNEL_PATTERN.test(FAKE_CHANNEL)).toBe(true);
-    expect(TARGET_CHANNEL_PATTERN.test('pixellort')).toBe(false);
+    expect(TARGET_CHANNEL_PATTERN.test('pixellores')).toBe(false);
     expect(TARGET_CHANNEL_PATTERN.test('@abc')).toBe(false);
     expect(TARGET_CHANNEL_PATTERN.test('@1abc')).toBe(false);
     expect(TARGET_CHANNEL_PATTERN.test('@bad space')).toBe(false);

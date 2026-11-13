@@ -77,7 +77,7 @@ const IgdbConfigSchema = z
   })
   .strict();
 
-const CONFIG_SCHEMAS: Readonly<Record<string, z.ZodTypeAny>> = {
+const CONFIG_SCHEMAS: Readonly<Record<string, z.ZodType>> = {
   'steam-news': SteamNewsConfigSchema,
   'youtube-playlists': YoutubeConfigSchema,
   'reddit-oauth': RedditConfigSchema,
@@ -106,7 +106,7 @@ const RegistrySourceSchema = z
     autoPublishThreshold: ThresholdSchema,
     content: z.array(z.string().max(64)).max(16),
     attribution: z.string().max(128).optional(),
-    config: z.record(z.unknown()).optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
   .superRefine((source, ctx) => {
@@ -116,14 +116,14 @@ const RegistrySourceSchema = z
       const parsed = schema.safeParse(source.config ?? {});
       if (!parsed.success) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `invalid config for connector ${source.connector}`,
           path: ['config'],
         });
       }
     } else if (source.config !== undefined) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         message: 'connector does not accept config',
         path: ['config'],
       });
@@ -135,7 +135,7 @@ const RegistrySourceSchema = z
         (Array.isArray(source.endpointTemplates) && source.endpointTemplates.length > 0);
       if (!hasEndpoint) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: 'rss source requires endpoint or endpointTemplates',
           path: ['endpoint'],
         });
@@ -144,7 +144,7 @@ const RegistrySourceSchema = z
     // signal_only must never carry an auto threshold (blueprint §11).
     if (source.approvalPolicy === 'signal_only' && source.autoPublishThreshold !== null) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         message: 'signal_only sources cannot have an autoPublishThreshold',
         path: ['autoPublishThreshold'],
       });

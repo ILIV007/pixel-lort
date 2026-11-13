@@ -28,6 +28,12 @@
  *   is deliberately not implemented (blueprint: HTML is the safe default).
  */
 import { isSafeTelegramHtml, type TelegramSafeHtml } from '../../admin/telegram-html';
+import {
+  createRichTextEnvelope,
+  richTextEntitiesWire,
+  type RichTextEnvelope,
+  type RichTextKind,
+} from '../../domain/telegram/rich-text-envelope';
 import { AppError } from '../../shared/errors/app-error';
 import {
   BoundedReadError,
@@ -102,6 +108,16 @@ export interface TelegramSendMessageInput {
   readonly chatId: number;
   readonly text: TelegramSafeHtml;
   readonly disableLinkPreview?: boolean;
+  /**
+   * R1.20-R: optional inline keyboard for CONTROL messages (admin post
+   * preview/status buttons). Absent = identical payload as before. Callback
+   * data strings are the opaque `a:<token>` contract only.
+   */
+  readonly replyMarkup?: {
+    readonly inline_keyboard: ReadonlyArray<
+      ReadonlyArray<{ readonly text: string; readonly callbackData: string }>
+    >;
+  };
 }
 
 export interface TelegramEditMessageInput {
@@ -113,6 +129,154 @@ export interface TelegramEditMessageInput {
 export interface TelegramAnswerCallbackInput {
   readonly callbackQueryId: string;
   readonly text?: string;
+}
+
+// -------------------------------------------------------------------------
+// R1.19 — separate typed entity-based transport (the rich-text capability).
+//
+// Direct entity payloads use EXACT `text` + `entities` (or `caption` +
+// `caption_entities`) with NO `parse_mode` property — the two output modes
+// are distinct typed operations on the SAME client factory, so an ambiguous
+// or raw-invalid combination is impossible by construction. Every input is
+// RE-VALIDATED at runtime (the branded envelope type alone is compile-time;
+// a forged cast cannot bypass the boundary), and any rejection happens
+// BEFORE fetch: zero network calls for invalid content. custom_emoji output
+// requires an explicit trusted eligibility capability; without it the send
+// fails typed (custom_emoji_not_eligible) — never dropped silently, never a
+// pretend formatting success. Retaining a custom-emoji id is NOT a claim of
+// delivery or rendering; Telegram's bot/chat capabilities decide that.
+// -------------------------------------------------------------------------
+
+export type TelegramRichContentErrorReason =
+  'kind_mismatch' | 'invalid_content' | 'custom_emoji_not_eligible';
+
+/** Typed pre-fetch rejection for entity-based output (never reaches fetch). */
+export class TelegramRichContentError extends Error {
+  readonly reason: TelegramRichContentErrorReason;
+
+  constructor(reason: TelegramRichContentErrorReason) {
+    super(`Telegram rich content rejected: ${reason}`);
+    this.name = 'TelegramRichContentError';
+    this.reason = reason;
+  }
+}
+
+export interface TelegramSendRichInput {
+  /**
+   * Numeric chat id, or an operator-configured @username target (Telegram
+   * resolves usernames server-side; never user input).
+   */
+  readonly chatId: number | string;
+  /** kind must be 'text' — a caption envelope fails typed before fetch. */
+  readonly content: RichTextEnvelope;
+  /** Existing documented policy: link previews disabled by default. */
+  readonly disableLinkPreview?: boolean;
+  /**
+   * Explicit trusted capability authorizing custom_emoji OUTPUT for this
+   * send. Default/absent = restricted: any custom_emoji entity fails typed
+   * with ZERO fetch calls.
+   */
+  readonly customEmojiEligible?: boolean;
+}
+
+/**
+ * R1.21 — the SINGLE-media sends. The media is referenced by its Telegram
+ * file_id (opaque, already bounded upstream); the caption is a REQUIRED-kind
+ * 'caption' envelope or absent (a media post without a caption is valid).
+ * A caption envelope here is carried as `caption` + `caption_entities` with
+ * NO parse_mode; there is no text field and no text entities on a media
+ * send — kind mismatches fail typed BEFORE fetch.
+ */
+export interface TelegramSendPhotoRichInput {
+  readonly chatId: number | string;
+  /** Telegram file_id of the photo (opaque reference, never a URL here). */
+  readonly photo: string;
+  /** kind must be 'caption'. Absent = the photo is sent without a caption. */
+  readonly caption?: RichTextEnvelope;
+  readonly customEmojiEligible?: boolean;
+}
+
+export interface TelegramSendVideoRichInput {
+  readonly chatId: number | string;
+  /** Telegram file_id of the video (opaque reference, never a URL here). */
+  readonly video: string;
+  /** kind must be 'caption'. Absent = the video is sent without a caption. */
+  readonly caption?: RichTextEnvelope;
+  readonly customEmojiEligible?: boolean;
+}
+
+/**
+ * Phase 7.3 — the MEDIA-GROUP send (sendMediaGroup, the album transport):
+ * 2..10 items, EACH carrying EXACTLY ONE media reference (an existing
+ * file_id — the reuse path; a direct https URL — the direct-URL path; or
+ * an attach upload — the staged-bytes multipart path), and a caption
+ * envelope that is LEGAL ONLY ON THE FIRST ITEM (the house invariant: the
+ * album caption rides ordinal 0 and nowhere else — a caption on any other
+ * item fails typed BEFORE any fetch). NO parse_mode anywhere.
+ */
+export interface TelegramMediaGroupItemInput {
+  readonly type: 'photo' | 'video';
+  /** An existing Telegram file_id (the reuse path). */
+  readonly fileId?: string;
+  /** A direct https URL (the direct-URL path; Telegram fetches it). */
+  readonly url?: string;
+  /** A staged upload: the attach reference + its bytes (the multipart path). */
+  readonly attach?: {
+    readonly ref: string;
+    readonly bytes: Uint8Array;
+    readonly contentType: string;
+  };
+  /** kind must be 'caption'. LEGAL ONLY on the FIRST item of the group. */
+  readonly caption?: RichTextEnvelope;
+}
+
+export interface TelegramSendMediaGroupRichInput {
+  readonly chatId: number | string;
+  /** 2..10 items (the Bot API media-group bound; blueprint §14 step 7). */
+  readonly items: readonly TelegramMediaGroupItemInput[];
+  readonly customEmojiEligible?: boolean;
+}
+
+/** ONE message of a media-group reply: its id + the returned media file_id. */
+export interface TelegramSentMediaGroupMessage {
+  readonly messageId: number;
+  /** photo = the LARGEST variant's file_id; video = the video's file_id. */
+  readonly fileId?: string;
+}
+
+export interface TelegramEditRichInput {
+  readonly chatId: number;
+  readonly messageId: number;
+  /** kind must be 'text'. */
+  readonly content: RichTextEnvelope;
+  readonly customEmojiEligible?: boolean;
+}
+
+export interface TelegramEditCaptionRichInput {
+  readonly chatId: number;
+  readonly messageId: number;
+  /** kind must be 'caption'. */
+  readonly content: RichTextEnvelope;
+  readonly customEmojiEligible?: boolean;
+}
+
+/**
+ * The cohesive entity-based capability returned by the SAME client factory
+ * implementation. Kept SEPARATE from `TelegramBotApiClient` so every
+ * existing consumer/fake of the admin HTML surface stays untouched.
+ */
+export interface TelegramRichTextClient {
+  sendMessageRich(input: TelegramSendRichInput): Promise<TelegramSentMessage>;
+  /** R1.21: the single-photo channel/preview send (sendPhoto, no parse_mode). */
+  sendPhotoRich(input: TelegramSendPhotoRichInput): Promise<TelegramSentMessage>;
+  /** R1.21: the single-video channel/preview send (sendVideo, no parse_mode). */
+  sendVideoRich(input: TelegramSendVideoRichInput): Promise<TelegramSentMessage>;
+  /** Phase 7.3: the album media-group send (sendMediaGroup, no parse_mode). */
+  sendMediaGroupRich(
+    input: TelegramSendMediaGroupRichInput,
+  ): Promise<readonly TelegramSentMediaGroupMessage[]>;
+  editMessageTextRich(input: TelegramEditRichInput): Promise<boolean>;
+  editMessageCaptionRich(input: TelegramEditCaptionRichInput): Promise<boolean>;
 }
 
 export interface TelegramBotApiClient {
@@ -201,7 +365,9 @@ async function readResponseBounded(response: Response): Promise<string> {
   }
 }
 
-export function createBotApiClient(options: BotApiClientOptions): TelegramBotApiClient {
+export function createBotApiClient(
+  options: BotApiClientOptions,
+): TelegramBotApiClient & TelegramRichTextClient {
   const { botToken, logger } = options;
   const fetchImpl = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   const timeoutMs = options.timeoutMs ?? DEFAULT_TELEGRAM_API_TIMEOUT_MS;
@@ -214,6 +380,7 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
     method: string,
     payload: Record<string, unknown>,
     parseResult: (result: unknown) => T | null,
+    formBody?: FormData,
   ): Promise<T> {
     logger?.debug('telegram.api.request', { method });
 
@@ -221,8 +388,12 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
     try {
       response = await fetchImpl(baseUrl + method, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
+        // The JSON transport (every existing method) declares its content
+        // type; the multipart transport (sendMediaGroup attach uploads,
+        // Phase 7.3) lets the runtime set the multipart boundary — the
+        // content-type header MUST stay absent there.
+        headers: formBody === undefined ? { 'content-type': 'application/json' } : {},
+        body: formBody ?? JSON.stringify(payload),
         // Observe and reject 3xx ourselves; never follow a redirect or
         // read/log Location. This preserves the token boundary on live
         // Cloudflare fetch, including runtimes that reject error mode.
@@ -315,6 +486,122 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
     return messageId === undefined ? null : { messageId };
   }
 
+  /** Bounded non-throwing file_id shape check (the media-group parser). */
+  function isBoundedFileIdWire(value: unknown): value is string {
+    if (typeof value !== 'string' || value.length === 0 || value.length > 256) return false;
+    if (new TextEncoder().encode(value).byteLength > 1024) return false;
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      if (code <= 0x20 || code >= 0x7f) return false;
+    }
+    return true;
+  }
+
+  /** The LARGEST photo variant's file_id (bounded area math, ties keep the later entry). */
+  function largestPhotoFileIdFromWire(photo: readonly unknown[]): string | undefined {
+    let best: { readonly area: number; readonly fileId: string } | undefined;
+    for (const entry of photo) {
+      if (!isRecord(entry)) continue;
+      const width = safeInteger(entry['width'], 1, 100000);
+      const height = safeInteger(entry['height'], 1, 100000);
+      const fileId = entry['file_id'];
+      if (width === undefined || height === undefined || !isBoundedFileIdWire(fileId)) continue;
+      const area = width * height;
+      if (best === undefined || area >= best.area) best = { area, fileId };
+    }
+    return best?.fileId;
+  }
+
+  /**
+   * The media-group reply parser: an array of 2..10 messages, each with a
+   * message_id and (for a media message) the returned file_id — photo =
+   * the LARGEST variant, video = the video's file_id. A malformed entry
+   * fails the WHOLE parse (the response is invalid — never guessed).
+   */
+  function parseMediaGroupResult(result: unknown): TelegramSentMediaGroupMessage[] | null {
+    if (!Array.isArray(result) || result.length < 2 || result.length > 10) return null;
+    const messages: TelegramSentMediaGroupMessage[] = [];
+    for (const entry of result) {
+      const message = parseSentMessage(entry);
+      if (message === null || !isRecord(entry)) return null;
+      let fileId: string | undefined;
+      const photo = entry['photo'];
+      const video = entry['video'];
+      if (Array.isArray(photo)) {
+        fileId = largestPhotoFileIdFromWire(photo);
+        if (fileId === undefined) return null;
+      } else if (isRecord(video)) {
+        const videoFileId = video['file_id'];
+        if (!isBoundedFileIdWire(videoFileId)) return null;
+        fileId = videoFileId;
+      } else {
+        return null; // a media-group reply message carries its media
+      }
+      messages.push({ messageId: message.messageId, fileId });
+    }
+    return messages;
+  }
+
+  /**
+   * RUNTIME file_id gate (R1.21): the media reference is an opaque string —
+   * bounded, printable ASCII, never a URL and never interpreted. A malformed
+   * reference is a typed pre-fetch rejection (permanent; nothing was sent).
+   */
+  function requireFileId(fileId: string): string {
+    if (
+      typeof fileId !== 'string' ||
+      fileId.length === 0 ||
+      fileId.length > 256 ||
+      new TextEncoder().encode(fileId).byteLength > 1024
+    ) {
+      throw new TelegramRichContentError('invalid_content');
+    }
+    for (let index = 0; index < fileId.length; index += 1) {
+      const code = fileId.charCodeAt(index);
+      if (code <= 0x20 || code >= 0x7f) {
+        throw new TelegramRichContentError('invalid_content');
+      }
+    }
+    return fileId;
+  }
+
+  /**
+   * RUNTIME rich-content gate: the branded envelope type is compile-time
+   * only, so the value's OWN fields are re-validated through the domain
+   * validator before any fetch. A forged/malformed value fails typed with
+   * ZERO fetch calls; a valid envelope of the WRONG kind fails
+   * kind_mismatch; custom_emoji output without the explicit capability
+   * fails custom_emoji_not_eligible. The canonical re-validated value is
+   * what actually reaches the payload — nothing unvalidated is forwarded.
+   */
+  function requireRichContent(
+    content: RichTextEnvelope,
+    expectedKind: RichTextKind,
+    customEmojiEligible: boolean,
+  ): RichTextEnvelope {
+    const candidate = content as unknown;
+    const validated = isRecord(candidate)
+      ? createRichTextEnvelope({
+          kind: candidate['kind'],
+          text: candidate['text'],
+          entities: candidate['entities'],
+        })
+      : { ok: false as const, reason: 'invalid_kind' as const };
+    if (!validated.ok) {
+      throw new TelegramRichContentError('invalid_content');
+    }
+    if (validated.envelope.kind !== expectedKind) {
+      throw new TelegramRichContentError('kind_mismatch');
+    }
+    if (
+      !customEmojiEligible &&
+      validated.envelope.entities.some((entity) => entity.type === 'custom_emoji')
+    ) {
+      throw new TelegramRichContentError('custom_emoji_not_eligible');
+    }
+    return validated.envelope;
+  }
+
   return {
     async getMe() {
       return callMethod('getMe', {}, (result) => {
@@ -337,6 +624,18 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
           text: requireSafeHtml(input.text),
           parse_mode: 'HTML',
           disable_web_page_preview: input.disableLinkPreview ?? true,
+          ...(input.replyMarkup !== undefined
+            ? {
+                reply_markup: {
+                  inline_keyboard: input.replyMarkup.inline_keyboard.map((row) =>
+                    row.map((button) => ({
+                      text: button.text,
+                      callback_data: button.callbackData,
+                    })),
+                  ),
+                },
+              }
+            : {}),
         },
         parseSentMessage,
       );
@@ -369,6 +668,212 @@ export function createBotApiClient(options: BotApiClientOptions): TelegramBotApi
           ...(input.text !== undefined ? { text: input.text } : {}),
         },
         (result) => (result === true ? true : null),
+      );
+    },
+
+    // ---- R1.19: direct entity-based transport (NO parse_mode anywhere) --
+    async sendMessageRich(input) {
+      const content = requireRichContent(input.content, 'text', input.customEmojiEligible === true);
+      return callMethod(
+        'sendMessage',
+        {
+          chat_id: input.chatId,
+          text: content.text,
+          entities: richTextEntitiesWire(content.entities),
+          disable_web_page_preview: input.disableLinkPreview ?? true,
+        },
+        parseSentMessage,
+      );
+    },
+
+    // ---- R1.21: single-media sends (file_id + caption envelope) --------
+    async sendPhotoRich(input) {
+      // file_id re-checked at the boundary (bounded printable ASCII): a
+      // malformed reference fails typed with ZERO fetch calls.
+      const photo = requireFileId(input.photo);
+      const caption =
+        input.caption === undefined
+          ? undefined
+          : requireRichContent(input.caption, 'caption', input.customEmojiEligible === true);
+      return callMethod(
+        'sendPhoto',
+        {
+          chat_id: input.chatId,
+          photo,
+          ...(caption !== undefined
+            ? {
+                caption: caption.text,
+                caption_entities: richTextEntitiesWire(caption.entities),
+              }
+            : {}),
+        },
+        parseSentMessage,
+      );
+    },
+
+    async sendVideoRich(input) {
+      const video = requireFileId(input.video);
+      const caption =
+        input.caption === undefined
+          ? undefined
+          : requireRichContent(input.caption, 'caption', input.customEmojiEligible === true);
+      return callMethod(
+        'sendVideo',
+        {
+          chat_id: input.chatId,
+          video,
+          ...(caption !== undefined
+            ? {
+                caption: caption.text,
+                caption_entities: richTextEntitiesWire(caption.entities),
+              }
+            : {}),
+        },
+        parseSentMessage,
+      );
+    },
+
+    // ---- Phase 7.3: the album media-group send (sendMediaGroup) --------
+    async sendMediaGroupRich(input) {
+      // Bounded group: 2..10 items (the Bot API bound; blueprint §14 step 7).
+      if (!Array.isArray(input.items) || input.items.length < 2 || input.items.length > 10) {
+        throw new TelegramRichContentError('invalid_content');
+      }
+      const mediaWire: Record<string, unknown>[] = [];
+      const attachments = new Map<
+        string,
+        { readonly bytes: Uint8Array; readonly contentType: string }
+      >();
+      for (let index = 0; index < input.items.length; index += 1) {
+        const item = input.items[index]!;
+        // The house invariant AT THE TRANSPORT BOUNDARY: a caption is legal
+        // ONLY on the ordinal-0 item — anything else fails typed with ZERO
+        // fetch calls (the 7.1 no-separation layer, extended).
+        if (index !== 0 && item.caption !== undefined) {
+          throw new TelegramRichContentError('invalid_content');
+        }
+        // EXACTLY ONE reference per item.
+        const referenceCount =
+          (item.fileId !== undefined ? 1 : 0) +
+          (item.url !== undefined ? 1 : 0) +
+          (item.attach !== undefined ? 1 : 0);
+        if (referenceCount !== 1) {
+          throw new TelegramRichContentError('invalid_content');
+        }
+        let mediaRef: string;
+        if (item.fileId !== undefined) {
+          mediaRef = requireFileId(item.fileId);
+        } else if (item.url !== undefined) {
+          // The direct-URL path: https-only, bounded (the client boundary is
+          // conservative; the FULL transport rules live in the 7.2 policy).
+          const url = item.url;
+          if (typeof url !== 'string' || !url.startsWith('https://') || url.length > 2048) {
+            throw new TelegramRichContentError('invalid_content');
+          }
+          mediaRef = url;
+        } else if (item.attach !== undefined) {
+          const ref = item.attach.ref;
+          if (
+            typeof ref !== 'string' ||
+            ref.length === 0 ||
+            ref.length > 64 ||
+            !/^[A-Za-z0-9_-]+$/.test(ref)
+          ) {
+            throw new TelegramRichContentError('invalid_content');
+          }
+          if (!(item.attach.bytes instanceof Uint8Array) || item.attach.bytes.byteLength === 0) {
+            throw new TelegramRichContentError('invalid_content');
+          }
+          if (typeof item.attach.contentType !== 'string' || item.attach.contentType.length === 0) {
+            throw new TelegramRichContentError('invalid_content');
+          }
+          mediaRef = `attach://${ref}`;
+          attachments.set(ref, { bytes: item.attach.bytes, contentType: item.attach.contentType });
+        } else {
+          throw new TelegramRichContentError('invalid_content');
+        }
+        const caption =
+          index === 0 && item.caption !== undefined
+            ? requireRichContent(item.caption, 'caption', input.customEmojiEligible === true)
+            : undefined;
+        mediaWire.push({
+          type: item.type === 'video' ? 'video' : 'photo',
+          media: mediaRef,
+          ...(caption !== undefined
+            ? {
+                caption: caption.text,
+                caption_entities: richTextEntitiesWire(caption.entities),
+              }
+            : {}),
+        });
+      }
+
+      if (attachments.size === 0) {
+        // The JSON transport: file_id/URL references only (the reuse path
+        // and the direct-URL path).
+        return callMethod(
+          'sendMediaGroup',
+          { chat_id: input.chatId, media: JSON.stringify(mediaWire) },
+          parseMediaGroupResult,
+        );
+      }
+
+      // The multipart transport (the staged-bytes upload path): the runtime
+      // sets the multipart boundary — no content-type header is declared.
+      const form = new FormData();
+      form.append('chat_id', String(input.chatId));
+      form.append('media', JSON.stringify(mediaWire));
+      for (const [ref, file] of attachments) {
+        form.append(ref, new Blob([file.bytes], { type: file.contentType }), ref);
+      }
+      return callMethod(
+        'sendMediaGroup',
+        { chat_id: input.chatId, media: '' },
+        parseMediaGroupResult,
+        form,
+      );
+    },
+
+    async editMessageTextRich(input) {
+      const content = requireRichContent(input.content, 'text', input.customEmojiEligible === true);
+      return callMethod(
+        'editMessageText',
+        {
+          chat_id: input.chatId,
+          message_id: input.messageId,
+          text: content.text,
+          entities: richTextEntitiesWire(content.entities),
+        },
+        (result) => {
+          // Telegram answers `true` or the edited Message.
+          if (result === true || parseSentMessage(result) !== null) {
+            return true;
+          }
+          return null;
+        },
+      );
+    },
+
+    async editMessageCaptionRich(input) {
+      const content = requireRichContent(
+        input.content,
+        'caption',
+        input.customEmojiEligible === true,
+      );
+      return callMethod(
+        'editMessageCaption',
+        {
+          chat_id: input.chatId,
+          message_id: input.messageId,
+          caption: content.text,
+          caption_entities: richTextEntitiesWire(content.entities),
+        },
+        (result) => {
+          if (result === true || parseSentMessage(result) !== null) {
+            return true;
+          }
+          return null;
+        },
       );
     },
   };

@@ -58,11 +58,17 @@ export function isJobStatus(value: string): value is JobStatus {
 
 /**
  * Registered job types. ONLY implemented handlers are registered
- * (ADR-0036 §7, ADR-0038 §1): the Phase 3 maintenance heartbeat plus the
- * Phase 4 source poll (registered ONLY while the ingestion gate is on —
- * an unregistered type can never be created or executed, ADR-0036 §7).
+ * (ADR-0036 §7, ADR-0038 §1): the Phase 3 maintenance heartbeat, the
+ * Phase 4 source poll (registered ONLY while the ingestion gate is on),
+ * and the Phase 5A editorial prepare-draft (registered ONLY while the
+ * editorial gate is on — an unregistered type can never be created or
+ * executed, ADR-0036 §7; the gate-off pause is LOSSLESS per ADR-0040/0042).
  */
-export const JOB_TYPES = ['jobs.maintenance_heartbeat', 'sources.fetch_poll'] as const;
+export const JOB_TYPES = [
+  'jobs.maintenance_heartbeat',
+  'sources.fetch_poll',
+  'editorial.prepare_draft',
+] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];
 
@@ -97,6 +103,37 @@ export const JOB_ERROR_CODES = [
   // source-state effects and returns this stable RECOVERABLE code; the
   // engine's own retry bookkeeping (retry_wait/last_error) carries it.
   'ingestion_capability_unresolved',
+  // Phase 5A editorial (ADR-0042) — stable, safe, authored constants.
+  // The handler maps AI/identity failures onto these; the engine's fenced
+  // bookkeeping carries them into retry_wait/dead_letter/last_error.
+  'editorial_source_item_missing',
+  'editorial_source_missing',
+  'editorial_snapshot_mismatch',
+  'editorial_input_invalid',
+  'editorial_ai_refused',
+  // R1.11.1 (Posidon correctness review): the stored source snapshot
+  // changed BETWEEN the handler's identity-checked read and the atomic
+  // commit — the SQL snapshot predicate made the WHOLE commit a no-op.
+  // Deliberately DISTINCT from a lost job fence and from the pre-read
+  // `editorial_snapshot_mismatch`; terminal (a retry would re-read the
+  // same stale identity and dead-end anyway — never a hot loop).
+  'editorial_snapshot_changed',
+  // R1.11.1: the provider returned a schema-valid draft with NO claim
+  // traceable to the request evidence — editorially unusable at THIS
+  // boundary (the general AI schema contract for other callers is
+  // unchanged). Terminal: retrying the identical input deterministically
+  // repeats; the real run is recorded as `invalid`, never a ready draft.
+  'editorial_no_traced_claim',
+  // R1.15.1 (Posidon exact-content reuse correctness): the exact-content
+  // GROUP anchor exists — one stable result for this full composed text is
+  // already owned IN SQL — but NO candidate (including the anchor's own
+  // owner story) could be verified as a usable reuse target. The fenced
+  // normal commit would deterministically collide on the anchor and roll
+  // back, so entering the PAID provider→conflict→retry cycle is forbidden:
+  // the handler returns this PERMANENT code BEFORE any provider work — zero
+  // charges, zero writes, zero fake success. The anchor is never taken over
+  // or deleted; a later re-enqueue after the owner heals decides again.
+  'editorial_exact_content_blocked',
 ] as const;
 
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];

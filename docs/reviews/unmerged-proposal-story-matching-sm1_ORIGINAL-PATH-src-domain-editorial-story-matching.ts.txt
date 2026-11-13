@@ -1,0 +1,683 @@
+/**
+ * Versioned story-MATCHING report (Phase 5.2 — V4 owner authorization
+ * 2026-11): the HONEST, DETERMINISTIC, CONSERVATIVE decision layer ON TOP
+ * of the sibling `candidateDiscovery` report. NO SQL, NO network, NO SDK,
+ * NO model call, NO clock — a PURE derivation of the discovery report of
+ * the SAME draft (the SAME lookup moment), stored INSIDE
+ * `drafts.document_json` next to it by the SAME fenced atomic commit
+ * (zero new statements, zero extra execution calls, zero new probes).
+ *
+ * WHAT THE MATCHING ADDS (and nothing else):
+ * - a VERSIONED RULES SET (`rulesVersion 'sm1'`) of fixed integer signal
+ *   weights and two fixed thresholds, applied to the EXACT signal kinds
+ *   the sibling discovery already observed for each candidate;
+ * - one deterministic DECISION per candidate with its integer score and
+ *   the complete per-signal reason list (`same_story_proposed` /
+ *   `related_story_observed` / `insufficient_signal`) — a PROPOSAL layer,
+ *   never an executed action;
+ * - an explicit CONSERVATIVE suppression policy: when the sibling
+ *   discovery window was INCOMPLETE (any probe overflow OR the candidate
+ *   cap truncated the report), ALL decisions are suppressed with a typed
+ *   reason — an incomplete window never yields a same-story proposal;
+ * - an explicit ambiguity record: ≥2 `same_story_proposed` decisions are
+ *   flagged ambiguous — the report NEVER picks a winner.
+ *
+ * WHAT THE MATCHING NEVER CLAIMS OR DOES:
+ * - it NEVER merges stories, marks duplicates, supersedes, attaches,
+ *   rewrites evidence, raises trust/confidence, or bypasses review — the
+ *   roadmap's merge/adjudication decision layer is Phase 5.3 (future,
+ *   its own rules and its own authorization);
+ * - it NEVER verifies truth, same-event identity, or source
+ *   independence — correlated fingerprint signals are NOT independent
+ *   confirmations (the multi-signal bonus is a WEIGHT, never independence
+ *   evidence, and stays visible as its own reason line);
+ * - it NEVER introduces a new signal: the title_key signal is the SAME
+ *   weak normalized-title signal discovery used — same-name games,
+ *   sequels and re-reviews routinely share a title key WITHOUT being the
+ *   same story, so title-only matches are always `insufficient_signal`;
+ * - it NEVER sees entity-shared or alias-derived candidates: those need
+ *   their own bounded probes and are explicitly OUT OF SCOPE for v1
+ *   (`fingerprint_signals_only_no_entity_candidates_v1`);
+ * - a disabled report NEVER pretends to have decided anything.
+ *
+ * DETERMINISM: same discovery → byte-identical report. Fixed field order,
+ * inherited candidate order (ascending storyId — never re-ranked), fixed
+ * signal-priority reason order, integer arithmetic only, no timestamps,
+ * no randomness. The typed reader (R1.12.1 lesson applied from birth)
+ * validates the REAL v1 invariants — including CROSS-validation against
+ * the sibling discovery (mirrors, re-derived scores/decisions/reasons,
+ * exact counts, suppression and ambiguity consistency) — before
+ * surfacing `story_matching_v1`. A payload that merely CLAIMS the
+ * version or the rules version is `malformed`, never a current result.
+ *
+ * OWNER DECISION RECORD (V4 conservative defaults, revisable ONLY by
+ * bumping `rulesVersion`): weights content_hash=80 / url=45 /
+ * title_key=15, multi-signal bonus=10, same-story threshold=70,
+ * related threshold=30. The values are recorded in docs/OPEN_DECISIONS.md
+ * (OD-010) as conservative defaults awaiting owner/Posidon confirmation —
+ * the feature is OFF by default (`STORY_MATCHING_ENABLED`), so no
+ * production behavior changes until the flag AND the decision are both
+ * explicit.
+ */
+
+import {
+  CANDIDATE_DISCOVERY_COVERAGE,
+  CANDIDATE_DISCOVERY_MAX_ROWS_PER_LOOKUP,
+  CANDIDATE_SIGNAL_REASON_CODES,
+  readCandidateDiscoveryReport,
+  type CandidateDiscoveryReport,
+  type CandidateSignalKind,
+} from './candidate-discovery';
+
+/** Report schema version — bump ONLY with a documented contract change. */
+export const STORY_MATCHING_VERSION = 1 as const;
+
+/** The versioned RULES set id — weight/threshold changes bump THIS. */
+export const STORY_MATCHING_RULES_VERSION = 'sm1' as const;
+
+/** Fixed basis label — a pure view of the sibling discovery v1 signals. */
+export const STORY_MATCHING_BASIS =
+  'candidate_discovery_v1_signals_at_lookup_moment' as const;
+
+/** The index namespace the underlying discovery lookups are scoped to. */
+export const STORY_MATCHING_INDEX_VERSION = 'sc1' as const;
+
+/**
+ * Fixed integer signal weights (rules `sm1` — OD-010 conservative
+ * defaults): the full title+body composite digest dominates, the stored
+ * URL is strong but version-blind, the normalized title key is weak.
+ */
+export const STORY_MATCHING_SIGNAL_WEIGHTS: Readonly<
+  Record<CandidateSignalKind, number>
+> = {
+  url: 45,
+  content_hash: 80,
+  title_key: 15,
+} as const;
+
+/**
+ * The multi-signal bonus (rules `sm1`): a weight for signal VARIETY, NOT
+ * independence evidence — correlated signals never count as independent
+ * confirmations, and the bonus is always visible as its own reason line.
+ */
+export const STORY_MATCHING_MULTI_SIGNAL_BONUS = 10 as const;
+
+/** `same_story_proposed` band minimum (rules `sm1`). */
+export const STORY_MATCHING_SAME_STORY_PROPOSED_MIN = 70 as const;
+
+/** `related_story_observed` band minimum (rules `sm1`). */
+export const STORY_MATCHING_RELATED_STORY_MIN = 30 as const;
+
+/** The decision universe (fixed; additive-only in possible future versions). */
+export const STORY_MATCHING_DECISIONS = [
+  'same_story_proposed',
+  'related_story_observed',
+  'insufficient_signal',
+] as const;
+export type StoryMatchingDecision = (typeof STORY_MATCHING_DECISIONS)[number];
+
+/** The observation universe (fixed; `disabled` mirrors the 5E-1 pattern). */
+export const STORY_MATCHING_OBSERVATIONS = [
+  'disabled',
+  'no_candidates_observed',
+  'candidates_observed',
+] as const;
+export type StoryMatchingObservation = (typeof STORY_MATCHING_OBSERVATIONS)[number];
+
+/** Typed suppression reason when the discovery window was incomplete. */
+export const STORY_MATCHING_SUPPRESSION_OVERFLOW =
+  'lookup_overflow_or_truncation_observed' as const;
+export const STORY_MATCHING_SUPPRESSION_NONE = 'none' as const;
+export type StoryMatchingSuppressionReason =
+  | typeof STORY_MATCHING_SUPPRESSION_OVERFLOW
+  | typeof STORY_MATCHING_SUPPRESSION_NONE;
+
+/** Fixed limitation labels (order is part of the deterministic output). */
+export const STORY_MATCHING_LIMITATIONS = [
+  'proposals_only_never_merge',
+  'not_truth_verification',
+  'not_same_event_proof',
+  'not_source_independence_proof',
+  'fingerprint_signals_only_no_entity_candidates_v1',
+  'lookup_moment_visibility',
+  'title_signal_is_weak',
+  'thresholds_are_conservative_defaults',
+] as const;
+
+/** Fixed unassessed tuple — what this layer NEVER judges or executes. */
+export const STORY_MATCHING_UNASSESSED = [
+  'same_event',
+  'truth',
+  'source_independence',
+  'merge_action',
+] as const;
+
+/** One weighted reason line of a score (code mirrors the discovery reason). */
+export interface StoryMatchingScoreReason {
+  readonly code: string;
+  readonly weight: number;
+}
+
+/** One decided candidate: a minimal, non-contradictory projection. */
+export interface StoryMatchingDecisionEntry {
+  /** The candidate story (same value and order as the sibling discovery). */
+  readonly storyId: string;
+  /** The deterministic decision band of the observed signals. */
+  readonly decision: StoryMatchingDecision;
+  /** The integer rules-`sm1` score of the observed signals. */
+  readonly score: number;
+  /** ALL real reason lines with their weights, in fixed signal order. */
+  readonly scoreReasons: readonly StoryMatchingScoreReason[];
+}
+
+/** The versioned, deterministic report stored with the draft. */
+export interface StoryMatchingReport {
+  readonly matchingVersion: typeof STORY_MATCHING_VERSION;
+  /** The versioned rules set the scores were computed under. */
+  readonly rulesVersion: typeof STORY_MATCHING_RULES_VERSION;
+  /** Fixed basis label — what this report is derived from (and only that). */
+  readonly basis: typeof STORY_MATCHING_BASIS;
+  readonly indexVersion: typeof STORY_MATCHING_INDEX_VERSION;
+  /** Mirrors the sibling discovery (`disabled` when the flag is OFF). */
+  readonly observation: StoryMatchingObservation;
+  /** Mirrors the sibling discovery (cross-validated by the reader). */
+  readonly storyId: string;
+  readonly snapshot: {
+    readonly sourceItemId: string;
+    readonly contentHash: string;
+  };
+  /** Mirrors the sibling discovery lookup window, verbatim. */
+  readonly lookup: {
+    readonly signals: readonly CandidateSignalKind[];
+    readonly maxRowsPerLookup: typeof CANDIDATE_DISCOVERY_MAX_ROWS_PER_LOOKUP;
+    readonly overflowObserved: boolean;
+  };
+  /**
+   * One entry per sibling candidate in the SAME deterministic ascending
+   * order — EMPTY when disabled or suppressed (never partial decisions).
+   */
+  readonly decisions: readonly StoryMatchingDecisionEntry[];
+  readonly counts: {
+    /** Decided candidates (= decisions.length). */
+    readonly decided: number;
+    readonly sameStoryProposed: number;
+    readonly relatedObserved: number;
+    readonly insufficientSignal: number;
+  };
+  /** True iff the discovery window was incomplete ⇒ decisions suppressed. */
+  readonly decisionsSuppressed: boolean;
+  readonly suppressionReason: StoryMatchingSuppressionReason;
+  /** True iff ≥2 `same_story_proposed` decisions exist — NEVER a winner. */
+  readonly sameStoryProposalsAmbiguous: boolean;
+  /** The discovery coverage/truncation limits, PRESERVED verbatim. */
+  readonly discoveryLimits: {
+    readonly candidatesTruncated: boolean;
+    readonly overflowObserved: boolean;
+    readonly maxCandidates: typeof CANDIDATE_DISCOVERY_COVERAGE.maxCandidates;
+    readonly indexedScope: 'index_version_sc1_only';
+    readonly historicalBackfill: false;
+  };
+  readonly limitations: readonly string[];
+  readonly unassessed: readonly string[];
+}
+
+/** The deterministic score result for one candidate's signal kinds. PURE. */
+export interface StoryMatchingScore {
+  readonly decision: StoryMatchingDecision;
+  readonly score: number;
+  readonly scoreReasons: readonly StoryMatchingScoreReason[];
+}
+
+/**
+ * Score ONE candidate's observed signal kinds under rules `sm1`. TOTAL
+ * and DETERMINISTIC: fixed signal-priority reason order (url,
+ * content_hash, title_key — the sibling discovery's display order), the
+ * multi-signal bonus line LAST when ≥2 distinct kinds were observed,
+ * integer arithmetic only. Requires at least one kind (the sibling
+ * discovery's candidates always carry ≥1 signal — its reader enforces
+ * it); kept TOTAL by an explicit typed error otherwise.
+ */
+export function matchCandidateSignals(
+  kinds: readonly CandidateSignalKind[],
+): StoryMatchingScore {
+  const unique = new Set(kinds);
+  if (unique.size === 0) {
+    throw new Error('story_matching_requires_at_least_one_signal');
+  }
+  const scoreReasons: StoryMatchingScoreReason[] = [];
+  let score = 0;
+  // Fixed priority order — identical to the sibling discovery's signal
+  // display order; the reason list NEVER reorders with input order.
+  const order: readonly CandidateSignalKind[] = ['url', 'content_hash', 'title_key'];
+  for (const kind of order) {
+    if (!unique.has(kind)) {
+      continue;
+    }
+    const weight = STORY_MATCHING_SIGNAL_WEIGHTS[kind];
+    score += weight;
+    scoreReasons.push({ code: CANDIDATE_SIGNAL_REASON_CODES[kind], weight });
+  }
+  if (unique.size >= 2) {
+    score += STORY_MATCHING_MULTI_SIGNAL_BONUS;
+    scoreReasons.push({ code: 'multi_signal_bonus', weight: STORY_MATCHING_MULTI_SIGNAL_BONUS });
+  }
+  const decision: StoryMatchingDecision =
+    score >= STORY_MATCHING_SAME_STORY_PROPOSED_MIN
+      ? 'same_story_proposed'
+      : score >= STORY_MATCHING_RELATED_STORY_MIN
+        ? 'related_story_observed'
+        : 'insufficient_signal';
+  return { decision, score, scoreReasons };
+}
+
+/**
+ * Build the versioned matching report from the SAME draft's discovery
+ * report (the ENABLED path). TOTAL and DETERMINISTIC: same discovery →
+ * byte-identical report. The builder reads NOTHING but the discovery
+ * report — there is no text comparison, no re-fetch, no new signal, no
+ * new lookup anywhere. The conservative suppression policy is absolute:
+ * an overflowed probe OR a truncated candidate list ⇒ EVERY decision is
+ * suppressed (an incomplete window never yields a same-story proposal).
+ */
+export function buildStoryMatchingReport(input: {
+  readonly discovery: CandidateDiscoveryReport;
+}): StoryMatchingReport {
+  const discovery = input.discovery;
+  const incompleteWindow =
+    discovery.lookup.overflowObserved || discovery.candidatesTruncated;
+  const decisions = incompleteWindow
+    ? []
+    : discovery.candidates.map((candidate) => {
+        const matched = matchCandidateSignals(
+          candidate.matchedSignals.map((signal) => signal.kind),
+        );
+        return {
+          storyId: candidate.storyId,
+          decision: matched.decision,
+          score: matched.score,
+          scoreReasons: matched.scoreReasons,
+        };
+      });
+  const sameStoryProposed = decisions.filter(
+    (entry) => entry.decision === 'same_story_proposed',
+  ).length;
+  const relatedObserved = decisions.filter(
+    (entry) => entry.decision === 'related_story_observed',
+  ).length;
+  const insufficientSignal = decisions.filter(
+    (entry) => entry.decision === 'insufficient_signal',
+  ).length;
+  return {
+    matchingVersion: STORY_MATCHING_VERSION,
+    rulesVersion: STORY_MATCHING_RULES_VERSION,
+    basis: STORY_MATCHING_BASIS,
+    indexVersion: STORY_MATCHING_INDEX_VERSION,
+    observation: discovery.observation,
+    storyId: discovery.storyId,
+    snapshot: {
+      sourceItemId: discovery.snapshot.sourceItemId,
+      contentHash: discovery.snapshot.contentHash,
+    },
+    lookup: {
+      signals: discovery.lookup.signals,
+      maxRowsPerLookup: discovery.lookup.maxRowsPerLookup,
+      overflowObserved: discovery.lookup.overflowObserved,
+    },
+    decisions,
+    counts: {
+      decided: decisions.length,
+      sameStoryProposed,
+      relatedObserved,
+      insufficientSignal,
+    },
+    decisionsSuppressed: incompleteWindow,
+    suppressionReason: incompleteWindow
+      ? STORY_MATCHING_SUPPRESSION_OVERFLOW
+      : STORY_MATCHING_SUPPRESSION_NONE,
+    sameStoryProposalsAmbiguous: sameStoryProposed >= 2,
+    discoveryLimits: {
+      candidatesTruncated: discovery.candidatesTruncated,
+      overflowObserved: discovery.lookup.overflowObserved,
+      maxCandidates: CANDIDATE_DISCOVERY_COVERAGE.maxCandidates,
+      indexedScope: CANDIDATE_DISCOVERY_COVERAGE.indexedScope,
+      historicalBackfill: CANDIDATE_DISCOVERY_COVERAGE.historicalBackfill,
+    },
+    limitations: STORY_MATCHING_LIMITATIONS,
+    unassessed: STORY_MATCHING_UNASSESSED,
+  };
+}
+
+/**
+ * The honest `disabled` report: the versioned report a draft carries when
+ * the matching flag is absent or OFF — ZERO decisions, deterministic
+ * mirrors of the sibling discovery only. The discovery report is REQUIRED
+ * (every draft since R1.13 carries one) so the mirrors stay exact.
+ */
+export function disabledStoryMatchingReport(input: {
+  readonly discovery: CandidateDiscoveryReport;
+}): StoryMatchingReport {
+  const discovery = input.discovery;
+  return {
+    matchingVersion: STORY_MATCHING_VERSION,
+    rulesVersion: STORY_MATCHING_RULES_VERSION,
+    basis: STORY_MATCHING_BASIS,
+    indexVersion: STORY_MATCHING_INDEX_VERSION,
+    observation: 'disabled',
+    storyId: discovery.storyId,
+    snapshot: {
+      sourceItemId: discovery.snapshot.sourceItemId,
+      contentHash: discovery.snapshot.contentHash,
+    },
+    lookup: {
+      signals: discovery.lookup.signals,
+      maxRowsPerLookup: discovery.lookup.maxRowsPerLookup,
+      overflowObserved: discovery.lookup.overflowObserved,
+    },
+    decisions: [],
+    counts: {
+      decided: 0,
+      sameStoryProposed: 0,
+      relatedObserved: 0,
+      insufficientSignal: 0,
+    },
+    decisionsSuppressed: false,
+    suppressionReason: STORY_MATCHING_SUPPRESSION_NONE,
+    sameStoryProposalsAmbiguous: false,
+    discoveryLimits: {
+      candidatesTruncated: discovery.candidatesTruncated,
+      overflowObserved: discovery.lookup.overflowObserved,
+      maxCandidates: CANDIDATE_DISCOVERY_COVERAGE.maxCandidates,
+      indexedScope: CANDIDATE_DISCOVERY_COVERAGE.indexedScope,
+      historicalBackfill: CANDIDATE_DISCOVERY_COVERAGE.historicalBackfill,
+    },
+    limitations: STORY_MATCHING_LIMITATIONS,
+    unassessed: STORY_MATCHING_UNASSESSED,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Versioned reader — payloads that merely claim the version are malformed,
+// and a matching report is ONLY valid next to the discovery it derives
+// from (re-derived scores, exact counts, suppression/ambiguity invariant).
+// ---------------------------------------------------------------------------
+
+export type StoryMatchingRead =
+  | { readonly kind: 'story_matching_v1'; readonly report: StoryMatchingReport }
+  /** A pre-5.2 draft (no matching payload). Honest absence — no backfill. */
+  | { readonly kind: 'absent' }
+  /** A matching-shaped payload with a different (e.g. future) version. */
+  | { readonly kind: 'unsupported_version'; readonly matchingVersion: unknown }
+  | {
+      readonly kind: 'unsupported_version';
+      readonly matchingVersion: typeof STORY_MATCHING_VERSION;
+      readonly rulesVersion: unknown;
+    }
+  /** Not a matching payload at all — including one that violates v1 or
+   *  lacks a VALID sibling `candidateDiscovery` to derive from. */
+  | { readonly kind: 'malformed' };
+
+const DECISIONS: ReadonlySet<string> = new Set(STORY_MATCHING_DECISIONS);
+const OBSERVATIONS: ReadonlySet<string> = new Set(STORY_MATCHING_OBSERVATIONS);
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+/** Same element sequence (order-sensitive) — no reorder, no duplicate. */
+function sameStringSequence(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+/**
+ * Read the matching payload from a PARSED `drafts.document_json` value.
+ * Consumers must treat `absent`/`unsupported_version`/`malformed` as "no
+ * current matching result" — none of them validates anything, and NONE
+ * of them ever means "unrelated" or "mergeable".
+ */
+export function readStoryMatchingReport(document: unknown): StoryMatchingRead {
+  if (typeof document !== 'object' || document === null) {
+    return { kind: 'malformed' };
+  }
+  const matching = (document as Record<string, unknown>)['storyMatching'];
+  if (matching === undefined) {
+    return { kind: 'absent' };
+  }
+  if (typeof matching !== 'object' || matching === null) {
+    return { kind: 'malformed' };
+  }
+  const m = matching as Record<string, unknown>;
+  if (m['matchingVersion'] !== STORY_MATCHING_VERSION) {
+    return { kind: 'unsupported_version', matchingVersion: m['matchingVersion'] };
+  }
+  if (m['rulesVersion'] !== STORY_MATCHING_RULES_VERSION) {
+    return {
+      kind: 'unsupported_version',
+      matchingVersion: STORY_MATCHING_VERSION,
+      rulesVersion: m['rulesVersion'],
+    };
+  }
+
+  // ---- Sibling basis: a v1 matching report WITHOUT a valid v1 sibling
+  //      discovery is not a current result (the report is a DERIVED view
+  //      — a standalone copy could contradict its own basis).
+  const sibling = readCandidateDiscoveryReport(document);
+  if (sibling.kind !== 'candidate_discovery_v1') {
+    return { kind: 'malformed' };
+  }
+  const discovery = sibling.report;
+
+  const snapshot = m['snapshot'];
+  const lookup = m['lookup'];
+  const discoveryLimits = m['discoveryLimits'];
+  const counts = m['counts'];
+  const decisions = m['decisions'];
+  if (
+    m['basis'] !== STORY_MATCHING_BASIS ||
+    m['indexVersion'] !== STORY_MATCHING_INDEX_VERSION ||
+    typeof m['observation'] !== 'string' ||
+    !OBSERVATIONS.has(m['observation']) ||
+    typeof m['storyId'] !== 'string' ||
+    m['storyId'].length === 0 ||
+    typeof snapshot !== 'object' ||
+    snapshot === null ||
+    typeof (snapshot as Record<string, unknown>)['sourceItemId'] !== 'string' ||
+    typeof (snapshot as Record<string, unknown>)['contentHash'] !== 'string' ||
+    typeof lookup !== 'object' ||
+    lookup === null ||
+    !Array.isArray((lookup as Record<string, unknown>)['signals']) ||
+    !isStringArray((lookup as Record<string, unknown>)['signals']) ||
+    typeof (lookup as Record<string, unknown>)['overflowObserved'] !== 'boolean' ||
+    !Array.isArray(decisions) ||
+    typeof counts !== 'object' ||
+    counts === null ||
+    typeof discoveryLimits !== 'object' ||
+    discoveryLimits === null ||
+    !Array.isArray(m['limitations']) ||
+    !isStringArray(m['limitations']) ||
+    !Array.isArray(m['unassessed']) ||
+    !isStringArray(m['unassessed']) ||
+    typeof m['decisionsSuppressed'] !== 'boolean' ||
+    typeof m['sameStoryProposalsAmbiguous'] !== 'boolean' ||
+    typeof m['suppressionReason'] !== 'string'
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Limitations/unassessed: exactly the fixed v1 sets, each once.
+  const fixedLimitations = STORY_MATCHING_LIMITATIONS as readonly string[];
+  const limitations = m['limitations'] as readonly string[];
+  const unassessed = m['unassessed'] as readonly string[];
+  const fixedUnassessed = STORY_MATCHING_UNASSESSED as readonly string[];
+  if (
+    limitations.length !== fixedLimitations.length ||
+    new Set(limitations).size !== limitations.length ||
+    !limitations.every((label) => fixedLimitations.includes(label)) ||
+    !sameStringSequence(unassessed, fixedUnassessed)
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Discovery limits: PRESERVED verbatim from the sibling.
+  const limits = discoveryLimits as Record<string, unknown>;
+  if (
+    limits['candidatesTruncated'] !== discovery.candidatesTruncated ||
+    limits['overflowObserved'] !== discovery.lookup.overflowObserved ||
+    limits['maxCandidates'] !== CANDIDATE_DISCOVERY_COVERAGE.maxCandidates ||
+    limits['indexedScope'] !== CANDIDATE_DISCOVERY_COVERAGE.indexedScope ||
+    limits['historicalBackfill'] !== false
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Identity mirrors: story, snapshot, lookup window, observation.
+  const observation = m['observation'] as StoryMatchingObservation;
+  const lookupRecord = lookup as Record<string, unknown>;
+  if (
+    m['storyId'] !== discovery.storyId ||
+    (snapshot as Record<string, unknown>)['sourceItemId'] !==
+      discovery.snapshot.sourceItemId ||
+    (snapshot as Record<string, unknown>)['contentHash'] !==
+      discovery.snapshot.contentHash ||
+    lookupRecord['maxRowsPerLookup'] !== discovery.lookup.maxRowsPerLookup ||
+    lookupRecord['overflowObserved'] !== discovery.lookup.overflowObserved ||
+    !sameStringSequence(
+      lookupRecord['signals'] as readonly string[],
+      discovery.lookup.signals as readonly string[],
+    )
+  ) {
+    return { kind: 'malformed' };
+  }
+  if (observation !== 'disabled' && observation !== discovery.observation) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Suppression invariant: for a DERIVED report the window rule is
+  //      absolute; a DISABLED report is never suppressed (it decided
+  //      nothing at all).
+  const incompleteWindow =
+    discovery.lookup.overflowObserved || discovery.candidatesTruncated;
+  const suppressed = m['decisionsSuppressed'] as boolean;
+  const suppressionReason = m['suppressionReason'] as string;
+  if (observation === 'disabled') {
+    if (suppressed || suppressionReason !== STORY_MATCHING_SUPPRESSION_NONE) {
+      return { kind: 'malformed' };
+    }
+  } else if (suppressed !== incompleteWindow) {
+    return { kind: 'malformed' };
+  } else if (
+    suppressionReason !==
+    (suppressed ? STORY_MATCHING_SUPPRESSION_OVERFLOW : STORY_MATCHING_SUPPRESSION_NONE)
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Decisions: EXACTLY the sibling candidates (same order) when the
+  //      window was clean and the feature enabled; EMPTY when disabled or
+  //      suppressed — never partial, never reordered, never re-ranked.
+  if (suppressed || observation === 'disabled') {
+    if ((decisions as unknown[]).length !== 0) {
+      return { kind: 'malformed' };
+    }
+  } else if (decisions.length !== discovery.candidates.length) {
+    return { kind: 'malformed' };
+  }
+  let sameStoryProposed = 0;
+  let relatedObserved = 0;
+  let insufficientSignal = 0;
+  let previousStoryId: string | null = null;
+  for (let index = 0; index < decisions.length; index += 1) {
+    const entry = decisions[index];
+    const candidate = discovery.candidates[index]!;
+    if (typeof entry !== 'object' || entry === null) {
+      return { kind: 'malformed' };
+    }
+    const record = entry as Record<string, unknown>;
+    const decision = record['decision'];
+    const score = record['score'];
+    const scoreReasons = record['scoreReasons'];
+    if (
+      record['storyId'] !== candidate.storyId ||
+      typeof decision !== 'string' ||
+      !DECISIONS.has(decision) ||
+      !isNonNegativeInteger(score) ||
+      !Array.isArray(scoreReasons) ||
+      scoreReasons.length === 0
+    ) {
+      return { kind: 'malformed' };
+    }
+    if (previousStoryId !== null && !(previousStoryId < (record['storyId'] as string))) {
+      return { kind: 'malformed' };
+    }
+    previousStoryId = record['storyId'] as string;
+    // Re-derive: the score/reasons/decision must be EXACTLY what rules
+    // `sm1` produce from the sibling's observed signal kinds.
+    const expected = matchCandidateSignals(
+      candidate.matchedSignals.map((signal) => signal.kind),
+    );
+    if (decision !== expected.decision || (score as number) !== expected.score) {
+      return { kind: 'malformed' };
+    }
+    const reasons: string[] = [];
+    const weights: number[] = [];
+    for (const reason of scoreReasons as unknown[]) {
+      if (typeof reason !== 'object' || reason === null) {
+        return { kind: 'malformed' };
+      }
+      const reasonRecord = reason as Record<string, unknown>;
+      if (typeof reasonRecord['code'] !== 'string' || !isNonNegativeInteger(reasonRecord['weight'])) {
+        return { kind: 'malformed' };
+      }
+      reasons.push(reasonRecord['code'] as string);
+      weights.push(reasonRecord['weight'] as number);
+    }
+    if (
+      !sameStringSequence(reasons, expected.scoreReasons.map((line) => line.code)) ||
+      !sameStringSequence(
+        weights.map((weight) => String(weight)),
+        expected.scoreReasons.map((line) => String(line.weight)),
+      )
+    ) {
+      return { kind: 'malformed' };
+    }
+    if (decision === 'same_story_proposed') {
+      sameStoryProposed += 1;
+    } else if (decision === 'related_story_observed') {
+      relatedObserved += 1;
+    } else {
+      insufficientSignal += 1;
+    }
+  }
+
+  // ---- Ambiguity: exactly the ≥2 same-story-proposals rule.
+  if ((m['sameStoryProposalsAmbiguous'] as boolean) !== sameStoryProposed >= 2) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Counts: non-negative integers that EXACTLY describe the payload.
+  const countsRecord = counts as Record<string, unknown>;
+  if (
+    !isNonNegativeInteger(countsRecord['decided']) ||
+    !isNonNegativeInteger(countsRecord['sameStoryProposed']) ||
+    !isNonNegativeInteger(countsRecord['relatedObserved']) ||
+    !isNonNegativeInteger(countsRecord['insufficientSignal'])
+  ) {
+    return { kind: 'malformed' };
+  }
+  if (
+    countsRecord['decided'] !== decisions.length ||
+    countsRecord['sameStoryProposed'] !== sameStoryProposed ||
+    countsRecord['relatedObserved'] !== relatedObserved ||
+    countsRecord['insufficientSignal'] !== insufficientSignal
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  return {
+    kind: 'story_matching_v1',
+    report: matching as unknown as StoryMatchingReport,
+  };
+}

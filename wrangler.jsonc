@@ -18,14 +18,14 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.4.0",
+    "APP_VERSION": "1.41.0",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
     // replaced by the real commit identifier at deploy time in later phases;
     // SCHEMA_VERSION is validated as a strict positive decimal integer.
     "APP_COMMIT": "local-dev",
-    "SCHEMA_VERSION": "3",
+    "SCHEMA_VERSION": "6",
     // Phase 2A Telegram ingress flag (non-secret; ADR-0024). The webhook
     // route fails closed unless this is "true" AND the Phase 2 secrets are
     // configured (BOT_TOKEN / WEBHOOK_SECRET / OWNER_TELEGRAM_ID via
@@ -44,6 +44,72 @@
     // activated by this pass; the operator runbook documents the reviewed
     // activation procedure (gate + explicit per-source enablement).
     "SOURCE_INGESTION_ENABLED": "false",
+    // Phase 5A editorial source→draft gate (non-secret; ADR-0042). Gates
+    // the editorial.prepare_draft job type ONLY — never the jobs engine,
+    // never AI activation. Ships "false" everywhere: while off, editorial
+    // work is losslessly policy-paused (pre-claim ack, zero attempt burn,
+    // zero writes) and the AI service keeps its own independent gates.
+    "EDITORIAL_ENABLED": "false",
+    // Phase 5C-4 candidate-MATCHING report gate (V4 Phase 5.2;
+    // non-secret). Independent fail-closed flag: while off, no
+    // candidateMatching payload is computed or stored; while on, it is a
+    // pure zero-SQL/zero-cost derivation inside the same commit. Never
+    // implies EDITORIAL_ENABLED or AI_ENABLED.
+    "EDITORIAL_MATCHING_ENABLED": "false",
+    "EDITORIAL_ADJUDICATION_ENABLED": "false",
+    // Target public channel username — NON-SECRET configuration (ADR-0009).
+    // R1.10.5 owner channel identity: pixel lores / @pixellores
+    // (https://t.me/pixellores). Not credential material; never a numeric
+    // chat ID; format-validated by src/shared/config/phase2.ts and currently
+    // UNCONSUMED by any sending path (Phase 8 is FUTURE).
+    "TARGET_CHANNEL": "@pixellores",
+    // Phase 6 AI adapter gates (non-secret; ADR-0041). FAIL-CLOSED: with
+    // AI_ENABLED "false" the AI draft service is the typed deferred
+    // `ai_disabled` outcome — ZERO provider calls, ZERO budget writes,
+    // ZERO binding access. AI_GEMINI_ENABLED additionally requires verified
+    // Free-tier eligibility (the versioned policy keeps it unverified this
+    // round), so the Gemini fallback stays OFF even if this flag were true.
+    "AI_ENABLED": "false",
+    "AI_GEMINI_ENABLED": "false",
+    // R1.17 (Phase 5E-1) event-relation task gate (non-secret;
+    // ADR-0045). INDEPENDENT fail-closed flag: with "false" the relation
+    // step performs ZERO retrieval, ZERO adjudication, ZERO writes. It
+    // NEVER implies AI_ENABLED or EDITORIAL_ENABLED; no live model call
+    // is possible while the shipped flags stay "false".
+    "EVENT_RELATION_ENABLED": "false",
+    // R1.18 (Phase 9A slice) read-only admin review gate (non-secret;
+    // ADR-0046). INDEPENDENT fail-closed flag for the /drafts read-only
+    // Telegram surface and its help advertisement — with "false" the
+    // commands keep their unknown-command noop semantics with ZERO
+    // editorial queries. It NEVER implies AI/EDITORIAL/ingestion/relation
+    // gates, the Telegram ingress itself, or any write path.
+    "ADMIN_REVIEW_ENABLED": "false",
+    "ADMIN_QUEUE_ENABLED": "false",
+    // Phase 9B read-only story-identity surface gate (non-secret;
+    // independent, fail-closed). With "false" the /story command keeps its
+    // unknown-command noop semantics with ZERO story queries; it is
+    // observation-only (two bounded SELECTs) and never a write path.
+    "ADMIN_STORY_ENABLED": "false",
+    // Phase 9C write-capable queue disposition surface gate (non-secret;
+    // independent, fail-closed). With "false" the /queue <publicationId>
+    // detail view keeps the Phase 9A invalid-usage response and callback
+    // queries keep the legacy routing; the ONE disposition is the pol1
+    // cancel from pending/retry_wait/failed (a STOP, never a resend) and
+    // it never enables the scheduler send path or any other write.
+    "ADMIN_QUEUE_WRITE_ENABLED": "false",
+    // Phase 9D album media-group capture surface gate (non-secret;
+    // independent, fail-closed). With "false" the /album_capture command
+    // keeps its unknown-command noop and media-group members keep the
+    // EXACT legacy behavior; the surface gathers rights-unknown candidate
+    // evidence (OD-010) and NEVER sends.
+    "ADMIN_ALBUM_CAPTURE_ENABLED": "false",
+    // R1.20-R admin post pipeline gates (non-secret). FAIL-CLOSED defaults:
+    // ADMIN_POST_ENABLED gates the authorized admin post capture/preview/
+    // approve/callback surface; ADMIN_POST_LIVE_PUBLISH_ENABLED gates ONLY
+    // the real channel send (an approved post can NEVER reach the channel
+    // while it is "false"). Both ship "false" everywhere in this round.
+    "ADMIN_POST_ENABLED": "false",
+    "ADMIN_POST_LIVE_PUBLISH_ENABLED": "false",
   },
 
   // ---------------------------------------------------------------------------
@@ -108,8 +174,12 @@
   //   { "binding": "MEDIA", "bucket_name": "pixel-media-production" }  // preview: pixel-media-preview
   // ],
   //
-  // Phase 6 (AI adapters) — Workers AI binding:
-  // "ai": { "binding": "AI" }
+  // Phase 6 (AI adapters) — Workers AI binding: DECLARED in the preview
+  // environment below as configuration-as-code reconciliation of the
+  // owner-approved dashboard binding (round 1.10.6; ADR-0041). This
+  // declaration performs NO deploy and creates NO resource; a future
+  // reviewed deploy will preserve the already-added binding. Production
+  // remains future-only.
 
   // ---------------------------------------------------------------------------
   // Phase 1B — provisioned preview environment.
@@ -120,11 +190,11 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.4.0",
+        "APP_VERSION": "1.41.0",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
-        "SCHEMA_VERSION": "3",
+        "SCHEMA_VERSION": "6",
         // Owner-authorized Preview live wiring. Secret VALUES remain in
         // Cloudflare only: BOT_TOKEN, WEBHOOK_SECRET, OWNER_TELEGRAM_ID.
         // Production is unchanged; local defaults above remain disabled.
@@ -137,6 +207,32 @@
         // activation is a post-review operator procedure (runbook Phase 4).
         // The reviewed Phase 3 engine behavior is preserved unchanged.
         "SOURCE_INGESTION_ENABLED": "false",
+        // Phase 5A editorial source→draft gate ships DISABLED on preview
+        // (ADR-0042): activation is a post-review owner procedure. While
+        // off, editorial.prepare_draft work is losslessly policy-paused;
+        // AI_ENABLED stays an independent fail-closed gate.
+        "EDITORIAL_ENABLED": "false",
+        // Phase 5C-4 candidate-MATCHING report gate ships DISABLED on
+        // preview too (V4 Phase 5.2 local slice): a pure zero-SQL/
+        // zero-cost derivation of the discovery + assessment of the same
+        // commit; independent fail-closed flag, never implies other gates.
+        "EDITORIAL_MATCHING_ENABLED": "false",
+        "EDITORIAL_ADJUDICATION_ENABLED": "false",
+        // Target public channel username — NON-SECRET configuration
+        // (ADR-0009). R1.10.5 owner channel identity: @pixellores
+        // (https://t.me/pixellores). Format-validated; unconsumed today.
+        "TARGET_CHANNEL": "@pixellores",
+        // Phase 6 AI adapter gates ship DISABLED on preview (ADR-0041):
+        // the AI draft service is the typed deferred `ai_disabled` outcome
+        // with zero provider calls. Activation is a separate reviewed
+        // owner procedure; no model is invoked by this declaration.
+        "AI_ENABLED": "false",
+        "AI_GEMINI_ENABLED": "false",
+        // R1.17 event-relation task gate ships DISABLED on preview
+        // (ADR-0045): the independent fail-closed flag NEVER implies
+        // AI_ENABLED or EDITORIAL_ENABLED; zero relation work happens
+        // while it stays "false".
+        "EVENT_RELATION_ENABLED": "false",
       },
       "d1_databases": [
         {
@@ -167,6 +263,17 @@
             "max_batch_timeout": 5,
           },
         ],
+      },
+      // Phase 6 — Workers AI binding (blueprint §4 binding name AI).
+      // Configuration-as-code reconciliation (round 1.10.6, ADR-0041): the
+      // binding was added to the LIVE pixel-preview Worker by the owner's
+      // authorized operator (dashboard configuration version 0ef009b9…,
+      // 100% Ready) — this repository pass mirrors that state so a FUTURE
+      // reviewed deploy preserves it. NO deploy, NO resource creation, and
+      // NO model invocation is authorized or performed by this change; the
+      // AI_ENABLED gate ships "false" above.
+      "ai": {
+        "binding": "AI",
       },
     },
   },

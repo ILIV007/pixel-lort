@@ -2,6 +2,8 @@ import migration0001 from '../../migrations/0001_initial_schema.sql?raw';
 import migration0002 from '../../migrations/0002_telegram_update_lifecycle.sql?raw';
 import migration0003 from '../../migrations/0003_job_dlq_delivery.sql?raw';
 import migration0004Candidate from '../../migrations/0004_source_poll_ownership.sql?raw';
+import migration0005 from '../../migrations/0005_admin_post_pipeline.sql?raw';
+import migration0006 from '../../migrations/0006_admin_post_editorial_source.sql?raw';
 import migration0002Synthetic from '../fixtures/migration-0002-synthetic.sql?raw';
 
 /**
@@ -52,7 +54,22 @@ export interface MigrationDescriptor {
 /**
  * Ordered migration list — APPEND-ONLY and strictly ascending by version
  * (AGENTS.md §6: applied migrations are never edited or reordered; newer
- * schema changes append `0003_*.sql` and newer).
+ * schema changes append `0006_*.sql` and newer).
+ *
+ * R1.22 LINEAR PATH: the list is ONE strictly ascending chain —
+ *   0001 (v1) -> 0002 (v2) -> 0003 (v3, the APPLIED accepted history)
+ *   -> 0004_source_poll_ownership (v4, the R09 ownership candidate)
+ *   -> 0005_admin_post_pipeline (v5, the admin post candidate ON TOP of the
+ *      ownership migration)
+ *   -> 0006_admin_post_editorial_source (v6, the R1.22 editorial→post
+ *      provenance: nullable source_update_id + the per-version editorial
+ *      link + the partial unique conversion index, ON TOP of the admin post
+ *      pipeline)
+ * The order here is exactly the order real Wrangler applies the files
+ * (lexical filename order, one atomic batch per file), so a database that
+ * walked the whole chain reports schema 6 with ALL capabilities present.
+ * All candidates remain LOCAL-ONLY until the owner separately authorizes
+ * remote application.
  *
  * TEST-ONLY synthetic descriptors (see
  * `tests/fixtures/migration-0002-synthetic.sql`) are injected via the `plan`
@@ -62,6 +79,29 @@ export const MIGRATIONS: readonly MigrationDescriptor[] = [
   { id: '0001_initial_schema', version: 1, sql: migration0001 },
   { id: '0002_telegram_update_lifecycle', version: 2, sql: migration0002 },
   { id: '0003_job_dlq_delivery', version: 3, sql: migration0003 },
+  { id: '0004_source_poll_ownership', version: 4, sql: migration0004Candidate },
+  { id: '0005_admin_post_pipeline', version: 5, sql: migration0005 },
+  { id: '0006_admin_post_editorial_source', version: 6, sql: migration0006 },
+];
+
+/**
+ * The APPLIED accepted history (migrations 0001–0003, schema version 3) —
+ * the append-only base the linear candidates stand on.
+ */
+const APPLIED_MIGRATION_BASE: readonly MigrationDescriptor[] = MIGRATIONS.filter(
+  (migration) => migration.version <= 3,
+);
+
+/**
+ * TEST-ONLY plan for the pipeline-mechanics suites written in the LEGACY
+ * era (Round 1.7/1.8 ingestion behaviors, pre-R09): applies exactly the
+ * accepted 0001–0003 history so the database reports the honest legacy
+ * capability state (schema 3). Ownership-mode behavior has its own
+ * dedicated suites (ROUND19 plan at schema 4); the R1.20-R1 linear chain
+ * default covers the final candidate state.
+ */
+export const LEGACY_APPLIED_MIGRATION_PLAN: readonly MigrationDescriptor[] = [
+  ...APPLIED_MIGRATION_BASE,
 ];
 
 /** Synthetic version-2 descriptor — TEST INFRASTRUCTURE ONLY. */
@@ -72,15 +112,14 @@ export const SYNTHETIC_MIGRATION_0002: MigrationDescriptor = {
 };
 
 /**
- * Round 1.9 — the R09 ownership migration CANDIDATE (schema 3 → 4).
+ * Round 1.9 — the R09 ownership migration descriptor (schema 3 → 4).
  *
- * LOCAL CANDIDATE ONLY: applied EXCLUSIVELY to disposable workerd D1 test
- * databases through the explicit `ROUND19_MIGRATION_PLAN` below. It is
- * deliberately NOT a member of the default `MIGRATIONS` list: no product
- * code path, test default, or helper applies it implicitly, and no real
- * database has it applied (the applied runtime stays schema 3 until the
- * owner separately authorizes and executes the migration — see
- * docs/reviews/PIXEL_ROUND1_9_MIGRATION_0004_TRANSITION.md). The DDL is
+ * LOCAL CANDIDATE ONLY: a real database receives it exclusively through
+ * `wrangler d1 migrations apply` with explicit owner approval (NONE has been
+ * requested or executed). In tests it reaches disposable workerd D1
+ * databases through the LINEAR default plan (as migration 4 of 5) or the
+ * explicit `ROUND19_MIGRATION_PLAN` below (stopping at version 4) for
+ * suites that exercise the ownership-only intermediate state. The DDL is
  * byte-identical to the independently reviewed Round 1.5 design fixture
  * (`tests/fixtures/proposed-0004-source-poll-ownership.sql`); only the
  * header comment differs.
@@ -93,14 +132,14 @@ export const ROUND19_CANDIDATE_MIGRATION_0004: MigrationDescriptor = {
 
 /**
  * Round 1.9 TEST-ONLY plan: the accepted append-only set 0001–0003 plus
- * the 0004 candidate. Plan validation (strict continuity 1..4) applies
- * unchanged. Tests that exercise the REAL product ownership paths (R09)
- * pass this plan explicitly to `applyMigrations` — disposable test
- * databases ONLY; this plan is never the helper default and never
- * registered anywhere in the product.
+ * the 0004 candidate — the honest schema-4 intermediate state of the linear
+ * path (ownership present, admin post ABSENT). Plan validation (strict
+ * continuity 1..4) applies unchanged. Tests that exercise the ownership
+ * intermediate state pass this plan explicitly to `applyMigrations` —
+ * disposable test databases ONLY.
  */
 export const ROUND19_MIGRATION_PLAN: readonly MigrationDescriptor[] = [
-  ...MIGRATIONS,
+  ...APPLIED_MIGRATION_BASE,
   ROUND19_CANDIDATE_MIGRATION_0004,
 ];
 

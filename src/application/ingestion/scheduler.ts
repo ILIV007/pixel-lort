@@ -104,12 +104,15 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
   }
 
   // R19-01 (R09.1): resolve the schema capability ONCE per pass (ONE
-  // bounded, indexed metadata read) into EXACTLY ONE of three typed
-  // states. Only a readable exact v3 may choose the legacy path and only
-  // a readable exact v4 the ownership path; ANYTHING else must stop the
-  // pass BEFORE the completeness probe / seed / due scan — i.e. before
-  // every source/job/state effect. An unreadable capability must never be
-  // interpreted as permission to run unfenced legacy ingestion (CE1).
+  // bounded, indexed metadata read) into EXACTLY ONE of the typed states.
+  // Only a readable exact v3 may choose the legacy path; only a readable
+  // exact v4 (the 0004 ownership shape) or v5 (the R1.20-R1 LINEAR final
+  // state — 0005 applied ON TOP of 0004, which PROVES the ownership column
+  // and index are present) may choose the ownership path; ANYTHING else
+  // must stop the pass BEFORE the completeness probe / seed / due scan —
+  // i.e. before every source/job/state effect. An unreadable capability
+  // must never be interpreted as permission to run unfenced legacy
+  // ingestion (CE1).
   const capability = await resolveSchemaCapability(executor);
   if (capability.kind === 'unresolved') {
     logger?.warn('ingestion.schedule.capability_unresolved', {
@@ -117,7 +120,10 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
     });
     return { kind: 'capability_unresolved', reason: capability.reason };
   }
-  const ownershipEnabled = capability.kind === 'known_v4_ownership';
+  const ownershipEnabled =
+    capability.kind === 'known_v4_ownership' ||
+    capability.kind === 'known_v5_admin_post' ||
+    capability.kind === 'known_v6_editorial_post';
 
   // Catalog completeness probe (R08): which registry sources are missing
   // a `sources` row or a `source_state` row — even when the table is NOT

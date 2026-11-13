@@ -8,7 +8,7 @@
 # --- Non-secret (local overrides) ----------------------------------------------
 # ENVIRONMENT=development
 # LOG_LEVEL=debug
-# APP_VERSION=1.4.0
+# APP_VERSION=1.41.0
 # Phase 2A Telegram ingress flag (non-secret). Turn on locally ONLY together
 # with the three Phase 2 secrets below (fake local fixtures are fine).
 # TELEGRAM_INGRESS_ENABLED=false
@@ -16,7 +16,47 @@
 # locally only to exercise the engine against local D1 (no real queue is
 # needed for offline tests; dispatch fails closed without the JOBS binding).
 # JOBS_ENABLED=false
-# TARGET_CHANNEL=
+# Phase 5A editorial source→draft gate (non-secret; ADR-0042). Ships OFF:
+# editorial.prepare_draft work is losslessly policy-paused while off; the
+# AI service keeps its own independent gates.
+# EDITORIAL_ENABLED=false
+# Phase 5C-4 candidate-MATCHING report gate (V4 Phase 5.2): independent
+# fail-closed flag; while off no candidateMatching payload is computed or
+# stored; while on it is a pure zero-SQL/zero-cost derivation. Never
+# implies EDITORIAL_ENABLED or AI_ENABLED.
+# EDITORIAL_MATCHING_ENABLED=false
+# EDITORIAL_ADJUDICATION_ENABLED=false
+# Intended owner value since R1.10.5 (owner channel identity: pixel lores;
+# non-secret per ADR-0009): TARGET_CHANNEL=@pixellores
+# TARGET_CHANNEL=@pixellores
+# Phase 6 AI adapter gates (non-secret; ADR-0041). Ships OFF: with
+# AI_ENABLED=false the AI draft service never calls a provider.
+# AI_GEMINI_ENABLED also requires verified Free-tier eligibility.
+# AI_ENABLED=false
+# AI_GEMINI_ENABLED=false
+# R1.17 event-relation task gate (non-secret; ADR-0045). INDEPENDENT
+# fail-closed flag: with false the relation step performs zero retrieval,
+# zero adjudication, zero writes; never implies AI/EDITORIAL gates.
+# EVENT_RELATION_ENABLED=false
+# R1.18 read-only admin review gate (non-secret; ADR-0046). INDEPENDENT
+# fail-closed flag for the /drafts read-only Telegram surface; ships OFF.
+# ADMIN_REVIEW_ENABLED=false
+# ADMIN_QUEUE_ENABLED=false
+# Phase 9B read-only story-identity surface gate (non-secret; independent,
+# fail-closed; ships OFF).
+# ADMIN_STORY_ENABLED=false
+# Phase 9C write-capable queue disposition surface gate (non-secret;
+# independent, fail-closed; ships OFF — a STOP, never a resend).
+# ADMIN_QUEUE_WRITE_ENABLED=false
+# Phase 9D album media-group capture surface gate (non-secret; independent,
+# fail-closed; ships OFF — evidence gathering, never a send path).
+# ADMIN_ALBUM_CAPTURE_ENABLED=false
+# R1.20-R admin post pipeline gates (independent, fail-closed; ship OFF):
+# ADMIN_POST_ENABLED=false
+# ADMIN_POST_LIVE_PUBLISH_ENABLED=false
+# R1.22 Phase A editorial→post bridge gate (independent, fail-closed; ships
+# OFF): gates ONLY /post_from_draft.
+# EDITORIAL_TO_POST_ENABLED=false
 
 # --- Secrets (names only; leave empty unless your phase requires them) ----------
 # Phase 2 formats (ADR-0024):

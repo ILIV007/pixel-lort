@@ -1,7 +1,7 @@
 # PIXEL Editorial Agent — Implementation Specification v1
 
-**Channel:** PIXEL LORT  
-**Username:** `@pixellort`  
+**Channel:** pixel lores  
+**Username:** `@pixellores` (https://t.me/pixellores; R1.10.5 owner amendment)  
 **Bot persona:** Pixel  
 **Platform:** Cloudflare Workers Free + D1 + Queues + KV + R2 + Workers AI  
 **Primary interface:** Telegram private admin chat  
@@ -27,7 +27,7 @@
 Telegram webhook ──► update claim (D1) ──► durable job (D1) ──► pixel-jobs
 Cron */5 ──────────► due source/publication scan ─────────────► pixel-jobs
 pixel-jobs ────────► use case handlers ──► D1/R2/KV/external APIs
-Publisher ─────────► Telegram API ───────► @pixellort
+Publisher ─────────► Telegram API ───────► @pixellores
 Failures ──────────► retry_wait/D1 ──────► pixel-dlq after max attempts
 ```
 
@@ -57,7 +57,7 @@ Domain code imports no Cloudflare, Telegram, provider SDK, or HTTP client types.
 - `BOT_TOKEN`
 - `WEBHOOK_SECRET`
 - `OWNER_TELEGRAM_ID`
-- `TARGET_CHANNEL=@pixellort`
+- `TARGET_CHANNEL=@pixellores`
 - `GEMINI_API_KEY`
 - `GROQ_API_KEY`
 - `YOUTUBE_API_KEY`

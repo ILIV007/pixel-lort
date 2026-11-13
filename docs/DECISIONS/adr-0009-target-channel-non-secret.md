@@ -26,3 +26,15 @@ it (phase 2) and is validated there as plain config.
 - `.env.example` documents it under non-secret configuration, not secrets.
 - The blueprint's secrets-list layout is knowingly deviated from; the
   deviation is recorded here and in ADR-0008.
+
+## Owner amendment (Round 1.10.5, 2026-10-27) — channel identity update
+
+The owner renamed the CHANNEL: the public channel is now **pixel lores**
+(`@pixellores`, https://t.me/pixellores). The verbatim "Context" quote above
+is preserved exactly as recorded (the Blueprint historically listed the old
+value); the _current_ intended non-secret value is `TARGET_CHANNEL=@pixellores`
+(reflected in `.env.example`, `.dev.vars.example`, `wrangler.jsonc` vars and
+`docs/blueprint/v1/pixel_source_registry_v1.json` brand fields). The
+non-secret CLASSIFICATION decided here is unchanged. The Telegram bot/persona
+("Pixel"), the repository slug, and all Cloudflare resource names are NOT
+renamed by the owner's instruction.
