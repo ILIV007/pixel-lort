@@ -24,6 +24,7 @@ import { validateConfig, type ConfigValidationResult } from './validate';
 export const ADMIN_REVIEW_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_QUEUE_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_STORY_FLAG_VALUES = ['true', 'false'] as const;
+export const ADMIN_QUEUE_WRITE_FLAG_VALUES = ['true', 'false'] as const;
 
 export const PHASE_9A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
   {
@@ -59,15 +60,29 @@ export const PHASE_9A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
       'Read-only story-identity surface gate (non-secret; Phase 9B). Gates the /story <storyId> Telegram command and its help advertisement only — fail-closed default false; observation-only (two bounded SELECTs, zero writes); never enables any write path, the scheduler send path, or any other behavior.',
     phase: 9,
   },
+  {
+    name: 'ADMIN_QUEUE_WRITE_ENABLED',
+    type: 'enum',
+    required: false,
+    secret: false,
+    allowed: [...ADMIN_QUEUE_WRITE_FLAG_VALUES],
+    default: 'false',
+    description:
+      'Write-capable queue disposition surface gate (non-secret; Phase 9C). Gates the /queue <publicationId> detail view, its cancel button and its single-use disposition callback only — fail-closed default false; the ONE disposition is the pol1 cancel from pending/retry_wait/failed (a STOP, never a resend); independent of ADMIN_QUEUE_ENABLED; never enables the scheduler send path, any send, or any other write.',
+    phase: 9,
+  },
 ]);
 
-/** Validated Phase 9A/9B flag state (values only; no secrets involved). */
+/** Validated Phase 9A/9B/9C flag state (values only; no secrets involved). */
 export interface AdminReviewConfig {
   readonly reviewEnabled: boolean;
   /** Phase 9A: the read-only /queue surface gate (independent; default OFF). */
   readonly queueEnabled: boolean;
   /** Phase 9B: the read-only /story surface gate (independent; default OFF). */
   readonly storyEnabled: boolean;
+  /** Phase 9C: the write-capable queue disposition surface gate (independent;
+   *  default OFF — the cancel disposition is a STOP, never a resend). */
+  readonly queueWriteEnabled: boolean;
 }
 
 /**
@@ -90,6 +105,7 @@ export function parseAdminReviewConfig(env: Readonly<Record<string, unknown>>): 
       reviewEnabled: result.ok === true && result.config.ADMIN_REVIEW_ENABLED === 'true',
       queueEnabled: result.ok === true && result.config.ADMIN_QUEUE_ENABLED === 'true',
       storyEnabled: result.ok === true && result.config.ADMIN_STORY_ENABLED === 'true',
+      queueWriteEnabled: result.ok === true && result.config.ADMIN_QUEUE_WRITE_ENABLED === 'true',
     },
     result,
   };

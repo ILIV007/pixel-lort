@@ -8,7 +8,7 @@
 # --- Non-secret (local overrides) ----------------------------------------------
 # ENVIRONMENT=development
 # LOG_LEVEL=debug
-# APP_VERSION=1.37.0
+# APP_VERSION=1.38.0
 # Phase 2A Telegram ingress flag (non-secret). Turn on locally ONLY together
 # with the three Phase 2 secrets below (fake local fixtures are fine).
 # TELEGRAM_INGRESS_ENABLED=false
@@ -45,6 +45,9 @@
 # Phase 9B read-only story-identity surface gate (non-secret; independent,
 # fail-closed; ships OFF).
 # ADMIN_STORY_ENABLED=false
+# Phase 9C write-capable queue disposition surface gate (non-secret;
+# independent, fail-closed; ships OFF — a STOP, never a resend).
+# ADMIN_QUEUE_WRITE_ENABLED=false
 # R1.20-R admin post pipeline gates (independent, fail-closed; ship OFF):
 # ADMIN_POST_ENABLED=false
 # ADMIN_POST_LIVE_PUBLISH_ENABLED=false

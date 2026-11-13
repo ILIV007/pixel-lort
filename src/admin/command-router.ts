@@ -64,6 +64,7 @@ import { parseDraftsArgument, type DraftsArgumentParse } from './review-command'
 import { ADMIN_REVIEW_STRINGS, REVIEW_COMMAND } from './review-strings';
 import { ADMIN_QUEUE_STRINGS, QUEUE_COMMAND } from './queue-strings';
 import { parseQueueArgument } from './queue-command';
+import { parseQueueDispositionArgument } from '../domain/publishing/queue-disposition';
 import { ADMIN_STORY_STRINGS, STORY_COMMAND } from './story-strings';
 import { parseStoryArgument } from './story-command';
 import type {
@@ -170,6 +171,39 @@ export type TelegramAction =
       readonly type: 'queue_view';
       readonly chatId: number;
       readonly uiLanguage: AdminUiLanguage;
+    }
+  | {
+      /**
+       * Phase 9C write-capable queue disposition: show ONE publication's
+       * bounded detail with the honest disposition state (and, for a
+       * `publication.cancel` holder, the single-use cancel button). The
+       * id is already validated as a whole opaque token; the disposition
+       * service binds it as a single parameter (never SQL structure). The
+       * disposition itself is a STOP (the pol1 cancel) — never a resend.
+       */
+      readonly type: 'queue_detail';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly publicationId: string;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+    }
+  | {
+      /**
+       * Phase 9C token-callback dispatcher action: an `a:<token>` callback
+       * arrived while the write-capable queue surface is enabled. The
+       * ingress PRE-READS the token's action and routes to the OWNING
+       * service WITHOUT consuming foreign tokens (an admin_post.* token
+       * reaches the admin-post service; a queue.cancel_publication token
+       * reaches the disposition service; anything else answers the honest
+       * invalid with NOTHING consumed).
+       */
+      readonly type: 'action_token_callback';
+      readonly callbackQueryId: string;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+      readonly token: string;
     }
   | {
       /**
@@ -364,6 +398,17 @@ export interface CommandRouteContext {
    */
   readonly queueEnabled?: boolean;
   /**
+   * Phase 9C: whether the write-capable queue disposition surface is
+   * enabled (the `ADMIN_QUEUE_WRITE_ENABLED` fail-closed flag, parsed by
+   * the caller). Default/absent = DISABLED: `/queue <publicationId>` keeps
+   * the EXACT Phase 9A invalid-usage response and callback queries keep
+   * the exact legacy routing. It gates ONLY the detail view, its cancel
+   * button and its single-use disposition callback — the disposition is a
+   * STOP (the pol1 cancel), never a resend, and it never widens any send
+   * behavior.
+   */
+  readonly queueWriteEnabled?: boolean;
+  /**
    * Phase 9B: whether the READ-ONLY story-identity surface is enabled (the
    * `ADMIN_STORY_ENABLED` fail-closed flag, parsed by the caller). Default/
    * absent = DISABLED: `/story` keeps the exact unknown-command noop
@@ -507,6 +552,11 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
   const editorialToPostEnabled = context.editorialToPostEnabled === true;
   // Phase 9A: the queue gate is fail-closed — absent/false both DISABLE.
   const queueEnabled = context.queueEnabled === true;
+  // Phase 9C: the write-capable queue disposition gate is fail-closed AND
+  // INDEPENDENT — absent/false both DISABLE (the one-argument /queue keeps
+  // the EXACT Phase 9A invalid-usage response while OFF; a callback query
+  // keeps the legacy routing while OFF).
+  const queueWriteEnabled = context.queueWriteEnabled === true;
   // Phase 9B: the story gate is fail-closed — absent/false both DISABLE.
   const storyEnabled = context.storyEnabled === true;
 
@@ -547,6 +597,31 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
       const callback = parseCallbackData(update.callbackData);
       if (!callback.ok) {
         return { type: 'noop', reason: 'malformed_callback_data' };
+      }
+      // ---- Phase 9C token dispatcher ------------------------------------
+      // While the write-capable queue surface is enabled, EVERY `a:`
+      // callback routes through the ACTION-AWARE dispatcher: the ingress
+      // pre-reads the token's server-side action and hands it to the
+      // OWNING service (admin_post.* → the admin-post service;
+      // queue.cancel_publication → the disposition service; anything else
+      // → the honest invalid answer with NOTHING consumed). An
+      // admin-post token can never be burned by the queue surface, and a
+      // foreign/future token can never be burned by either.
+      if (queueWriteEnabled) {
+        if (actor.kind === 'unauthorized') {
+          return { type: 'noop', reason: 'callback_not_supported' };
+        }
+        if (update.callbackQueryId === undefined || update.fromUserId === undefined) {
+          return { type: 'noop', reason: 'malformed_callback_data' };
+        }
+        return {
+          type: 'action_token_callback',
+          callbackQueryId: update.callbackQueryId,
+          telegramUserId: update.fromUserId,
+          role: actor.role,
+          uiLanguage: uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE,
+          token: callback.token,
+        };
       }
       // ---- R1.20-R admin post callbacks --------------------------------
       // Enabled ONLY while the fail-closed gate is ON and the actor is
@@ -941,11 +1016,29 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         return { type: 'noop', reason: 'unroutable_message' };
       }
       const remainder = commandRemainder(update.text);
-      const parsedQueueArgument = parseQueueArgument(
-        remainder.kind === 'remainder' ? remainder.text : undefined,
-      );
+      const remainderText = remainder.kind === 'remainder' ? remainder.text : undefined;
+      const parsedQueueArgument = parseQueueArgument(remainderText);
       if (parsedQueueArgument.kind === 'list') {
         return { type: 'queue_view', chatId, uiLanguage: queueUi };
+      }
+      // ---- Phase 9C: the write-capable detail grammar ------------------
+      // ONLY while the independent write flag is ON: a valid whole-token
+      // argument routes to the detail surface (the disposition is a STOP —
+      // never a resend). While OFF (or for a grammar-invalid argument) the
+      // EXACT Phase 9A invalid-usage response applies — the richer surface
+      // is never leaked.
+      if (queueWriteEnabled) {
+        const parsedDetail = parseQueueDispositionArgument(remainderText);
+        if (parsedDetail.kind === 'valid' && update.fromUserId !== undefined) {
+          return {
+            type: 'queue_detail',
+            chatId,
+            telegramUserId: update.fromUserId,
+            publicationId: parsedDetail.publicationId,
+            role: actor.role,
+            uiLanguage: queueUi,
+          };
+        }
       }
       return {
         type: 'send_message',

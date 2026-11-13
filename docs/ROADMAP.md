@@ -1703,6 +1703,32 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       family) registered in test:db. docs/reviews/PHASE_9B_STORY_SCREEN.md
       records the design and the three in-round findings. The
       write-capable queue dispositions remain.
+- [x] Phase 9C (app 1.38.0, schema still 6 — ZERO DDL): the WRITE-CAPABLE
+      queue disposition surface (`/queue <publicationId>` detail + the
+      single-use cancel callback) — the plan slice 4 first carry. The
+      independent fail-closed `ADMIN_QUEUE_WRITE_ENABLED` flag (default
+      false, invalid-present = disabled, shipped 'false' everywhere)
+      gates ONLY the detail view, its button and its callback; while OFF
+      the one-argument form keeps the EXACT Phase 9A invalid-usage
+      response and callback routing stays byte-identical legacy. The PURE
+      qd1 disposition table over the REAL pol1 vocabulary (pending/
+      retry_wait/failed = cancellable — exactly the machine's cancel rows;
+      claimed/publishing = refused in_flight; published = refused
+      already_published; the terminal rows = refused terminal; the ONE
+      disposition is the pol1 CANCEL — a STOP, NEVER a resend); the
+      FENCED store write with the rowcount authority (last_error
+      deliberately preserved — the parked row keeps its classifier code) + ONE deterministic audit event (actor_type 'admin' per the
+      migration-0001 CHECK vocabulary, id `queue-cancel:<publicationId>`),
+      the action-aware token dispatcher (the ingress PRE-READS the token's
+      action WITHOUT consuming — an admin_post.* token reaches the
+      UNCHANGED admin-post service, a foreign/future token answers the
+      honest invalid with NOTHING consumed), the callback permission
+      RE-CHECK at callback time, and the bounded detail renderer
+      (identity/status/counters/schedule facts/stable codes only — never
+      draft content, never destinations). RED-first held: 16 unit + 34
+      REAL-D1 registered in test:db. docs/reviews/
+      PHASE_9C_QUEUE_DISPOSITIONS.md records the design and the two
+      in-round findings. The album-draft CAPTURING side remains.
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ⬜

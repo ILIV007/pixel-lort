@@ -229,6 +229,15 @@ export interface WorkerEnv {
   readonly ADMIN_REVIEW_ENABLED?: string;
   readonly ADMIN_QUEUE_ENABLED?: string;
   /**
+   * NON-SECRET write-capable queue disposition surface gate ('true' |
+   * 'false'; default 'false'; Phase 9C). INDEPENDENT fail-closed flag for
+   * the /queue <publicationId> detail view, its cancel button and its
+   * single-use disposition callback. The ONE disposition is the pol1
+   * cancel from pending/retry_wait/failed — a STOP, never a resend. Never
+   * implies the read screen, the scheduler send path, or any other write.
+   */
+  readonly ADMIN_QUEUE_WRITE_ENABLED?: string;
+  /**
    * NON-SECRET admin post pipeline gate ('true' | 'false'; default 'false';
    * R1.20-R). INDEPENDENT fail-closed flag for the authorized admin post
    * capture/preview/approve/callback surface. Never implies the ingress,

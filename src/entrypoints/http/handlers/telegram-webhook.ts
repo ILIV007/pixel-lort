@@ -47,6 +47,7 @@ import { AppError, type AppErrorCode } from '../../../shared/errors/app-error';
 import { parseWorkerConfig } from '../../../shared/config/phase0';
 import { parseTelegramPhase2Config } from '../../../shared/config/phase2';
 import { parseAdminReviewConfig } from '../../../shared/config/phase9';
+import { createAdminQueueDispositionService } from '../../../application/publishing/queue-disposition-service';
 import { parseAdminPostConfig } from '../../../shared/config/phase10';
 import { timingSafeEqualStrings } from '../../../shared/security/timing-safe';
 import {
@@ -244,6 +245,10 @@ export async function handleTelegramWebhook(
   // Phase 9B: the read-only story gate is parsed by the SAME fail-closed
   // phase9 config (independent flag; default false).
   const storyEnabled = review.config.storyEnabled;
+  // Phase 9C: the write-capable queue disposition gate is parsed by the
+  // SAME fail-closed phase9 config (INDEPENDENT flag; default false — the
+  // disposition is a STOP, never a resend).
+  const queueWriteEnabled = review.config.queueWriteEnabled;
 
   // R1.20-R: the admin post pipeline gates are parsed fail-closed —
   // absent/false AND any invalid-present value both DISABLE (the invalid
@@ -296,6 +301,10 @@ export async function handleTelegramWebhook(
       // Phase 9A: the read-only /queue gate (fail-closed, default false) —
       // gates ONLY that observation command.
       queueEnabled,
+      // Phase 9C: the write-capable queue disposition gate (fail-closed,
+      // default false) — gates ONLY the detail view, its cancel button and
+      // its single-use callback; the disposition is a STOP, never a resend.
+      queueWriteEnabled,
       // Phase 9B: the read-only /story gate (fail-closed, default false) —
       // gates ONLY that observation command.
       storyEnabled,
@@ -324,6 +333,12 @@ export async function handleTelegramWebhook(
           executor,
           sendGateEnabled: false,
         })
+      : undefined,
+    // Phase 9C: the write-capable queue disposition service is wired ONLY
+    // while its gate is ON — the fenced cancel disposition (a STOP, never a
+    // resend) with the deterministic audit event.
+    adminQueueDisposition: queueWriteEnabled
+      ? createAdminQueueDispositionService({ executor, clock: systemClock })
       : undefined,
     // R1.20-R: the admin post service is wired ONLY while its gate is ON;
     // R1.20-R1: the transport is the SAME real Bot API client instance built

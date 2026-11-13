@@ -18,7 +18,7 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.37.0",
+    "APP_VERSION": "1.38.0",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
@@ -90,6 +90,13 @@
     // unknown-command noop semantics with ZERO story queries; it is
     // observation-only (two bounded SELECTs) and never a write path.
     "ADMIN_STORY_ENABLED": "false",
+    // Phase 9C write-capable queue disposition surface gate (non-secret;
+    // independent, fail-closed). With "false" the /queue <publicationId>
+    // detail view keeps the Phase 9A invalid-usage response and callback
+    // queries keep the legacy routing; the ONE disposition is the pol1
+    // cancel from pending/retry_wait/failed (a STOP, never a resend) and
+    // it never enables the scheduler send path or any other write.
+    "ADMIN_QUEUE_WRITE_ENABLED": "false",
     // R1.20-R admin post pipeline gates (non-secret). FAIL-CLOSED defaults:
     // ADMIN_POST_ENABLED gates the authorized admin post capture/preview/
     // approve/callback surface; ADMIN_POST_LIVE_PUBLISH_ENABLED gates ONLY
@@ -177,7 +184,7 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.37.0",
+        "APP_VERSION": "1.38.0",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",

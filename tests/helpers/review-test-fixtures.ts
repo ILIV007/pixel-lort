@@ -4,6 +4,7 @@ import { createTelegramIngress } from '../../src/application/telegram-ingress';
 import type { TelegramIngressDeps } from '../../src/application/telegram-ingress';
 import { createEditorialReviewService } from '../../src/application/editorial/draft-review-view';
 import { createAdminQueueViewService } from '../../src/application/publishing/queue-view-service';
+import { createAdminQueueDispositionService } from '../../src/application/publishing/queue-disposition-service';
 import { createAdminStoryViewService } from '../../src/application/publishing/story-view-service';
 import { createAuthorizationService } from '../../src/admin/authorization';
 import { createCommandRouter } from '../../src/admin/command-router';
@@ -119,12 +120,17 @@ export interface ReviewHarnessOptions {
   readonly queueEnabled?: boolean;
   /** Override the ADMIN_STORY_ENABLED parsing result (default: disabled). */
   readonly storyEnabled?: boolean;
+  /** Phase 9C: whether the write-capable queue disposition surface is enabled
+   *  (default: disabled — the flag-off legacy behavior). */
+  readonly queueWriteEnabled?: boolean;
   /** Omit the editorial review service (wiring-failure tests). */
   readonly omitReviewService?: boolean;
   /** Omit the queue view service (wiring-failure tests). */
   readonly omitQueueService?: boolean;
   /** Omit the story view service (wiring-failure tests). */
   readonly omitStoryService?: boolean;
+  /** Omit the queue disposition service (Phase 9C wiring-failure tests). */
+  readonly omitQueueDispositionService?: boolean;
   readonly botApi?: TelegramBotApiClient;
   readonly executor?: CountingExecutor;
 }
@@ -160,6 +166,7 @@ export function buildReviewHarness(options: ReviewHarnessOptions = {}): ReviewHa
       applicationVersion: APPLICATION_VERSION,
       reviewEnabled,
       queueEnabled: options.queueEnabled ?? false,
+      queueWriteEnabled: options.queueWriteEnabled ?? false,
       storyEnabled: options.storyEnabled ?? false,
     }),
     ...(options.omitReviewService
@@ -170,6 +177,14 @@ export function buildReviewHarness(options: ReviewHarnessOptions = {}): ReviewHa
       : {}),
     ...(options.storyEnabled === true && !options.omitStoryService
       ? { adminStoryView: createAdminStoryViewService({ executor, sendGateEnabled: false }) }
+      : {}),
+    ...(options.queueWriteEnabled === true && !options.omitQueueDispositionService
+      ? {
+          adminQueueDisposition: createAdminQueueDispositionService({
+            executor,
+            clock: fixedClock(NOW),
+          }),
+        }
       : {}),
     botApi: client,
     clock: fixedClock(NOW),

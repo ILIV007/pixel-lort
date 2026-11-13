@@ -677,6 +677,96 @@ export async function markWaitingPublicationDeadLetter(
 }
 
 // ---------------------------------------------------------------------------
+// Phase 9C — the human cancel disposition (qd1)
+// ---------------------------------------------------------------------------
+
+export type CancelPublicationOutcome =
+  | { readonly kind: 'applied'; readonly priorStatus: string }
+  | { readonly kind: 'not_found' }
+  | { readonly kind: 'not_cancellable'; readonly status: string };
+
+/** The audit action name of the Phase 9C disposition. */
+export const QUEUE_CANCEL_AUDIT_ACTION = 'queue_publication_cancelled';
+
+/**
+ * The HUMAN cancel disposition (Phase 9C, qd1): the ONE fenced route a
+ * waiting/parked row takes to `cancelled` through the admin surface.
+ *
+ * THE FENCE: `status IN ('pending','retry_wait','failed')` — exactly the
+ * pol1 `cancel` rows. The rowcount is the authority (the auto-approval
+ * house shape): a row claimed by a worker between view and click, a row
+ * that healed, or a terminal row answers the honest not_cancellable with
+ * ZERO effect; a missing row answers not_found.
+ *
+ * `last_error` is deliberately NOT overwritten: a parked row keeps its
+ * classifier code as the epistemic record of WHY it parked — the cancel's
+ * story lives in the audit event (ONE deterministic
+ * `queue-cancel:<publicationId>` row, actor telegram, the measured
+ * metadata only — never document content, never destinations).
+ *
+ * The audit failure does NOT roll back the fence (the status is the
+ * authority); a duplicate audit id (an impossible second cancel of a
+ * terminal row) is absorbed, never a second event.
+ */
+export async function cancelPublicationById(
+  executor: DbExecutor,
+  input: {
+    readonly publicationId: string;
+    readonly actorId: string;
+    readonly nowMs: number;
+  },
+): Promise<CancelPublicationOutcome> {
+  if (typeof input.publicationId !== 'string' || input.publicationId.length === 0) {
+    return { kind: 'not_found' };
+  }
+  // The informational pre-read for the audit metadata (the FENCE remains
+  // the authority; the metadata status is best-effort context — an exotic
+  // same-set transition between the read and the fence only re-labels the
+  // audit row, never changes the effect).
+  const before = await executor.first<{ readonly status: string }>({
+    sql: `SELECT status FROM publications WHERE id = ?`,
+    params: [input.publicationId],
+  });
+  if (!before) {
+    return { kind: 'not_found' };
+  }
+  const fence = await executor.run({
+    sql: `UPDATE publications
+            SET status = 'cancelled', lease_until = NULL, claimed_at = NULL, updated_at = ?
+          WHERE id = ? AND status IN ('pending', 'retry_wait', 'failed')`,
+    params: [input.nowMs, input.publicationId],
+  });
+  if (fence.changes === 0) {
+    return { kind: 'not_cancellable', status: before.status };
+  }
+  try {
+    await executor.run({
+      sql: `INSERT INTO audit_events (id, actor_type, actor_id, action, target_type,
+              target_id, trace_id, metadata_json, created_at)
+            VALUES (?, 'admin', ?, ?, 'publication', ?, NULL, ?, ?)`,
+      params: [
+        `queue-cancel:${input.publicationId}`,
+        input.actorId,
+        QUEUE_CANCEL_AUDIT_ACTION,
+        input.publicationId,
+        JSON.stringify({
+          dispositionVersion: 'qd1',
+          priorStatus: before.status,
+          permission: 'publication.cancel',
+        }),
+        input.nowMs,
+      ],
+    });
+  } catch (error) {
+    if (!(isAppError(error) && error.code === 'db_constraint_violation')) {
+      throw error;
+    }
+    // The duplicate audit id absorption (see the docblock).
+  }
+  return { kind: 'applied', priorStatus: before.status };
+}
+
+// ---------------------------------------------------------------------------
 // the at-most-once ledger (publication_messages)
 // ---------------------------------------------------------------------------
 

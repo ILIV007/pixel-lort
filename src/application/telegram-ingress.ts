@@ -127,8 +127,11 @@ import type { Clock } from '../shared/time/clock';
 import type { Logger } from '../observability/logger';
 import type { EditorialReviewService } from './editorial/draft-review-view';
 import type { AdminQueueViewService } from './publishing/queue-view-service';
+import type { AdminQueueDispositionService } from './publishing/queue-disposition-service';
 import type { AdminStoryViewService } from './publishing/story-view-service';
 import type { AdminPostButtons, AdminPostService } from './admin-post/admin-post-service';
+import { QUEUE_CANCEL_TOKEN_ACTION } from '../domain/publishing/queue-disposition';
+import { ADMIN_QUEUE_STRINGS } from '../admin/queue-strings';
 import type { PostContentDocument } from '../domain/admin-post/post-content';
 
 export type TelegramUpdateOutcome = 'processed' | 'duplicate' | 'failed';
@@ -207,6 +210,14 @@ export interface TelegramIngressDeps {
    */
   readonly adminQueueView?: AdminQueueViewService;
   /**
+   * Phase 9C: the injected write-capable queue disposition service that
+   * executes the typed `queue_detail` action and the
+   * `queue.cancel_publication` token callbacks the dispatcher routes. The
+   * router NEVER queries D1; when the service is absent the action fails
+   * retryably (honest service_unavailable — never silently skipped).
+   */
+  readonly adminQueueDisposition?: AdminQueueDispositionService;
+  /**
    * Phase 9B: the injected read-only story view service that executes the
    * typed `story_view` action the router emits while the
    * `ADMIN_STORY_ENABLED` gate is ON. The router NEVER queries D1; when
@@ -246,6 +257,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     botApi,
     editorialReview,
     adminQueueView,
+    adminQueueDisposition,
     adminStoryView,
     adminPost,
     clock,
@@ -518,6 +530,91 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         }
         const view = await adminStoryView.storyView(action.storyId, action.uiLanguage);
         await sendSafely(action.chatId, view, 'story_view');
+        return;
+      }
+      case 'queue_detail': {
+        // Phase 9C write-capable queue disposition: the read + the button
+        // mint happen in the injected service (the mint is DURABLE before
+        // the message is sent); a missing service is a retryable wiring
+        // failure, never a silent skip and never a fabricated reply.
+        if (adminQueueDisposition === undefined) {
+          logger.warn('telegram.action.queue_disposition_unavailable', {
+            action: action.type,
+          });
+          throw new AppError('service_unavailable');
+        }
+        const detail = await adminQueueDisposition.queueDetail({
+          telegramUserId: action.telegramUserId,
+          publicationId: action.publicationId,
+          role: action.role,
+          uiLanguage: action.uiLanguage,
+        });
+        const buttons = detail.buttons as AdminPostButtons | undefined;
+        await sendSafely(action.chatId, detail.text, 'queue_detail', buttons);
+        return;
+      }
+      case 'action_token_callback': {
+        // Phase 9C: the ACTION-AWARE token dispatcher. The token's
+        // server-side action is PRE-READ (no consume): the owning service
+        // executes its own full consume/validate flow, a foreign/future
+        // token is answered honestly with NOTHING consumed, and a missing
+        // owning service is the honest retryable wiring failure.
+        const tokenRow = await executor.first<{ readonly action: string }>({
+          sql: 'SELECT action FROM admin_action_tokens WHERE id = ?',
+          params: [action.token],
+        });
+        const ui = action.uiLanguage;
+        const answerInvalid = async (): Promise<void> => {
+          await requireBotApi('action_token_callback').answerCallbackQuery({
+            callbackQueryId: action.callbackQueryId,
+            text: ADMIN_QUEUE_STRINGS[ui].callbackInvalidToken,
+          });
+        };
+        if (tokenRow === null) {
+          await answerInvalid();
+          return;
+        }
+        if (tokenRow.action === QUEUE_CANCEL_TOKEN_ACTION) {
+          if (adminQueueDisposition === undefined) {
+            logger.warn('telegram.action.queue_disposition_unavailable', {
+              action: action.type,
+            });
+            throw new AppError('service_unavailable');
+          }
+          const result = await adminQueueDisposition.handleCallback({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: ui,
+            token: action.token,
+          });
+          await requireBotApi('action_token_callback').answerCallbackQuery({
+            callbackQueryId: action.callbackQueryId,
+            text: result.callbackText,
+          });
+          return;
+        }
+        if (tokenRow.action.startsWith('admin_post.')) {
+          // The admin-post service owns these tokens; its own
+          // consume/validate flow is UNCHANGED. Absent service = the
+          // honest retryable wiring failure (the token is NOT consumed
+          // through the queue path).
+          if (adminPost === undefined) {
+            logger.warn('telegram.action.admin_post_unavailable', { action: action.type });
+            throw new AppError('service_unavailable');
+          }
+          await executeAdminPost({
+            type: 'admin_post_callback',
+            callbackQueryId: action.callbackQueryId,
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: ui,
+            token: action.token,
+          });
+          return;
+        }
+        // A foreign/future action: the honest invalid answer with NOTHING
+        // consumed — a token can never be burned by the wrong service.
+        await answerInvalid();
         return;
       }
       case 'set_admin_ui_language': {
