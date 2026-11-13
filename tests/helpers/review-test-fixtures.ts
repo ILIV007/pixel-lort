@@ -5,6 +5,7 @@ import type { TelegramIngressDeps } from '../../src/application/telegram-ingress
 import { createEditorialReviewService } from '../../src/application/editorial/draft-review-view';
 import { createAdminQueueViewService } from '../../src/application/publishing/queue-view-service';
 import { createAdminQueueDispositionService } from '../../src/application/publishing/queue-disposition-service';
+import { createAdminAlbumCaptureService } from '../../src/application/media/album-capture-service';
 import { createAdminStoryViewService } from '../../src/application/publishing/story-view-service';
 import { createAuthorizationService } from '../../src/admin/authorization';
 import { createCommandRouter } from '../../src/admin/command-router';
@@ -131,6 +132,10 @@ export interface ReviewHarnessOptions {
   readonly omitStoryService?: boolean;
   /** Omit the queue disposition service (Phase 9C wiring-failure tests). */
   readonly omitQueueDispositionService?: boolean;
+  /** Phase 9D: whether the album capture surface is enabled (default: disabled). */
+  readonly albumCaptureEnabled?: boolean;
+  /** Omit the album capture service (Phase 9D wiring-failure tests). */
+  readonly omitAlbumCaptureService?: boolean;
   readonly botApi?: TelegramBotApiClient;
   readonly executor?: CountingExecutor;
 }
@@ -167,6 +172,7 @@ export function buildReviewHarness(options: ReviewHarnessOptions = {}): ReviewHa
       reviewEnabled,
       queueEnabled: options.queueEnabled ?? false,
       queueWriteEnabled: options.queueWriteEnabled ?? false,
+      albumCaptureEnabled: options.albumCaptureEnabled ?? false,
       storyEnabled: options.storyEnabled ?? false,
     }),
     ...(options.omitReviewService
@@ -183,6 +189,15 @@ export function buildReviewHarness(options: ReviewHarnessOptions = {}): ReviewHa
           adminQueueDisposition: createAdminQueueDispositionService({
             executor,
             clock: fixedClock(NOW),
+          }),
+        }
+      : {}),
+    ...(options.albumCaptureEnabled === true && !options.omitAlbumCaptureService
+      ? {
+          albumCapture: createAdminAlbumCaptureService({
+            executor,
+            clock: fixedClock(NOW),
+            logger,
           }),
         }
       : {}),

@@ -1729,6 +1729,31 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       REAL-D1 registered in test:db. docs/reviews/
       PHASE_9C_QUEUE_DISPOSITIONS.md records the design and the two
       in-round findings. The album-draft CAPTURING side remains.
+- [x] Phase 9D (app 1.39.0, schema still 6 — ZERO DDL): the album-draft
+      CAPTURING side (`/album_capture` + the media-group member capture) —
+      the honest carry closed at the SURFACE level. The independent
+      fail-closed `ADMIN_ALBUM_CAPTURE_ENABLED` flag (default false,
+      invalid-present = disabled, shipped 'false' everywhere) gates ONLY
+      the capture session surface; while OFF media-group members keep the
+      EXACT legacy behavior. The pure ac1 module (the grammar, the TOTAL
+      state reader, the append rules — photo/video only, the 2..10 bound,
+      the one-caption rule, the duplicate refusal); the FENCED sessions
+      over the GENERIC `admin_sessions` table (flow 'album_capture',
+      step 'active', the 15-minute TTL; the rowcount is the authority);
+      the finish: the 2..10 bound checked BEFORE any write, then ONE batch
+      commits the N `media_assets` candidate rows (status 'candidate',
+      rights_status 'unknown' — OD-010: the machine invents NO permission)
+      + the capture-only canonical identity
+      `album-capture:<sessionId>/<ordinal>` + the session completion, and
+      ONE deterministic audit row; the OD-010 boundary PROVEN END-TO-END:
+      the REAL producer over the REAL captured rows refuses TYPED at the
+      planner gate (`candidate_malformed` — an admin-captured album is not
+      a source-media album; the admin-capture production route is PART of
+      the OD-010 owner decision); a SINGLE non-album photo is NEVER
+      captured here (the R1.21 path owns it); ZERO-send asserted.
+      RED-first held: 15 unit + 16 REAL-D1 registered in test:db.
+      docs/reviews/PHASE_9D_ALBUM_CAPTURE.md records the design and the
+      honest two-layer boundary.
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ⬜

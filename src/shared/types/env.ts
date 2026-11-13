@@ -238,6 +238,13 @@ export interface WorkerEnv {
    */
   readonly ADMIN_QUEUE_WRITE_ENABLED?: string;
   /**
+   * NON-SECRET album media-group capture surface gate ('true' | 'false';
+   * default 'false'; Phase 9D). INDEPENDENT fail-closed flag for the
+   * /album_capture session surface. Evidence gathering with rights-unknown
+   * candidates (OD-010); never a send path.
+   */
+  readonly ADMIN_ALBUM_CAPTURE_ENABLED?: string;
+  /**
    * NON-SECRET admin post pipeline gate ('true' | 'false'; default 'false';
    * R1.20-R). INDEPENDENT fail-closed flag for the authorized admin post
    * capture/preview/approve/callback surface. Never implies the ingress,

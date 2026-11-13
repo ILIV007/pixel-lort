@@ -130,6 +130,7 @@ import type { AdminQueueViewService } from './publishing/queue-view-service';
 import type { AdminQueueDispositionService } from './publishing/queue-disposition-service';
 import type { AdminStoryViewService } from './publishing/story-view-service';
 import type { AdminPostButtons, AdminPostService } from './admin-post/admin-post-service';
+import type { AdminAlbumCaptureService } from './media/album-capture-service';
 import { QUEUE_CANCEL_TOKEN_ACTION } from '../domain/publishing/queue-disposition';
 import { ADMIN_QUEUE_STRINGS } from '../admin/queue-strings';
 import type { PostContentDocument } from '../domain/admin-post/post-content';
@@ -218,6 +219,14 @@ export interface TelegramIngressDeps {
    */
   readonly adminQueueDisposition?: AdminQueueDispositionService;
   /**
+   * Phase 9D: the injected album-capture service that executes the typed
+   * `album_capture_command` / `album_capture_media` actions the router
+   * emits while the `ADMIN_ALBUM_CAPTURE_ENABLED` gate is ON. The router
+   * NEVER queries D1; when the service is absent the action fails
+   * retryably (honest service_unavailable — never silently skipped).
+   */
+  readonly albumCapture?: AdminAlbumCaptureService;
+  /**
    * Phase 9B: the injected read-only story view service that executes the
    * typed `story_view` action the router emits while the
    * `ADMIN_STORY_ENABLED` gate is ON. The router NEVER queries D1; when
@@ -259,6 +268,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     adminQueueView,
     adminQueueDisposition,
     adminStoryView,
+    albumCapture,
     adminPost,
     clock,
     logger,
@@ -551,6 +561,43 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         });
         const buttons = detail.buttons as AdminPostButtons | undefined;
         await sendSafely(action.chatId, detail.text, 'queue_detail', buttons);
+        return;
+      }
+      case 'album_capture_command': {
+        // Phase 9D album capture: the fenced session writes happen in the
+        // injected service (evidence gathering — NEVER a send path); a
+        // missing service is a retryable wiring failure, never a silent
+        // skip and never a fabricated reply.
+        if (albumCapture === undefined) {
+          logger.warn('telegram.action.album_capture_unavailable', { action: action.type });
+          throw new AppError('service_unavailable');
+        }
+        const view = await albumCapture.albumCaptureCommand({
+          telegramUserId: action.telegramUserId,
+          role: action.role,
+          storyId: action.storyId,
+          disposition: action.disposition,
+          uiLanguage: action.uiLanguage,
+        });
+        await sendSafely(action.chatId, view.text, 'album_capture_command');
+        return;
+      }
+      case 'album_capture_media': {
+        // Phase 9D album capture: ONE media-group member; the service
+        // checks the actor's active session and appends under the fence.
+        if (albumCapture === undefined) {
+          logger.warn('telegram.action.album_capture_unavailable', { action: action.type });
+          throw new AppError('service_unavailable');
+        }
+        const view = await albumCapture.albumCaptureMedia({
+          telegramUserId: action.telegramUserId,
+          role: action.role,
+          mediaKind: action.mediaKind,
+          fileId: action.fileId,
+          captionText: action.captionText,
+          uiLanguage: action.uiLanguage,
+        });
+        await sendSafely(action.chatId, view.text, 'album_capture_media');
         return;
       }
       case 'action_token_callback': {

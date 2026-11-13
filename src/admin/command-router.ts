@@ -67,6 +67,8 @@ import { parseQueueArgument } from './queue-command';
 import { parseQueueDispositionArgument } from '../domain/publishing/queue-disposition';
 import { ADMIN_STORY_STRINGS, STORY_COMMAND } from './story-strings';
 import { parseStoryArgument } from './story-command';
+import { ADMIN_ALBUM_CAPTURE_STRINGS, ALBUM_CAPTURE_COMMAND } from './album-capture-strings';
+import { parseAlbumCaptureArgument, type AlbumCaptureKind } from '../domain/media/album-capture';
 import type {
   ParsedMediaAttachment,
   ParsedRichTextExtraction,
@@ -117,6 +119,8 @@ export type NoopReason =
   | 'review_edited_message'
   | 'queue_not_private_chat'
   | 'queue_edited_message'
+  | 'album_capture_not_private_chat'
+  | 'album_capture_edited_message'
   | 'story_not_private_chat'
   | 'story_edited_message'
   | 'post_not_private_chat'
@@ -204,6 +208,37 @@ export type TelegramAction =
       readonly role: AdminRole;
       readonly uiLanguage: AdminUiLanguage;
       readonly token: string;
+    }
+  | {
+      /**
+       * Phase 9D album capture: one `/album_capture` disposition (start /
+       * status / finish / cancel). The argument is already grammar-
+       * validated; the service performs the story check and the fenced
+       * session writes. Evidence gathering — NEVER a send path.
+       */
+      readonly type: 'album_capture_command';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly disposition: 'start' | 'finish' | 'cancel' | 'status';
+      readonly storyId?: string;
+      readonly uiLanguage: AdminUiLanguage;
+    }
+  | {
+      /**
+       * Phase 9D album capture: ONE media-group member (photo/video with
+       * media_group_id) from an authorized admin in a private chat. The
+       * service decides honestly whether an active session exists (no
+       * session = the honest refusal — the legacy surfaces stay untouched).
+       */
+      readonly type: 'album_capture_media';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly mediaKind: AlbumCaptureKind;
+      readonly fileId: string;
+      readonly captionText?: string;
+      readonly uiLanguage: AdminUiLanguage;
     }
   | {
       /**
@@ -409,6 +444,16 @@ export interface CommandRouteContext {
    */
   readonly queueWriteEnabled?: boolean;
   /**
+   * Phase 9D: whether the album CAPTURE surface is enabled (the
+   * `ADMIN_ALBUM_CAPTURE_ENABLED` fail-closed flag, parsed by the caller).
+   * Default/absent = DISABLED: media-group members keep the EXACT legacy
+   * behavior (the admin-post capture's explicit album-member rejection, or
+   * the not_a_command noop) and /album_capture keeps the unknown-command
+   * noop. It gates ONLY the capture session surface — evidence gathering
+   * with rights-unknown candidates (OD-010), NEVER a send path.
+   */
+  readonly albumCaptureEnabled?: boolean;
+  /**
    * Phase 9B: whether the READ-ONLY story-identity surface is enabled (the
    * `ADMIN_STORY_ENABLED` fail-closed flag, parsed by the caller). Default/
    * absent = DISABLED: `/story` keeps the exact unknown-command noop
@@ -557,6 +602,10 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
   // the EXACT Phase 9A invalid-usage response while OFF; a callback query
   // keeps the legacy routing while OFF).
   const queueWriteEnabled = context.queueWriteEnabled === true;
+  // Phase 9D: the album capture gate is fail-closed AND INDEPENDENT —
+  // absent/false both DISABLE (media-group members keep the EXACT legacy
+  // behavior while OFF).
+  const albumCaptureEnabled = context.albumCaptureEnabled === true;
   // Phase 9B: the story gate is fail-closed — absent/false both DISABLE.
   const storyEnabled = context.storyEnabled === true;
 
@@ -661,6 +710,52 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
       ) {
         return { type: 'noop', reason: 'command_for_other_bot' };
       }
+    }
+
+    // ---- Phase 9D album-capture media-group members ----------------------
+    // ONLY while the independent capture gate is ON: a media-group member
+    // (photo/video carrying media_group_id) from an AUTHORIZED admin in a
+    // PRIVATE chat routes to the capture surface (the service decides
+    // honestly whether an active session exists — no session = the honest
+    // refusal, never a silent swallow). While OFF this block is unreachable
+    // and the EXACT legacy behavior applies (the admin-post capture's
+    // explicit album-member rejection, or the not_a_command noop). A SINGLE
+    // (non-album) photo is NEVER captured here — the R1.21 path owns it.
+    if (
+      albumCaptureEnabled &&
+      command === undefined &&
+      update.kind === 'message' &&
+      update.chatType === 'private' &&
+      update.inMediaGroup === true
+    ) {
+      const media = update.media;
+      if (media !== undefined && (media.kind === 'photo' || media.kind === 'video')) {
+        if (actor.kind === 'unauthorized') {
+          // Legacy behavior for unauthorized senders — no feedback.
+          return { type: 'noop', reason: 'not_a_command' };
+        }
+        if (chatId === undefined || update.fromUserId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        const capUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
+        const captionText =
+          update.richCaption !== undefined && update.richCaption.ok
+            ? update.richCaption.text
+            : undefined;
+        return {
+          type: 'album_capture_media',
+          chatId,
+          telegramUserId: update.fromUserId,
+          role: actor.role,
+          mediaKind: media.kind,
+          fileId: media.fileId,
+          ...(captionText !== undefined ? { captionText } : {}),
+          uiLanguage: capUi,
+        };
+      }
+      // A media-group member whose media is unsupported (document/audio/...)
+      // falls through to the legacy surface (the admin-post capture's
+      // explicit rejection, or the noop) — nothing is degraded.
     }
 
     // ---- R1.20-R admin post surface --------------------------------------
@@ -1101,6 +1196,67 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         type: 'send_message',
         chatId,
         text: escapeTelegramHtml(ADMIN_STORY_STRINGS[storyUi].invalidUsage),
+      };
+    }
+
+    // ---- Phase 9D album-capture session command (`/album_capture`) --------
+    // Gated by its OWN fail-closed flag; while OFF the command falls
+    // through to the SAME unknown-command noop — zero feedback and ZERO
+    // session reads. The router validates the argument grammar and emits
+    // the typed disposition; the session writes happen in the injected
+    // capture service (evidence gathering — NEVER a send path).
+    if (command === ALBUM_CAPTURE_COMMAND) {
+      if (!albumCaptureEnabled) {
+        return { type: 'noop', reason: 'command_not_allowlisted' };
+      }
+      if (actor.kind === 'unauthorized') {
+        if (chatId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        return { type: 'denied', chatId, reason: 'unauthorized', text: denialText() };
+      }
+      const capUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
+      if (!roleHasPermission(actor.role, 'draft.create')) {
+        if (chatId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        return {
+          type: 'denied',
+          chatId,
+          reason: 'insufficient_permission',
+          text: escapeTelegramHtml(ADMIN_ALBUM_CAPTURE_STRINGS[capUi].permissionDenied),
+        };
+      }
+      if (update.chatType !== 'private') {
+        return { type: 'noop', reason: 'album_capture_not_private_chat' };
+      }
+      if (update.kind !== 'message') {
+        return { type: 'noop', reason: 'album_capture_edited_message' };
+      }
+      if (chatId === undefined || update.fromUserId === undefined) {
+        return { type: 'noop', reason: 'unroutable_message' };
+      }
+      const remainder = commandRemainder(update.text);
+      const parsedCaptureArgument = parseAlbumCaptureArgument(
+        remainder.kind === 'remainder' ? remainder.text : undefined,
+      );
+      if (parsedCaptureArgument.kind === 'invalid') {
+        return {
+          type: 'send_message',
+          chatId,
+          text: escapeTelegramHtml(ADMIN_ALBUM_CAPTURE_STRINGS[capUi].invalidUsage),
+        };
+      }
+      return {
+        type: 'album_capture_command',
+        chatId,
+        telegramUserId: update.fromUserId,
+        role: actor.role,
+        disposition: parsedCaptureArgument.kind,
+        ...(parsedCaptureArgument.kind === 'start'
+          ? { storyId: parsedCaptureArgument.storyId }
+          : {}),
+        uiLanguage: capUi,
       };
     }
 

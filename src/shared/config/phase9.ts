@@ -25,6 +25,7 @@ export const ADMIN_REVIEW_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_QUEUE_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_STORY_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_QUEUE_WRITE_FLAG_VALUES = ['true', 'false'] as const;
+export const ADMIN_ALBUM_CAPTURE_FLAG_VALUES = ['true', 'false'] as const;
 
 export const PHASE_9A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
   {
@@ -61,6 +62,17 @@ export const PHASE_9A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
     phase: 9,
   },
   {
+    name: 'ADMIN_ALBUM_CAPTURE_ENABLED',
+    type: 'enum',
+    required: false,
+    secret: false,
+    allowed: [...ADMIN_ALBUM_CAPTURE_FLAG_VALUES],
+    default: 'false',
+    description:
+      'Album media-group CAPTURE surface gate (non-secret; Phase 9D). Gates the /album_capture session commands and the media-group member capture only — fail-closed default false; evidence gathering with rights-unknown candidates (OD-010: the machine invents no permission); independent; never enables any send path, the producer, or any other write.',
+    phase: 9,
+  },
+  {
     name: 'ADMIN_QUEUE_WRITE_ENABLED',
     type: 'enum',
     required: false,
@@ -83,6 +95,9 @@ export interface AdminReviewConfig {
   /** Phase 9C: the write-capable queue disposition surface gate (independent;
    *  default OFF — the cancel disposition is a STOP, never a resend). */
   readonly queueWriteEnabled: boolean;
+  /** Phase 9D: the album capture surface gate (independent; default OFF —
+   *  evidence gathering with rights-unknown candidates; never a send path). */
+  readonly albumCaptureEnabled: boolean;
 }
 
 /**
@@ -106,6 +121,8 @@ export function parseAdminReviewConfig(env: Readonly<Record<string, unknown>>): 
       queueEnabled: result.ok === true && result.config.ADMIN_QUEUE_ENABLED === 'true',
       storyEnabled: result.ok === true && result.config.ADMIN_STORY_ENABLED === 'true',
       queueWriteEnabled: result.ok === true && result.config.ADMIN_QUEUE_WRITE_ENABLED === 'true',
+      albumCaptureEnabled:
+        result.ok === true && result.config.ADMIN_ALBUM_CAPTURE_ENABLED === 'true',
     },
     result,
   };
