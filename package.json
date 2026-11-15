@@ -49,5 +49,9 @@
   },
   "dependencies": {
     "zod": "^4.6.7"
+  },
+  "overrides": {
+    "sharp": "^0.35.5",
+    "undici": "^7.30.1"
   }
 }
