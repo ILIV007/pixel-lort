@@ -14,9 +14,13 @@ engine on provisioned Preview" — JOBS_ENABLED=true with both queue
 producers and the consumer, after migration 0003 was applied remotely; see
 the published Phase 3 handoff and `docs/RUNBOOK_PHASE3_QUEUE_SETUP.md`).
 Local development defaults and production remain disabled/separate.
-**Phase 4** is implemented on `phase/04-source-ingestion` (application
-version 1.4.0, schema stays 3, ADR-0038/0039) with the new ingestion gate
-shipped disabled everywhere. **Phase 6 is PARTIAL**: the Workers-AI-first
+**Phase 4** is implemented on this branch (draft PR #11, application
+version 1.41.0, schema 6, ADR-0038/0039) with the new ingestion gate
+shipped disabled everywhere. **Phases 7–13** are implemented on this branch
+as well (draft PR #11): Phase 7 media code is done but cannot run until R2 and KV are
+provisioned; Phase 8's at-most-once publication gate is implemented; Phases 9–10 are
+partial; Phases 11–12 tooling is done with the runs blocked live; Phase 13 is
+engineering-ready. See the Phase 7–13 sections. **Phase 6 is PARTIAL**: the Workers-AI-first
 ADAPTER FOUNDATION is implemented on the review branch, UNDER INDEPENDENT
 REVIEW (draft PR #11), and ships OFF everywhere with zero live inference —
 see the Phase 6 section. **Phase 5 is PARTIAL in a bounded way (Phase 5A
@@ -89,7 +93,7 @@ DISTINCT statuses; they are never conflated in this document.
 - [x] Documentation: README, AGENTS, ARCHITECTURE, ROADMAP, OPEN_DECISIONS,
       ADRs, SECURITY_MODEL, SECURITY, CONTRIBUTING.
 
-## Phase 1A — D1 data foundation and version contract ✅ (current)
+## Phase 1A — D1 data foundation and version contract ✅
 
 - [x] Versioned D1 migration `migrations/0001_initial_schema.sql` converted
       from the preserved blueprint schema: 27 approved tables, 29 approved
@@ -243,7 +247,7 @@ umbrella.)_
       subset in Phase 2A; full editorial renderer later)_
 - [ ] `degraded` readiness semantics per ADR-0015 (ready/degraded/not_ready).
 
-## Phase 3 — job/queue framework and idempotency ◑ (implemented offline; activation gated)
+## Phase 3 — job/queue framework and idempotency ✅ (implemented and REVIEWED; engine ACTIVATED on Preview by owner-authorized commit 57d6bd1)
 
 Implemented on `phase/03-job-queue-engine` (application version **1.3.1**,
 schema **3** via incremental migration 0003; ADR-0036 with review
@@ -329,7 +333,7 @@ DESC, id ASC LIMIT 25`); overlapping crons produce duplicate REFERENCES
       unit contract/config suites; full baseline remains green (see the
       Phase 3 handoff for recorded numbers).
 
-## Phase 4 — source registry and initial connectors ◑ (implemented on `phase/04-source-ingestion`; ingestion gate ships disabled, post-review activation only)
+## Phase 4 — source registry and initial connectors ◑ (implemented on this branch, draft PR #11, v1.41.0 / schema 6; ingestion gate ships disabled, post-review activation only)
 
 Implemented per ADR-0038/0039 (application version **1.4.0**, schema **3** —
 no migration 0004 required). No push, no deploy, no remote migration, no
@@ -1213,7 +1217,7 @@ limitation (see the Phase 4 note and
 `free-plan/FREE_SAFE_EXECUTION_DESIGN.md`) each stay pending separate
 independent decisions; executing them is NOT part of this round.
 
-## Phase 7 — media engine and album publisher ⬜
+## Phase 7 — media engine and album publisher ◒ (implemented on this branch, draft PR #11; code done, needs live R2 + KV provisioning to run)
 
 - [x] **Phase 7.1 (V4 local round, docs/reviews/PHASE_7_1_MEDIA_COMPATIBILITY_REVIEW.md,
       on the post-6-gate tree, docs only, no version bump): the roadmap's
@@ -1378,7 +1382,7 @@ independent decisions; executing them is NOT part of this round.
       editorial/admin flow that enqueues album drafts) remains the
       documented carry; BLOCKED_LIVE (Posidon only).
 
-## Phase 8 — publication scheduler, edit and correction ⬜
+## Phase 8 — publication scheduler, edit and correction ◒ (implemented on this branch, draft PR #11; at-most-once gate implemented; real-D1 changes() fence smoke test still pending)
 
 - [x] Phase 8.1 (ADR-0057; app 1.24.0, schema still 6): the publication
       SCHEDULING POLICY layer — the roadmap bullet «Tehran-window
@@ -1649,7 +1653,7 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       exactly-once Telegram message delivery, and channel-facing posts need
       stronger at-most-once protection than the webhook ingress provides.
 
-## Phase 9 — admin Telegram screens ⬜
+## Phase 9 — admin Telegram screens ◒ (implemented on this branch, draft PR #11; PARTIAL)
 
 - [x] R1.18 (ADR-0046): the FIRST read-only admin review slice — `/drafts`
       bounded ready first page + `/drafts <draftId>` stored detail via the
@@ -1763,7 +1767,7 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       honest two-layer boundary.
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
-## Phase 10 — security hardening and budget controls ⬜
+## Phase 10 — security hardening and budget controls ◒ (implemented on this branch, draft PR #11; PARTIAL — zod GHSA closed at runtime, dev advisories fixed by overrides)
 
 - [x] Phase 10.1 (app 1.29.0, schema still 6 — ZERO DDL): the
       CONSOLIDATED adversarial security sweep (27 REAL-D1/unit tests

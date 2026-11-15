@@ -11,14 +11,13 @@ scheduling policies.
 - **Timezone:** `Asia/Tehran`
 - **Authoritative specification:** [`docs/blueprint/v1/`](docs/blueprint/README.md)
 
-## Current implementation status — Phase 2A (Telegram secure ingress + admin foundation)
+## Current implementation status — v1.41.0 / schema 6 (draft PR #11)
 
-Phase 0 delivered the repository and Worker foundation. Phase 1A delivered
-the offline D1 data foundation and the approved `/version` contract. Phase 1B
-provisioned the isolated Cloudflare preview environment. **Phase 2A adds the
-secure, fully OFFLINE Telegram ingress and the initial admin
-foundation — no Telegram credentials exist, no webhook is registered, and no
-live Telegram call can occur.**
+Phases 0, 1A, 1B-preview, 2A, 2B, and 3 are done; the live preview runs
+`main` (v1.3.1 / schema 3). Phases 4–13 are implemented on this branch
+(draft PR #11, v1.41.0 / schema 6) behind fail-closed flags, pending merge
+to `main` and a preview deploy. The Phase 2A record below is the historical
+account of that phase; the current phase state lives in `docs/ROADMAP.md`.
 
 Implemented in Phase 2A (as corrected in v1.2.1; lifecycle completed in the
 correction rounds v1.2.2–v1.2.3 — schema v2):
