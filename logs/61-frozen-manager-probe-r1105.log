@@ -1,0 +1,52 @@
+
+ RUN  v4.1.11 /home/z/my-project/pixel-lort-pub
+
+stdout | audit-tools/manager-probes/design-counterexamples.test.ts > Posidon independent R1.10.2 design and instrumentation controls > CE1 failed batch must not count its submitted statements as successfully completed
+POSIDON[CE1] {"batchCompleted":0,"batchFailed":1,"batchResultRecords":0,"executionApiCallAttempts":1,"executionApiCallsCompleted":0,"executionApiCallsFailed":1,"statementsAttempted":2,"statementsCompleted":0,"statementsNotConfirmedCompleted":2,"metaRecordsAvailable":0,"metaRecordsUnavailable":0,"metaReservoirRetained":0,"metaReservoirDropped":0,"metaReservoirTruncated":false}
+
+stdout | audit-tools/manager-probes/design-counterexamples.test.ts > Posidon independent R1.10.2 design and instrumentation controls > CONTROL retained100 item inserts plus2 grouped reads still exceed50 statements despite3 API calls
+POSIDON[CONTROL] {"retainedItemInserts":100,"groupedReads":2,"stateUpdateAndEngineOverhead":"omitted: lower bound only","executionApiCallAttempts":3,"executionApiCallsCompleted":3,"executionApiCallsFailed":0,"statementsAttempted":102,"statementsCompleted":102,"statementsNotConfirmedCompleted":0,"metaRecordsAvailable":102,"metaRecordsUnavailable":0,"metaReservoirRetained":102,"metaReservoirDropped":0,"metaReservoirTruncated":false}
+
+stdout | audit-tools/manager-probes/design-counterexamples.test.ts > Posidon independent R1.10.2 design and instrumentation controls > CE2 proposed ProbeA without source must preserve accepted source-scoped lookup
+POSIDON[CE2] {"accepted":[],"proposed":[{"id":"existing-foreign-id"}],"note":"query-equivalence counterexample; not a claim of normal-path foreign writes"}
+
+stdout | audit-tools/manager-probes/design-counterexamples.test.ts > Posidon independent R1.10.2 design and instrumentation controls > CE3 bounded metadata reservoir must not overwrite an earlier unavailable record after saturation
+POSIDON[CE3] {"completed":4097,"retainedRecords":4096}
+
+ ❯ audit-tools/manager-probes/design-counterexamples.test.ts (4 tests | 1 failed) 54ms
+     ✓ CE1 failed batch must not count its submitted statements as successfully completed 21ms
+     ✓ CONTROL retained100 item inserts plus2 grouped reads still exceed50 statements despite3 API calls 10ms
+     × CE2 proposed ProbeA without source must preserve accepted source-scoped lookup 10ms
+     ✓ CE3 bounded metadata reservoir must not overwrite an earlier unavailable record after saturation 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  audit-tools/manager-probes/design-counterexamples.test.ts > Posidon independent R1.10.2 design and instrumentation controls > CE2 proposed ProbeA without source must preserve accepted source-scoped lookup
+AssertionError: expected [ { id: 'existing-foreign-id' } ] to deeply equal []
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- [][39m
+[31m+ [[39m
+[31m+   {[39m
+[31m+     "id": "existing-foreign-id",[39m
+[31m+   },[39m
+[31m+ ][39m
+
+ ❯ audit-tools/manager-probes/design-counterexamples.test.ts:30:28
+     28|   const proposed=await db.prepare('SELECT id FROM manager_design_probe…
+     29|   console.log('POSIDON[CE2]',JSON.stringify({accepted:accepted.results…
+     30|   expect(proposed.results).toEqual(accepted.results);
+       |                            ^
+     31|  });
+     32|  it('CE3 bounded metadata reservoir must not overwrite an earlier unav…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  10:58:09
+   Duration  1.36s (transform 342ms, setup 0ms, import 794ms, tests 54ms, environment 0ms)
+

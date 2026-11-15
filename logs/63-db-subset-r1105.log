@@ -1,0 +1,121 @@
+
+ RUN  v4.1.11 /home/z/my-project/pixel-lort-pub
+
+ ✓ tests/integration/round18-r10-budget-authority.test.ts (38 tests) 460ms
+stdout | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > cron (gate OFF) dispatches only enabled types and spends no ingestion budget
+{"ts":"2026-10-27T11:01:39.598Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2026-02-02T02:40:00.000Z"}
+
+stdout | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > cron (gate OFF) dispatches only enabled types and spends no ingestion budget
+{"ts":"2026-10-27T11:01:39.603Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":1,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > queue (gate OFF) acks the paused poll delivery and completes enabled work in the same batch — no dropped durable jobs
+{"ts":"2026-10-27T11:01:39.611Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":2}
+
+stdout | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > queue (gate OFF) acks the paused poll delivery and completes enabled work in the same batch — no dropped durable jobs
+{"ts":"2026-10-27T11:01:39.616Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":2,"retried":0}
+
+stderr | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > global JOBS_ENABLED=false still retries delivered queue work (never ACK-drops)
+{"ts":"2026-10-27T11:01:39.623Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"disabled"}
+
+stderr | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > present-but-invalid gate value fails closed at the queue entrypoint (messages retry)
+{"ts":"2026-10-27T11:01:39.631Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"config_invalid"}
+
+ ✓ tests/integration/round16-d01-policy-pause.test.ts (22 tests) 377ms
+ ✓ tests/integration/source-poll-pipeline.test.ts (14 tests) 354ms
+ ✓ tests/integration/round13-r03-r07-r08.test.ts (23 tests) 275ms
+ ✓ tests/integration/job-engine.test.ts (22 tests) 281ms
+ ✓ tests/integration/round17-r04-steam-rotation.test.ts (9 tests) 185ms
+ ✓ tests/integration/job-store-lifecycle.test.ts (21 tests) 167ms
+ ✓ tests/integration/round12-r01-r02.test.ts (15 tests) 153ms
+ ✓ tests/integration/round131-seed-contract.test.ts (12 tests) 144ms
+ ✓ tests/integration/round14-r05-r06.test.ts (31 tests) 128ms
+stdout | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > disabled (default): a structured no-op that never dispatches
+{"ts":"2026-10-27T11:01:47.927Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stdout | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled without both queue bindings: config_invalid — cron no-op, rows stay recoverable
+{"ts":"2026-10-27T11:01:47.934Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stderr | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled without both queue bindings: config_invalid — cron no-op, rows stay recoverable
+{"ts":"2026-10-27T11:01:47.934Z","level":"warn","msg":"cron.jobs_config_invalid","evt":"cron"}
+
+stdout | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled without DB: config_invalid — no dispatch, no crash
+{"ts":"2026-10-27T11:01:47.938Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stderr | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled without DB: config_invalid — no dispatch, no crash
+{"ts":"2026-10-27T11:01:47.938Z","level":"warn","msg":"cron.jobs_config_invalid","evt":"cron"}
+
+stdout | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled + DB + fake JOBS/DLQ producers: dispatches the canonical envelope OBJECT
+{"ts":"2026-10-27T11:01:47.942Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stdout | tests/integration/job-entrypoints.test.ts > scheduled entrypoint activation > enabled + DB + fake JOBS/DLQ producers: dispatches the canonical envelope OBJECT
+{"ts":"2026-10-27T11:01:47.951Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stderr | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > disabled (default): retries instead of acknowledging
+{"ts":"2026-10-27T11:01:47.957Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"disabled"}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > enabled + DB + required bindings: processes a real delivery end-to-end and acks durable success
+{"ts":"2026-10-27T11:01:47.961Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > enabled + DB + required bindings: processes a real delivery end-to-end and acks durable success
+{"ts":"2026-10-27T11:01:47.966Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stderr | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > enabled but missing required bindings: config_invalid — retries instead of acknowledging
+{"ts":"2026-10-27T11:01:47.971Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"config_invalid"}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > enabled + malformed message: acks the poison message (no hot loop)
+{"ts":"2026-10-27T11:01:47.974Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint activation > enabled + malformed message: acks the poison message (no hot loop)
+{"ts":"2026-10-27T11:01:47.975Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:01:47.978Z","level":"info","msg":"cron.triggered","evt":"cron","cron":"*/5 * * * *","scheduledTime":"2023-11-14T22:13:20.000Z"}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:01:47.983Z","level":"info","msg":"cron.jobs_dispatched","evt":"cron","dueScanned":1,"strandedScanned":0,"dispatched":1,"sendFailures":0,"poisonedUnregistered":0,"misconfiguredPoisoned":0,"policyPaused":0,"pausedExpiredObserved":0,"reclaimedLeases":0,"reclaimedExhausted":0}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:01:47.985Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:01:47.988Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:01:47.990Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > producer→consumer round trip at worker.queue: dispatched wire body completes durably; duplicate delivery stays safe
+{"ts":"2026-10-27T11:01:47.992Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":1,"retried":0}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > entrypoint persistence fault on the terminal write: retry, never ack, row stays claimed
+{"ts":"2026-10-27T11:01:47.997Z","level":"info","msg":"queue.batch.received","evt":"queue","queue":"pixel-jobs-preview","messageCount":1}
+
+stderr | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > entrypoint persistence fault on the terminal write: retry, never ack, row stays claimed
+{"ts":"2026-10-27T11:01:48.000Z","level":"warn","msg":"db.run.failed","evt":"queue","errorCode":"db_query_failed","durationMs":0}
+
+stderr | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > entrypoint persistence fault on the terminal write: retry, never ack, row stays claimed
+{"ts":"2026-10-27T11:01:48.001Z","level":"warn","msg":"jobs.msg.consumer_error","evt":"queue","messageId":"m-pf-1","errorCode":"db_query_failed"}
+
+stdout | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > entrypoint persistence fault on the terminal write: retry, never ack, row stays claimed
+{"ts":"2026-10-27T11:01:48.001Z","level":"info","msg":"queue.batch.completed","evt":"queue","acked":0,"retried":1}
+
+stderr | tests/integration/job-entrypoints.test.ts > queue entrypoint fault regressions (v1.3.1 final review) > invalid queue activation (DLQ missing): retries without executing a handler
+{"ts":"2026-10-27T11:01:48.013Z","level":"warn","msg":"queue.consumer_inactive","evt":"queue","reason":"config_invalid"}
+
+ ✓ tests/integration/job-entrypoints.test.ts (14 tests) 109ms
+ ✓ tests/integration/ingestion-budget.test.ts (8 tests) 90ms
+ ✓ tests/integration/posidon-round13-review.test.ts (6 tests) 76ms
+ ✓ tests/integration/d1-schema.test.ts (13 tests) 73ms
+ ✓ tests/integration/round131-real-http-port.test.ts (5 tests) 72ms
+ ✓ tests/integration/source-registry-seed.test.ts (5 tests) 60ms
+ ✓ tests/integration/migration-0002.test.ts (6 tests) 53ms
+ ✓ tests/integration/db-boundary.test.ts (13 tests) 53ms
+ ✓ tests/integration/ingestion-gate.test.ts (4 tests) 37ms
+ ✓ tests/integration/migration-plan-failures.test.ts (3 tests) 33ms
+ ✓ tests/integration/migration-0003.test.ts (4 tests) 32ms
+ ✓ tests/integration/migration-plan.test.ts (13 tests) 33ms
+
+ Test Files  22 passed (22)
+      Tests  301 passed (301)
+   Start at  11:01:36
+   Duration  19.80s (transform 643ms, setup 0ms, import 8.59s, tests 3.25s, environment 4ms)
+

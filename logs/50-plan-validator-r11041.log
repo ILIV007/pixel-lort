@@ -1,0 +1,48 @@
+# PIXEL R1.10.4.1 — LOCAL probe-plan feasibility validator run log
+# Round: R1.10.4.1 (LOCAL probe-plan feasibility corrections ONLY)
+# Command: node audit-tools/probe-plan/validate-probe-plan.mjs
+# Toolchain: node v24.21.0 (node:sqlite); zero network/account operations
+# Expected: 19 checks / 0 failures / exit 0
+# LOCAL feasibility proxies on local SQLite — NOT cloud measurements.
+
+V-01 PASS — schedule structural integrity — cases=20 unique=20 contiguous=true phaseSums G2:1 G3:18 G4:1 total=20/20
+V-02 PASS — bind formula derived from design-lab/candidate-sql.ts (11 values/row + 7 owned guards; <= 100 binds; 102,400-byte budget) — ITEM_VALUE_COLUMNS=11 OWNED_SHARED_BINDS=7 LEGACY_SHARED_BINDS=0 MAX_BOUND_PARAMS=100 MAX_SQL_STATEMENT_BYTES=102400 => maxOwnedRows=8 maxLegacyRows=9
+V-03 PASS — owned/legacy INSERT templates extracted from source; '?' counts = 11k+7 / 11k for k in {1,2,4,8,9}; both fenced state writes extracted — templates OK (owned k=8 -> 95 binds; legacy k=9 -> 99 binds)
+V-07 PASS — fixtures: exact canonical-URL byte counts (F-CJK 45,023; F-ROWSIZE 1,899,995; F-OVERSIZE 102,500), distinct URLs, raw RSS < 2 MiB feed bound — F-CJK RSS=1511666 B; F-HETERO RSS=1391722 B; F-ROWSIZE RSS=633506 B (all < 2,097,152)
+V-08 PASS — reachable gate: aggregate rung-2 (26 legal 8-row statements, 208 rows, one db.batch) total bind payload >= 2x the exact F-CJK batch payload P_req — the R1.10.4 single-statement ladder defect (CE1) is closed — P_req=4,510,238 B; P_208=9,383,270 B; multiple=2.080x (rule: >= 2x)
+V-09 PASS — internal-budget proofs: F-OVERSIZE (102,500 B) and F-ROWSIZE (1,899,995 B) single rows exceed the 102,400-byte budget => plan-time OversizedRowPlanError (F-ROWSIZE still under the documented 2,000,000-byte row limit); F-CJK 2-row statement fits and 3-row does not => P-03 registers exactly 50 INSERTs — oversize=103774 rowsize=1901273 (URL 1899995 B) cjk2row=91399 cjk3row=136511
+V-04a PASS — S3 control tier: real migrations 0001-0003 applied to local SQLite (71 statements), schema_version=3, poll_owner_job_id ABSENT, owned compile-probe FAILS to prepare (the CE2 tier boundary is real) — version=3 statements=71/71 ownedColumn=false prepareFails=true
+V-05 PASS — latch-seed.sql AND sources-seed.sql regenerated from the schedule are byte-identical to the committed files (drift fences) — latch rows=21 (1 statement); sources rows=11 (1 statement)
+V-04b PASS — S4 owned tier: + migration 0004 applied (5 statements), schema_version=4, poll_owner_job_id PRESENT, owned compile-probe prepares, partial unique index exists; CLI setup totals reconcile (79) — version=4 statements=5 index=true cliTotal=79/79
+V-06 PASS — per-statement admissibility: every registered multi-row statement legal (owned <= 8 rows / 95 binds; legacy <= 9 rows / 99 binds); the illegal 16/32/50-row single statements are GONE (CE1 root cause removed) — all registered statements legal
+V-10f PASS — ownership fence proof: wrong-generation guarded insert changes 0 rows; correct-generation inserts 2 (the guarded predicate is live, not decorative) — wrongGen changes=0, rightGen changes=2
+V-10 PASS — full local replay against the real S4 schema: guarded inserts land, the fence blocks wrong generations, the partial-unique-index negative probe rejects, and the replay executes EXACTLY the registered invocation-side statement count (521) — replayed 521 statements (registered: 521); registered API calls: 151; local changes: 1404
+V-11 PASS — resource reconciliation: round statements (600), documented-accounting rows written, bind payload and MEASURED local storage growth (incl. UNIQUE-index storage of canonical URLs) all within the registered caps and the documented Free allowances — statements 600/650; documented rows written 8351/9000 (12.0x under 100,000/day); bind payload 49.0 MB/55 MB; local storage growth 101.2 MB/120 MB (4.9x under 500 MB/db; 12 KB is the EMPTY-DB figure, not the schema baseline)
+V-12 PASS — invocation totals: 20 registered (+3 transport retries = hard cap 23); per-invocation max statements (69) and max API calls (52, P-QU-B only) within caps — invocations=20 apiCalls=151 maxStatements/invocation=69/70 maxApi/invocation=52/55
+V-13 PASS — conservative rows-read bounds within the registered cap (>= 200x under the documented 5,000,000 rows/day) — bound=15637/25000 (320x under 5M/day)
+V-14 PASS — coverage boundary: the static counterexample computes exactly (a sub-2-MiB RSS document whose single URL expands beyond the documented 2,000,000-byte row limit) — feed-bound compliance does NOT imply row-size compliance — rawRSS=1800116 (registered 1800116) < feedBound 2097152; canonical=5400023 (registered 5400023) > rowBound 2000000
+V-15 PASS — plan-document cross-checks: the plan cites the schedule, validator, ladder, fixtures, phases, protected invocation, CPU scopes, coverage numbers and reconciled caps — 33 anchors present
+V-16 PASS — quota-unit discriminator: P-QU-A (batch-51) and P-QU-B (terminal-51) are non-mutating, each submits exactly 51 one-row SELECTs, and the 4-branch interpretation matrix is registered — nonMutating=true counts=51/51 matrixBranches=4
+V-17 PASS — protected invocation artifacts: latch DDL carries the kill-switch states; 21 latch rows seeded; every case's registered budget consumed EXACTLY once by the replay; __global__ open (unused) — rows=21 global=open casesWithRemainingBudget=0
+
+--- key computed numbers (LOCAL feasibility proxies, NOT cloud measurements) ---
+totalInvocations: 20
+fixture_F-NORMAL: {"items":300,"canonicalUrlBytes":[2048],"rssBytes":12456}
+fixture_F-HETERO: {"items":100,"canonicalUrlBytes":[2048,45023],"rssBytes":1391722}
+fixture_F-CJK: {"items":400,"canonicalUrlBytes":[45023],"rssBytes":1511666}
+fixture_F-CJK-L: {"items":538,"canonicalUrlBytes":[45014,45023],"rssBytes":12456}
+fixture_F-OVERSIZE: {"items":1,"canonicalUrlBytes":[102500],"rssBytes":191}
+fixture_F-ROWSIZE: {"items":1,"canonicalUrlBytes":[1899995],"rssBytes":633506}
+p_req_bytes: 4510238
+p_208_bytes: 9383270
+p_208_multiple_of_p_req: 2.08
+oversize_single_row_audit_bytes: 103774
+rowsize_single_row_audit_bytes: 1901273
+cjk_2row_audit_bytes: 91399
+cjk_3row_audit_bytes: 136511
+replay: {"statementsExecuted":521,"registeredInvocationStatements":521,"registeredApiCalls":151,"localChanges":1404}
+resources: {"roundStatements":600,"cliStatements":{"s3":71,"s4":5,"probeDdl":1,"latchSeed":1,"sourcesSeed":1},"documentedRowsWritten":8351,"localChanges":1404,"bindPayloadBytes":49029079,"measuredLocalStorageGrowthBytes":101154816}
+invocations: {"invocations":20,"apiCalls":151,"maxStatements":69,"maxApi":52}
+
+VALIDATOR RESULT: PASS — 19 checks, 0 failures
+LOCAL ONLY: node:sqlite + repository files; zero network/account operations.

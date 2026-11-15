@@ -1,0 +1,644 @@
+/**
+ * Versioned story-ADJUDICATION report (Phase 5.3 — the V4 roadmap's
+ * adjudication/merge local slice): the HONEST, DETERMINISTIC,
+ * CONSERVATIVE PROPOSAL layer OVER the same draft's
+ * `candidateDiscovery` + `candidateAssessment` + `candidateMatching`
+ * reports at the lookup moment. NO SQL, NO network, NO SDK, NO model
+ * call, NO clock — a PURE derivation stored INSIDE `drafts.document_json`
+ * next to its three siblings by the SAME fenced atomic commit (zero new
+ * statements, zero extra execution calls, zero new probes).
+ *
+ * WHAT THE ADJUDICATION MODELS (roadmap ۵.۳ — nothing else):
+ * - a typed STANCE per candidate over the support/unknown axis the
+ *   siblings can actually OBSERVE: `content_equality_support_observed`
+ *   (ONLY the versioned content-composite equality — the verified 5C-3
+ *   reuse locator) vs `similar_signals_no_same_story_evidence` (any
+ *   weaker signal combination — explicitly NEVER same-story evidence);
+ * - a report-level DECISION over the merge axis: `merge_ready_proposed`
+ *   ONLY when EXACTLY ONE candidate carries content-equality support at
+ *   FULL coverage — and even that is a PROPOSAL routed to review, NEVER
+ *   an executed merge; every other shape is a typed DEFER:
+ *   `no_adjudication_available`, `defer_incomplete_coverage` (probe
+ *   overflow OR report truncation — an incomplete window never proposes),
+ *   `defer_conflict_multiple_supported` (≥2 content-equality candidates —
+ *   the report NEVER picks a winner), or
+ *   `no_merge_proposal_similar_signals_only`;
+ * - a typed CONFLICT record naming the conflicting supported candidates;
+ * - explicit audit/provenance basis labels (which sibling versions the
+ *   decision was derived from) and the preserved discovery limits.
+ *
+ * WHAT THE ADJUDICATION NEVER CLAIMS OR DOES:
+ * - it NEVER EXECUTES a merge, duplicate marking, supersede, attach,
+ *   evidence rewrite, or trust raise — `execution.executed` is FIXED
+ *   `false`, `reviewRequired` is FIXED `true`; undo is explicitly not
+ *   applicable because NOTHING is changed (a pure report inside the
+ *   draft's own document);
+ * - it NEVER concludes a contradiction or a rejection: absence of a
+ *   signal is NOT an observed difference, and the siblings carry no
+ *   observed-difference input — `contradictionObserved` is FIXED `false`
+ *   (v1 honestly cannot observe this axis rather than silently judging
+ *   it); rejections/contradictions need their own future evidence path;
+ * - it NEVER verifies truth, same-event identity, or source independence
+ *   — correlated fingerprint signals are NOT independent confirmations
+ *   (`sourceIndependence` fixed to the unassessed label);
+ * - it NEVER uses a threshold, a confidence, a probability, or any
+ *   similarity-based same-story claim — the ONLY merge-ready condition
+ *   is the exact versioned content-composite equality already verified
+ *   upstream, and the decision is still only a PROPOSAL;
+ * - it NEVER changes production data (the report rides inside the SAME
+ *   draft document of the SAME fenced commit; schema 6 untouched).
+ *
+ * The typed reader (R1.12.1 lesson applied from birth) validates the REAL
+ * v1 invariants — INCLUDING cross-validation against ALL THREE siblings
+ * (same story/snapshot/observation, entries 1:1 in the same deterministic
+ * order, verdicts, scores, stances, decision, defer reasons, conflicts
+ * and counts re-derived from the siblings' observed signals) — before
+ * surfacing `story_adjudication_v1`. A payload that merely CLAIMS the
+ * version is `malformed`, never a current result. The reader is a
+ * shape/invariant validator — NOT authenticity, NOT semantic support.
+ */
+
+import {
+  CANDIDATE_DISCOVERY_COVERAGE,
+  readCandidateDiscoveryReport,
+  type CandidateDiscoveryReport,
+} from './candidate-discovery';
+import {
+  assessCandidateSignals,
+  readCandidateAssessmentReport,
+  type CandidateAssessmentVerdict,
+} from './candidate-assessment';
+import {
+  CANDIDATE_MATCHING_INDEX_VERSION,
+  CANDIDATE_MATCHING_MAX_SCORE,
+  CANDIDATE_MATCHING_VERSION,
+  readCandidateMatchingReport,
+  scoreCandidateSignals,
+  type CandidateMatchingReport,
+} from './candidate-matching';
+
+/** Report schema version — bump ONLY with a documented contract change. */
+export const STORY_ADJUDICATION_VERSION = 1 as const;
+
+/** The index namespace the underlying discovery lookups are scoped to. */
+export const STORY_ADJUDICATION_INDEX_VERSION = 'sc1' as const;
+
+/** Fixed basis label — the adjudication is a pure view of the three siblings. */
+export const STORY_ADJUDICATION_BASIS =
+  'candidate_matching_v1_with_discovery_v1_and_assessment_v1_at_lookup_moment' as const;
+
+/**
+ * The ONLY two stances v1 can OBSERVE. The support stance is derived
+ * exclusively from the assessment's content-equality verdict (the exact
+ * condition the 5C-3 reuse path already trusts); every other verdict is
+ * an honest "similar signals observed, no same-story evidence". A
+ * contradiction/rejection stance is deliberately NOT defined: neither
+ * sibling carries an observed-difference input, and inventing one from
+ * silence would be a fabricated judgment.
+ */
+export const STORY_ADJUDICATION_STANCES = [
+  'content_equality_support_observed',
+  'similar_signals_no_same_story_evidence',
+] as const;
+
+export type StoryAdjudicationStance = (typeof STORY_ADJUDICATION_STANCES)[number];
+
+/** The typed defer-reason vocabulary (order-stable, fixed). */
+export const STORY_ADJUDICATION_DEFER_REASONS = [
+  'no_candidates_observed',
+  'incomplete_coverage_probe_overflow',
+  'incomplete_coverage_candidates_truncated',
+  'multiple_content_equality_candidates_conflict',
+  'no_content_equality_support_observed',
+] as const;
+
+export type StoryAdjudicationDeferReason = (typeof STORY_ADJUDICATION_DEFER_REASONS)[number];
+
+/** Fixed limitation labels (order is part of the deterministic output). */
+export const STORY_ADJUDICATION_LIMITATIONS = [
+  'proposal_only_never_executes',
+  'no_state_change_undo_not_applicable',
+  'ambiguous_or_risky_deferred',
+  'absence_of_signal_is_not_observed_difference',
+  'contradiction_not_observable_v1',
+  'similarity_never_same_story_evidence',
+  'title_signal_is_weak',
+  'no_threshold_no_acceptance_no_confidence',
+  'derived_from_sibling_reports_only',
+  'discovery_data_not_refetched_or_validated',
+  'no_production_data_change_v1',
+] as const;
+
+/** Fixed unassessed tuple — what this report NEVER judges. */
+export const STORY_ADJUDICATION_UNASSESSED = [
+  'same_event',
+  'truth',
+  'source_independence',
+] as const;
+
+/** The report-level merge decision (see the module docblock). */
+export type StoryAdjudicationDecision =
+  | 'no_adjudication_available'
+  | 'defer_incomplete_coverage'
+  | 'defer_conflict_multiple_supported'
+  | 'merge_ready_proposed'
+  | 'no_merge_proposal_similar_signals_only';
+
+/**
+ * The deterministic per-candidate stance: ONLY the assessment's
+ * content-equality verdict supports a same-content relation.
+ */
+export function classifyAdjudicationStance(
+  verdict: CandidateAssessmentVerdict,
+): StoryAdjudicationStance {
+  return verdict === 'full_content_equality_observed'
+    ? 'content_equality_support_observed'
+    : 'similar_signals_no_same_story_evidence';
+}
+
+/** Merge eligibility — EXACTLY the support stance, nothing else. */
+export function isMergeEligibleStance(stance: StoryAdjudicationStance): boolean {
+  return stance === 'content_equality_support_observed';
+}
+
+/** One adjudicated candidate: the sibling entry + the derived stance. */
+export interface StoryAdjudicationEntry {
+  /** The candidate story (same value and order as the siblings). */
+  readonly storyId: string;
+  /** The mirrored assessment verdict (re-derived by the reader). */
+  readonly verdict: CandidateAssessmentVerdict;
+  /** The mirrored matching score (re-derived by the reader). */
+  readonly score: number;
+  /** The derived adjudication stance (see classifyAdjudicationStance). */
+  readonly stance: StoryAdjudicationStance;
+  /** Derived: true ONLY for the content-equality support stance. */
+  readonly mergeEligible: boolean;
+}
+
+/** The typed conflict record (v1 emits exactly one shape, or none). */
+export interface StoryAdjudicationConflict {
+  readonly kind: 'multiple_content_equality_candidates';
+  /** The conflicting supported candidate storyIds, in sibling order. */
+  readonly storyIds: readonly string[];
+}
+
+/** The versioned, deterministic report stored with the draft. */
+export interface StoryAdjudicationReport {
+  readonly adjudicationVersion: typeof STORY_ADJUDICATION_VERSION;
+  /** Fixed basis label — what this report is derived from (and only that). */
+  readonly basis: typeof STORY_ADJUDICATION_BASIS;
+  readonly indexVersion: typeof STORY_ADJUDICATION_INDEX_VERSION;
+  /** Mirrors all three siblings (cross-validated by the reader). */
+  readonly storyId: string;
+  readonly snapshot: {
+    readonly sourceItemId: string;
+    readonly contentHash: string;
+  };
+  /** Mirrors the sibling discovery observation — never a stronger claim. */
+  readonly observation: 'no_candidates_observed' | 'candidates_observed';
+  /** One entry per sibling candidate, SAME deterministic ascending order. */
+  readonly entries: readonly StoryAdjudicationEntry[];
+  /** Report-level merge decision (see the type and module docblock). */
+  readonly decision: StoryAdjudicationDecision;
+  /** The typed defer reasons behind a non-proposal decision (or empty). */
+  readonly deferReasons: readonly StoryAdjudicationDeferReason[];
+  /** The typed conflict record(s) — empty unless the conflict case fired. */
+  readonly conflicts: readonly StoryAdjudicationConflict[];
+  readonly counts: {
+    /** Adjudicated candidates (= entries.length = sibling candidatesReported). */
+    readonly candidates: number;
+    /** Candidates carrying content-equality support (merge-eligible). */
+    readonly supporting: number;
+  };
+  /** FIXED label — similarity is never source-independence evidence. */
+  readonly sourceIndependence: 'unassessed_similarity_is_not_independence';
+  /** FIXED `false` — v1 honestly cannot observe a contradiction axis. */
+  readonly contradictionObserved: false;
+  /** FIXED execution block — a proposal is computed, NEVER executed. */
+  readonly execution: {
+    readonly executed: false;
+    readonly policy: 'proposal_only_no_state_change_v1';
+    readonly reviewRequired: true;
+  };
+  /** The discovery coverage/truncation limits, PRESERVED verbatim. */
+  readonly discoveryLimits: {
+    readonly candidatesTruncated: boolean;
+    readonly overflowObserved: boolean;
+    readonly maxCandidates: typeof CANDIDATE_DISCOVERY_COVERAGE.maxCandidates;
+    readonly indexedScope: 'index_version_sc1_only';
+    readonly historicalBackfill: false;
+  };
+  readonly limitations: readonly string[];
+  readonly unassessed: readonly string[];
+}
+
+/**
+ * The deterministic decision + typed defer reasons. Precedence
+ * (documented, tested): nothing observed → no adjudication; incomplete
+ * coverage (probe overflow OR report truncation) → defer with the exact
+ * coverage reasons; ≥2 content-equality candidates → conflict defer (the
+ * report never picks a winner); exactly ONE content-equality candidate →
+ * the ONLY merge-ready PROPOSAL (still routed to review, never executed);
+ * otherwise an honest "similar signals only, no proposal". Ambiguity and
+ * risk ALWAYS defer — the roadmap's merge conditions are transparent AND
+ * conservative by construction.
+ */
+export function classifyAdjudicationDecision(input: {
+  readonly candidatesTruncated: boolean;
+  readonly overflowObserved: boolean;
+  readonly entries: readonly StoryAdjudicationEntry[];
+}): { readonly decision: StoryAdjudicationDecision; readonly deferReasons: readonly StoryAdjudicationDeferReason[] } {
+  if (input.entries.length === 0) {
+    return { decision: 'no_adjudication_available', deferReasons: ['no_candidates_observed'] };
+  }
+  if (input.candidatesTruncated || input.overflowObserved) {
+    return {
+      decision: 'defer_incomplete_coverage',
+      deferReasons: [
+        ...(input.overflowObserved
+          ? (['incomplete_coverage_probe_overflow'] as const)
+          : []),
+        ...(input.candidatesTruncated
+          ? (['incomplete_coverage_candidates_truncated'] as const)
+          : []),
+      ],
+    };
+  }
+  const supporting = input.entries.filter((entry) => entry.mergeEligible);
+  if (supporting.length >= 2) {
+    return {
+      decision: 'defer_conflict_multiple_supported',
+      deferReasons: ['multiple_content_equality_candidates_conflict'],
+    };
+  }
+  if (supporting.length === 1) {
+    return { decision: 'merge_ready_proposed', deferReasons: [] };
+  }
+  return {
+    decision: 'no_merge_proposal_similar_signals_only',
+    deferReasons: ['no_content_equality_support_observed'],
+  };
+}
+
+function adjudicationBasisMismatch(): Error {
+  return new Error('story_adjudication_basis_mismatch');
+}
+
+/**
+ * Build the versioned adjudication report from the SAME draft's three
+ * sibling reports. TOTAL and DETERMINISTIC: same input → byte-identical
+ * output (fixed field order, inherited candidate order, no timestamps,
+ * no randomness). The builder reads NOTHING but the three sibling
+ * reports — there is no text comparison, no re-fetch, no new signal, and
+ * no threshold anywhere. The matching input is cross-checked to mirror
+ * its own discovery + assessment basis (a mismatch is a typed builder
+ * error, never a silently accepted basis).
+ */
+export function buildStoryAdjudicationReport(input: {
+  readonly discovery: CandidateDiscoveryReport;
+  readonly matching: CandidateMatchingReport;
+}): StoryAdjudicationReport {
+  const discovery = input.discovery;
+  const matching = input.matching;
+  if (
+    matching.matchingVersion !== CANDIDATE_MATCHING_VERSION ||
+    matching.storyId !== discovery.storyId ||
+    matching.snapshot.sourceItemId !== discovery.snapshot.sourceItemId ||
+    matching.snapshot.contentHash !== discovery.snapshot.contentHash ||
+    matching.observation !== discovery.observation ||
+    matching.entries.length !== discovery.candidates.length ||
+    matching.indexVersion !== CANDIDATE_MATCHING_INDEX_VERSION
+  ) {
+    throw adjudicationBasisMismatch();
+  }
+  const entries: StoryAdjudicationEntry[] = discovery.candidates.map((candidate, index) => {
+    const mirrored = matching.entries[index];
+    if (mirrored === undefined || mirrored.storyId !== candidate.storyId) {
+      throw adjudicationBasisMismatch();
+    }
+    const kinds = candidate.matchedSignals.map((signal) => signal.kind);
+    const verdict = assessCandidateSignals(kinds);
+    const score = scoreCandidateSignals(kinds);
+    if (mirrored.verdict !== verdict || mirrored.score !== score) {
+      throw adjudicationBasisMismatch();
+    }
+    const stance = classifyAdjudicationStance(verdict);
+    return {
+      storyId: candidate.storyId,
+      verdict,
+      score,
+      stance,
+      mergeEligible: isMergeEligibleStance(stance),
+    };
+  });
+  const { decision, deferReasons } = classifyAdjudicationDecision({
+    candidatesTruncated: discovery.candidatesTruncated,
+    overflowObserved: discovery.lookup.overflowObserved,
+    entries,
+  });
+  const supporting = entries.filter((entry) => entry.mergeEligible);
+  const conflicts: readonly StoryAdjudicationConflict[] =
+    supporting.length >= 2
+      ? [
+          {
+            kind: 'multiple_content_equality_candidates',
+            storyIds: supporting.map((entry) => entry.storyId),
+          },
+        ]
+      : [];
+  return {
+    adjudicationVersion: STORY_ADJUDICATION_VERSION,
+    basis: STORY_ADJUDICATION_BASIS,
+    indexVersion: STORY_ADJUDICATION_INDEX_VERSION,
+    storyId: discovery.storyId,
+    snapshot: {
+      sourceItemId: discovery.snapshot.sourceItemId,
+      contentHash: discovery.snapshot.contentHash,
+    },
+    observation: discovery.observation,
+    entries,
+    decision,
+    deferReasons,
+    conflicts,
+    counts: {
+      candidates: entries.length,
+      supporting: supporting.length,
+    },
+    sourceIndependence: 'unassessed_similarity_is_not_independence',
+    contradictionObserved: false,
+    execution: {
+      executed: false,
+      policy: 'proposal_only_no_state_change_v1',
+      reviewRequired: true,
+    },
+    discoveryLimits: {
+      candidatesTruncated: discovery.candidatesTruncated,
+      overflowObserved: discovery.lookup.overflowObserved,
+      maxCandidates: CANDIDATE_DISCOVERY_COVERAGE.maxCandidates,
+      indexedScope: CANDIDATE_DISCOVERY_COVERAGE.indexedScope,
+      historicalBackfill: CANDIDATE_DISCOVERY_COVERAGE.historicalBackfill,
+    },
+    limitations: STORY_ADJUDICATION_LIMITATIONS,
+    unassessed: STORY_ADJUDICATION_UNASSESSED,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Versioned reader — payloads that merely claim the version are malformed,
+// and an adjudication report is ONLY valid next to ALL THREE siblings it
+// derives from.
+// ---------------------------------------------------------------------------
+
+export type StoryAdjudicationRead =
+  | { readonly kind: 'story_adjudication_v1'; readonly report: StoryAdjudicationReport }
+  /** A pre-5.3 draft (no adjudication payload). Honest absence — no backfill. */
+  | { readonly kind: 'absent' }
+  /** An adjudication-shaped payload with a different (e.g. future) version. */
+  | { readonly kind: 'unsupported_version'; readonly adjudicationVersion: unknown }
+  /** Not an adjudication payload at all — including one that violates v1
+   *  or lacks the valid sibling trio to derive from. */
+  | { readonly kind: 'malformed' };
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+/** Same element sequence (order-sensitive) — no reorder, no duplicate. */
+function sameStringSequence(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+const OBSERVATIONS: ReadonlySet<string> = new Set([
+  'no_candidates_observed',
+  'candidates_observed',
+]);
+const DECISIONS: ReadonlySet<string> = new Set([
+  'no_adjudication_available',
+  'defer_incomplete_coverage',
+  'defer_conflict_multiple_supported',
+  'merge_ready_proposed',
+  'no_merge_proposal_similar_signals_only',
+]);
+
+/**
+ * Read the adjudication payload from a PARSED `drafts.document_json`
+ * value. Consumers must treat `absent`/`unsupported_version`/`malformed`
+ * as "no current adjudication result" — none of them validates anything,
+ * and NONE of them ever means "unrelated", "same story", or "merge now".
+ */
+export function readStoryAdjudicationReport(document: unknown): StoryAdjudicationRead {
+  if (typeof document !== 'object' || document === null) {
+    return { kind: 'malformed' };
+  }
+  const adjudication = (document as Record<string, unknown>)['storyAdjudication'];
+  if (adjudication === undefined) {
+    return { kind: 'absent' };
+  }
+  if (typeof adjudication !== 'object' || adjudication === null) {
+    return { kind: 'malformed' };
+  }
+  const a = adjudication as Record<string, unknown>;
+  if (a['adjudicationVersion'] !== STORY_ADJUDICATION_VERSION) {
+    return { kind: 'unsupported_version', adjudicationVersion: a['adjudicationVersion'] };
+  }
+
+  // ---- Sibling trio: a v1 adjudication WITHOUT ALL THREE valid siblings
+  //      is not a current result (standalone copies could contradict their
+  //      own basis — each sibling reader enforces its own chain).
+  const discoveryRead = readCandidateDiscoveryReport(document);
+  if (discoveryRead.kind !== 'candidate_discovery_v1') {
+    return { kind: 'malformed' };
+  }
+  const discovery = discoveryRead.report;
+  const assessmentRead = readCandidateAssessmentReport(document);
+  if (assessmentRead.kind !== 'candidate_assessment_v1') {
+    return { kind: 'malformed' };
+  }
+  const matchingRead = readCandidateMatchingReport(document);
+  if (matchingRead.kind !== 'candidate_matching_v1') {
+    return { kind: 'malformed' };
+  }
+  const matching = matchingRead.report;
+
+  const snapshot = a['snapshot'];
+  const discoveryLimits = a['discoveryLimits'];
+  const counts = a['counts'];
+  const execution = a['execution'];
+  const entries = a['entries'];
+  const deferReasons = a['deferReasons'];
+  const conflicts = a['conflicts'];
+  if (
+    a['basis'] !== STORY_ADJUDICATION_BASIS ||
+    a['indexVersion'] !== STORY_ADJUDICATION_INDEX_VERSION ||
+    typeof a['storyId'] !== 'string' ||
+    a['storyId'].length === 0 ||
+    typeof snapshot !== 'object' ||
+    snapshot === null ||
+    typeof (snapshot as Record<string, unknown>)['sourceItemId'] !== 'string' ||
+    typeof (snapshot as Record<string, unknown>)['contentHash'] !== 'string' ||
+    typeof a['observation'] !== 'string' ||
+    !OBSERVATIONS.has(a['observation']) ||
+    typeof a['decision'] !== 'string' ||
+    !DECISIONS.has(a['decision']) ||
+    !Array.isArray(deferReasons) ||
+    !isStringArray(deferReasons) ||
+    !Array.isArray(conflicts) ||
+    !Array.isArray(entries) ||
+    typeof counts !== 'object' ||
+    counts === null ||
+    typeof execution !== 'object' ||
+    execution === null ||
+    a['sourceIndependence'] !== 'unassessed_similarity_is_not_independence' ||
+    a['contradictionObserved'] !== false ||
+    typeof discoveryLimits !== 'object' ||
+    discoveryLimits === null ||
+    !Array.isArray(a['limitations']) ||
+    !isStringArray(a['limitations']) ||
+    !Array.isArray(a['unassessed']) ||
+    !isStringArray(a['unassessed'])
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Limitations/unassessed: exactly the fixed v1 sets, each once, in
+  //      the documented order.
+  const fixedLimitations = STORY_ADJUDICATION_LIMITATIONS as readonly string[];
+  const limitations = a['limitations'] as readonly string[];
+  const unassessed = a['unassessed'] as readonly string[];
+  const fixedUnassessed = STORY_ADJUDICATION_UNASSESSED as readonly string[];
+  if (
+    !sameStringSequence(limitations, fixedLimitations) ||
+    !sameStringSequence(unassessed, fixedUnassessed)
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Discovery limits: PRESERVED verbatim from the sibling.
+  const limits = discoveryLimits as Record<string, unknown>;
+  if (
+    limits['candidatesTruncated'] !== discovery.candidatesTruncated ||
+    limits['overflowObserved'] !== discovery.lookup.overflowObserved ||
+    limits['maxCandidates'] !== CANDIDATE_DISCOVERY_COVERAGE.maxCandidates ||
+    limits['indexedScope'] !== CANDIDATE_DISCOVERY_COVERAGE.indexedScope ||
+    limits['historicalBackfill'] !== false
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Execution block: FIXED — a proposal is computed, never executed.
+  const exec = execution as Record<string, unknown>;
+  if (
+    exec['executed'] !== false ||
+    exec['policy'] !== 'proposal_only_no_state_change_v1' ||
+    exec['reviewRequired'] !== true
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Identity mirrors: story, snapshot, observation (ALL siblings).
+  if (
+    a['storyId'] !== discovery.storyId ||
+    matching.storyId !== discovery.storyId ||
+    (snapshot as Record<string, unknown>)['sourceItemId'] !== discovery.snapshot.sourceItemId ||
+    (snapshot as Record<string, unknown>)['contentHash'] !== discovery.snapshot.contentHash ||
+    a['observation'] !== discovery.observation
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Entries: EXACTLY one per sibling candidate, same order; verdict
+  //      and score re-derived from the sibling discovery's matched signals
+  //      and mirrored against BOTH the matching entry and the stored entry;
+  //      stance and mergeEligible re-derived from the verdict.
+  if (entries.length !== discovery.candidates.length) {
+    return { kind: 'malformed' };
+  }
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    const candidate = discovery.candidates[index]!;
+    const matchingEntry = matching.entries[index]!;
+    if (typeof entry !== 'object' || entry === null) {
+      return { kind: 'malformed' };
+    }
+    const record = entry as Record<string, unknown>;
+    const verdict = record['verdict'];
+    const score = record['score'];
+    const stance = record['stance'];
+    const mergeEligible = record['mergeEligible'];
+    if (
+      record['storyId'] !== candidate.storyId ||
+      typeof verdict !== 'string' ||
+      typeof score !== 'number' ||
+      !Number.isInteger(score) ||
+      score < 0 ||
+      score > CANDIDATE_MATCHING_MAX_SCORE
+    ) {
+      return { kind: 'malformed' };
+    }
+    const kinds = candidate.matchedSignals.map((signal) => signal.kind);
+    const expectedVerdict = assessCandidateSignals(kinds);
+    const expectedScore = scoreCandidateSignals(kinds);
+    const expectedStance = classifyAdjudicationStance(expectedVerdict);
+    const expectedEligible = isMergeEligibleStance(expectedStance);
+    if (
+      verdict !== expectedVerdict ||
+      verdict !== matchingEntry.verdict ||
+      score !== expectedScore ||
+      score !== matchingEntry.score ||
+      stance !== expectedStance ||
+      mergeEligible !== expectedEligible
+    ) {
+      return { kind: 'malformed' };
+    }
+  }
+  const typedEntries = entries as readonly StoryAdjudicationEntry[];
+
+  // ---- Defer reasons: exactly the fixed vocabulary, each once, and the
+  //      EXACT set the deterministic classifier derives.
+  const reasons = deferReasons as readonly string[];
+  const fixedReasons = STORY_ADJUDICATION_DEFER_REASONS as readonly string[];
+  if (
+    reasons.length !== new Set(reasons).size ||
+    !reasons.every((reason) => fixedReasons.includes(reason))
+  ) {
+    return { kind: 'malformed' };
+  }
+  const derived = classifyAdjudicationDecision({
+    candidatesTruncated: discovery.candidatesTruncated,
+    overflowObserved: discovery.lookup.overflowObserved,
+    entries: typedEntries,
+  });
+  if (a['decision'] !== derived.decision || !sameStringSequence(reasons, derived.deferReasons)) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Conflicts: EXACTLY the derived conflict set.
+  const supporting = typedEntries.filter((entry) => entry.mergeEligible);
+  const expectedConflicts: readonly unknown[] =
+    supporting.length >= 2
+      ? [
+          {
+            kind: 'multiple_content_equality_candidates',
+            storyIds: supporting.map((entry) => entry.storyId),
+          },
+        ]
+      : [];
+  if (JSON.stringify(conflicts) !== JSON.stringify(expectedConflicts)) {
+    return { kind: 'malformed' };
+  }
+
+  // ---- Counts: EXACTLY describe the payload.
+  const countsRecord = counts as Record<string, unknown>;
+  if (
+    countsRecord['candidates'] !== typedEntries.length ||
+    countsRecord['supporting'] !== supporting.length ||
+    typedEntries.length !== discovery.counts.candidatesReported
+  ) {
+    return { kind: 'malformed' };
+  }
+
+  return {
+    kind: 'story_adjudication_v1',
+    report: adjudication as unknown as StoryAdjudicationReport,
+  };
+}

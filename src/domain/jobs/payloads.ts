@@ -29,13 +29,57 @@ export const MaintenanceHeartbeatPayloadSchema = z
 export type MaintenanceHeartbeatPayload = z.infer<typeof MaintenanceHeartbeatPayloadSchema>;
 
 /**
+ * `sources.fetch_poll` payload (Phase 4 — ADR-0038 §3/§4): approved source
+ * ID plus the reserved poll window. NO content, NO credentials, NO URLs —
+ * the durable payload carries approved identifiers only (blueprint §7).
+ * `scheduledForMs` is the reserved `next_poll_at` value the scheduler read;
+ * the handler's fenced terminal write derives its guard
+ * (`scheduledForMs + hold`) deterministically from it.
+ */
+export const SourcesPollPayloadSchema = z
+  .object({
+    sourceId: z.string().regex(/^[a-z0-9_]{3,64}$/),
+    scheduledForMs: z.number().int().min(0).safe(),
+  })
+  .strict();
+
+export type SourcesPollPayload = z.infer<typeof SourcesPollPayloadSchema>;
+
+/**
+ * `editorial.prepare_draft` payload (Phase 5A — ADR-0042 §2): a REFERENCE
+ * to an existing durable `source_items` row plus the snapshot identity the
+ * caller observed. NO news text, NO raw payload, NO secret ever enters the
+ * durable envelope (blueprint §7): the handler reads the stored item and
+ * verifies the stored `content_hash` against `snapshotHash` BEFORE any
+ * work — a mismatch is a typed terminal outcome, never processing an
+ * imaginary snapshot. `snapshotHash` is the hex SHA-256 the ingestion
+ * pipeline persisted on the item.
+ */
+export const EditorialPrepareDraftPayloadSchema = z
+  .object({
+    sourceItemId: z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/),
+    snapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+
+export type EditorialPrepareDraftPayload = z.infer<typeof EditorialPrepareDraftPayloadSchema>;
+
+/**
  * Per-type payload schemas. Only REGISTERED (implemented) job types appear
  * here; the engine refuses to create or execute a type without a schema
- * (fail-safe — ADR-0036 §7). Later phases append their schemas together
- * with their handlers.
+ * (fail-safe — ADR-0036 §7). The Phase 4 poll type is created ONLY by the
+ * gated scheduler (ADR-0038 §3) and its HANDLER is registered only while
+ * the ingestion gate is on (ADR-0038 §1). The Phase 5A editorial type is
+ * created ONLY by the application boundary (`enqueueEditorialPrepareDraft`)
+ * and its HANDLER is registered only while the editorial gate is on
+ * (ADR-0042 §2); while the gate is off the type is policy-paused
+ * LOSSLESSLY (ADR-0040 semantics, ADR-0042 §3) — schema-known, never the
+ * unknown-type poison class.
  */
-export const PAYLOAD_SCHEMAS: ReadonlyMap<string, z.ZodTypeAny> = new Map([
+export const PAYLOAD_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>([
   ['jobs.maintenance_heartbeat', MaintenanceHeartbeatPayloadSchema],
+  ['sources.fetch_poll', SourcesPollPayloadSchema],
+  ['editorial.prepare_draft', EditorialPrepareDraftPayloadSchema],
 ]);
 
 /** Create-time input validation (type is bounded syntax, NOT yet registered). */

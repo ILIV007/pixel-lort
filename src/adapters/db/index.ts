@@ -16,7 +16,11 @@ export {
 export { classifyD1Error, toDbAppError, type DbErrorCode } from './d1-errors';
 export {
   checkSchemaHealth,
+  resolveSchemaCapability,
+  OWNERSHIP_SCHEMA_VERSION,
   SCHEMA_METADATA,
   type SchemaHealthResult,
   type SchemaHealthReason,
+  type SchemaCapability,
+  type SchemaCapabilityUnresolvedReason,
 } from './schema-health';

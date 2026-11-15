@@ -19,6 +19,16 @@
  *   - .dev.vars.example        (# APP_VERSION=)
  *   - tests/helpers/test-env.ts     (APP_VERSION: '<version>-test')
  *
+ * Checked ACTIVE release metadata (R1.12 hardening):
+ *   - VERSION.json             (ACTIVE metadata ONLY — appVersion must equal
+ *                               package.json, schemaVersion must equal the
+ *                               applied schema version (3), source identity
+ *                               must be 40-hex, and artifactFilename must be
+ *                               null OR name an artifact of THIS appVersion
+ *                               — a stale/fabricated ZIP filename fails the
+ *                               gate. Historical narratives live in
+ *                               docs/VERSION_HISTORY.md and are NOT scanned.)
+ *
  * Checked schema-version touch points (expected: 3 — migrations 0001+0002+0003):
  *   - src/shared/config/phase1a.ts  (EXPECTED_SCHEMA_VERSION)
  *   - wrangler.jsonc           (every SCHEMA_VERSION var)
@@ -118,10 +128,13 @@ if (typeof appVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(appVersion)) {
 }
 
 // ---------------------------------------------------------------------------
-// Schema version — the applied migrations 0001+0002+0003 define version 3.
+// Schema version — the LINEAR migration candidate chain: the applied
+// 0001+0002+0003 base + the LOCAL-ONLY candidates 0004 (ownership) → 4 and
+// 0005 (admin post) → 5 (R1.20-R1). The real applied runtime stays 3 until
+// the owner authorizes the remote migration.
 // ---------------------------------------------------------------------------
 
-const EXPECTED_SCHEMA_VERSION = '3';
+const EXPECTED_SCHEMA_VERSION = '6';
 
 expectEveryMatch(
   'src/shared/config/phase1a.ts',
@@ -141,6 +154,113 @@ expectEveryMatch(
   `SCHEMA_VERSION=${EXPECTED_SCHEMA_VERSION}`,
   'SCHEMA_VERSION',
 );
+
+// ---------------------------------------------------------------------------
+// ACTIVE release metadata — VERSION.json (R1.12 hardening).
+// VERSION.json holds ACTIVE metadata ONLY: it must agree with package.json
+// and the applied schema version, and it must never fabricate an artifact
+// filename for a ZIP that was not built in the current round. Historical
+// narratives are frozen in docs/VERSION_HISTORY.md and never scanned here.
+// ---------------------------------------------------------------------------
+
+let versionJson = null;
+try {
+  versionJson = JSON.parse(read('VERSION.json'));
+} catch (error) {
+  failures.push(`VERSION.json: unparseable JSON (${error.message})`);
+}
+if (versionJson !== null) {
+  if (versionJson.appVersion !== appVersion) {
+    failures.push(
+      `VERSION.json: appVersion (${versionJson.appVersion}) must equal package.json version (${appVersion})`,
+    );
+  }
+  if (String(versionJson.schemaVersion) !== EXPECTED_SCHEMA_VERSION) {
+    failures.push(
+      `VERSION.json: schemaVersion (${versionJson.schemaVersion}) must equal the applied schema version (${EXPECTED_SCHEMA_VERSION})`,
+    );
+  }
+  for (const field of ['sourceCommit', 'sourceTree']) {
+    if (!/^[0-9a-f]{40}$/.test(versionJson[field] ?? '')) {
+      failures.push(`VERSION.json: ${field} must be a full 40-char hex SHA`);
+    }
+  }
+  if (typeof versionJson.sourceBranch !== 'string' || versionJson.sourceBranch.length === 0) {
+    failures.push('VERSION.json: sourceBranch must be a non-empty string');
+  }
+  if (typeof versionJson.reviewRevision !== 'string' || versionJson.reviewRevision.length === 0) {
+    failures.push('VERSION.json: reviewRevision must be a non-empty string');
+  }
+  if (
+    typeof versionJson.reviewPullRequest !== 'string' ||
+    !versionJson.reviewPullRequest.includes('github.com/ILIV007/pixel-lort/pull/')
+  ) {
+    failures.push('VERSION.json: reviewPullRequest must reference the ILIV007/pixel-lort PR');
+  }
+  // An artifact filename that does not exist / was not built in THIS round
+  // must never be recorded: null is the honest value. A recorded name must
+  // belong to THIS appVersion (never a stale older candidate filename).
+  if (versionJson.artifactFilename !== null) {
+    if (
+      typeof versionJson.artifactFilename !== 'string' ||
+      !versionJson.artifactFilename.startsWith(`Pixel-Lores_v${appVersion}_`)
+    ) {
+      failures.push(
+        `VERSION.json: artifactFilename must be null (no ZIP built this round) or start with "Pixel-Lores_v${appVersion}_" — stale or fabricated names fail the gate`,
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The zod runtime dependency gate (Phase 10 tracked carry — the zod v4
+// migration for GHSA-mrhx-c7xc-m3w5, "memory exhaustion while validating
+// oversized constrained collections", fixed in 4.6.6; house pin >= 4.6.7).
+// Both the DECLARED range (package.json) and the INSTALLED version
+// (node_modules) must be the fixed v4 — a downgrade or a stale install
+// fails the gate exactly like a version drift.
+// ---------------------------------------------------------------------------
+
+const ZOD_MIN = [4, 6, 7];
+
+/** @param {string} version @param {number[]} min */
+function versionAtLeast(version, min) {
+  const parts = version.split('.').map((n) => Number.parseInt(n, 10));
+  for (let i = 0; i < min.length; i += 1) {
+    const p = Number.isNaN(parts[i]) ? 0 : parts[i];
+    if (p > min[i]) return true;
+    if (p < min[i]) return false;
+  }
+  return true;
+}
+
+const declaredZod = packageJson?.dependencies?.zod;
+if (typeof declaredZod !== 'string' || !/^\^?(\d+)\.(\d+)\.(\d+)/.test(declaredZod)) {
+  failures.push(
+    `package.json: dependencies.zod missing or unparseable ("${declaredZod ?? ''}") — the v4 migration contract expects ^4.6.7 or higher`,
+  );
+} else if (!versionAtLeast(declaredZod.replace(/^\^/, ''), ZOD_MIN)) {
+  failures.push(
+    `package.json: dependencies.zod ("${declaredZod}") must be >= ${ZOD_MIN.join('.')} (GHSA-mrhx-c7xc-m3w5 fix)`,
+  );
+}
+
+let installedZod = null;
+try {
+  installedZod = JSON.parse(read('node_modules/zod/package.json'));
+} catch {
+  failures.push(
+    'node_modules/zod/package.json: unreadable — run npm install (the zod gate needs the installed dependency)',
+  );
+}
+if (installedZod !== null) {
+  const installedVersion = installedZod?.version;
+  if (typeof installedVersion !== 'string' || !versionAtLeast(installedVersion, ZOD_MIN)) {
+    failures.push(
+      `node_modules/zod: installed version ("${installedVersion ?? ''}") must be >= ${ZOD_MIN.join('.')} (GHSA-mrhx-c7xc-m3w5 fix) — run npm install`,
+    );
+  }
+}
 
 if (failures.length > 0) {
   console.error(`VERSION CONSISTENCY FAILED: ${failures.length} drift finding(s).`);

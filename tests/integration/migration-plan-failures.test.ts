@@ -135,14 +135,19 @@ describe('applyMigrations — failure atomicity (proof 6)', () => {
 
     // Version-1 objects are intact and the database can still be upgraded by
     // a valid pending migration afterwards (recovery path) — here via the
-    // REAL pending migrations, landing at the shipped schema version 3.
+    // REAL pending migrations, landing at the shipped schema version 6
+    // (R1.20-R1 + R1.22: the LINEAR plan continues through the LOCAL-ONLY
+    // 0004 -> 4, 0005 -> 5 and 0006 -> 6).
     const recovery = await applyMigrations(db);
     expect(recovery.observedVersion).toBe(1);
     expect(recovery.applied.map((migration) => migration.id)).toEqual([
       '0002_telegram_update_lifecycle',
       '0003_job_dlq_delivery',
+      '0004_source_poll_ownership',
+      '0005_admin_post_pipeline',
+      '0006_admin_post_editorial_source',
     ]);
-    expect(await appliedSchemaVersion()).toBe(3);
-    expect(await appliedMigrationId()).toBe('0003_job_dlq_delivery');
+    expect(await appliedSchemaVersion()).toBe(6);
+    expect(await appliedMigrationId()).toBe('0006_admin_post_editorial_source');
   });
 });

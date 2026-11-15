@@ -386,18 +386,41 @@ export async function markJobQueued(
   return result.changes > 0;
 }
 
-/** Due dispatchable rows (`run_after <= now`), deterministic order, bounded. */
+/**
+ * Composable SQL fragment excluding policy-paused types from a bounded scan
+ * (Round 1.6 ADR-0040 — dispatch/recovery fairness). An empty exclusion
+ * list emits NOTHING: the accepted scan SQL stays byte-identical.
+ */
+function excludedTypeClause(excludedTypes: readonly string[]): {
+  readonly clause: string;
+  readonly params: readonly string[];
+} {
+  if (excludedTypes.length === 0) {
+    return { clause: '', params: [] };
+  }
+  const placeholders = excludedTypes.map(() => '?').join(', ');
+  return { clause: ` AND type NOT IN (${placeholders})`, params: [...excludedTypes] };
+}
+
+/**
+ * Due dispatchable rows (`run_after <= now`), deterministic order, bounded.
+ * `excludedTypes` (policy-paused types, ADR-0040) is filtered IN SQL so a
+ * paused row can NEVER consume a dispatch scan slot — with no exclusions
+ * the query is byte-identical to the accepted scan.
+ */
 export async function scanDueJobs(
   executor: DbExecutor,
   nowMs: number,
   limit: number,
+  excludedTypes: readonly string[] = [],
 ): Promise<readonly JobRow[]> {
+  const { clause, params } = excludedTypeClause(excludedTypes);
   const result = await executor.query<JobRow>({
     sql: `SELECT ${JOB_COLUMNS} FROM jobs
-          WHERE status IN ('pending', 'retry_wait') AND run_after <= ?
+          WHERE status IN ('pending', 'retry_wait') AND run_after <= ?${clause}
           ORDER BY run_after ASC, priority DESC, id ASC
           LIMIT ?`,
-    params: [nowMs, limit],
+    params: [nowMs, ...params, limit],
   });
   return result.rows;
 }
@@ -405,18 +428,23 @@ export async function scanDueJobs(
 /**
  * Stranded `queued` rows whose dispatch never settled within the grace
  * window (ADR-0036 §3: a queued marker alone cannot strand work).
+ * `excludedTypes` (policy-paused types, ADR-0040) is filtered IN SQL — a
+ * paused row never consumes a stranded scan slot nor re-dispatches while
+ * its gate is off; with no exclusions the query is byte-identical.
  */
 export async function scanStrandedQueuedJobs(
   executor: DbExecutor,
   graceCutoffMs: number,
   limit: number,
+  excludedTypes: readonly string[] = [],
 ): Promise<readonly JobRow[]> {
+  const { clause, params } = excludedTypeClause(excludedTypes);
   const result = await executor.query<JobRow>({
     sql: `SELECT ${JOB_COLUMNS} FROM jobs
-          WHERE status = 'queued' AND updated_at <= ?
+          WHERE status = 'queued' AND updated_at <= ?${clause}
           ORDER BY run_after ASC, priority DESC, id ASC
           LIMIT ?`,
-    params: [graceCutoffMs, limit],
+    params: [graceCutoffMs, ...params, limit],
   });
   return result.rows;
 }
@@ -434,8 +462,16 @@ export interface ReclaimExpiredResult {
 }
 
 /**
- * Reclaim expired claimed leases (bounded). Each row takes exactly one of
- * two MUTUALLY EXCLUSIVE guarded transitions (ADR-0037):
+ * Reclaim expired claimed leases (bounded). `excludedTypes` (policy-paused
+ * types, ADR-0040) is resolved BEFORE any candidate is selected: paused
+ * expired claims are excluded from the active page IN SQL — they are
+ * neither requeued nor dead-lettered while their gate is off (dormant: the
+ * row, its attempts and its exhaustion information stay exactly as they
+ * are) and they never consume an active recovery scan slot. With no
+ * exclusions the selection is byte-identical to the accepted scan.
+ *
+ * Each selected row takes exactly one of two MUTUALLY EXCLUSIVE guarded
+ * transitions (ADR-0037):
  * - budget spent (`attempts >= max_attempts`): the crashed generation can
  *   never be re-executed — the row dead-letters AT the recovery boundary;
  * - budget intact: the row moves back to `queued` for the bounded dispatch
@@ -446,13 +482,15 @@ export async function reclaimExpiredClaims(
   executor: DbExecutor,
   nowMs: number,
   limit: number,
+  excludedTypes: readonly string[] = [],
 ): Promise<ReclaimExpiredResult> {
+  const { clause, params } = excludedTypeClause(excludedTypes);
   const expired = await executor.query<Pick<JobRow, 'id' | 'attempts' | 'max_attempts'>>({
     sql: `SELECT id, attempts, max_attempts FROM jobs
-          WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ?
+          WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ?${clause}
           ORDER BY lease_until ASC, id ASC
           LIMIT ?`,
-    params: [nowMs, limit],
+    params: [nowMs, ...params, limit],
   });
   let reclaimed = 0;
   let exhaustedToDeadLetter = 0;
@@ -482,6 +520,56 @@ export async function reclaimExpiredClaims(
     reclaimed += result.changes > 0 ? 1 : 0;
   }
   return { reclaimed, exhaustedToDeadLetter };
+}
+
+/**
+ * Observability COUNT aggregate (ADR-0040; physical rows scanned are NOT
+ * bounded by the single result row): how many expired claimed rows
+ * of the POLICY-PAUSED types exist right now. Reported by the dispatch pass
+ * — deliberately NOT selected, NOT mutated, and NEVER counted against the
+ * active recovery page. Returns 0 without exclusions (no query at all).
+ */
+export async function countPolicyPausedExpiredClaims(
+  executor: DbExecutor,
+  nowMs: number,
+  excludedTypes: readonly string[],
+): Promise<number> {
+  if (excludedTypes.length === 0) {
+    return 0;
+  }
+  const placeholders = excludedTypes.map(() => '?').join(', ');
+  const row = await executor.first<{ n: number }>({
+    sql: `SELECT COUNT(*) AS n FROM jobs
+          WHERE status = 'claimed' AND lease_until IS NOT NULL AND lease_until <= ?
+            AND type IN (${placeholders})`,
+    params: [nowMs, ...excludedTypes],
+  });
+  return row?.n ?? 0;
+}
+
+/**
+ * Observability COUNT aggregate (ADR-0040; physical rows scanned are NOT
+ * bounded by the single result row): how many POLICY-PAUSED rows
+ * are currently due (`pending`/`retry_wait`, `run_after <= now`). Reported
+ * by the dispatch pass — never dispatched, never modified, never counted
+ * against the dispatch scan. Returns 0 without exclusions (no query).
+ */
+export async function countPolicyPausedDue(
+  executor: DbExecutor,
+  nowMs: number,
+  excludedTypes: readonly string[],
+): Promise<number> {
+  if (excludedTypes.length === 0) {
+    return 0;
+  }
+  const placeholders = excludedTypes.map(() => '?').join(', ');
+  const row = await executor.first<{ n: number }>({
+    sql: `SELECT COUNT(*) AS n FROM jobs
+          WHERE status IN ('pending', 'retry_wait') AND run_after <= ?
+            AND type IN (${placeholders})`,
+    params: [nowMs, ...excludedTypes],
+  });
+  return row?.n ?? 0;
 }
 
 /** Dead-letter rows whose safe DLQ reference was never confirmed delivered. */

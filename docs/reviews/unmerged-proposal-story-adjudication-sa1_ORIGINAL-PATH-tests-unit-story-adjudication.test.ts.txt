@@ -1,0 +1,480 @@
+import { describe, expect, it } from 'vitest';
+import {
+  buildCandidateDiscoveryReport,
+  type CandidateDiscoveryReport,
+} from '../../src/domain/editorial/candidate-discovery';
+import {
+  buildCandidateAssessmentReport,
+  type CandidateAssessmentReport,
+} from '../../src/domain/editorial/candidate-assessment';
+import {
+  buildCandidateMatchingReport,
+  type CandidateMatchingReport,
+} from '../../src/domain/editorial/candidate-matching';
+import {
+  STORY_ADJUDICATION_VERSION,
+  STORY_ADJUDICATION_BASIS,
+  STORY_ADJUDICATION_LIMITATIONS,
+  STORY_ADJUDICATION_UNASSESSED,
+  STORY_ADJUDICATION_STANCES,
+  STORY_ADJUDICATION_DEFER_REASONS,
+  classifyAdjudicationStance,
+  isMergeEligibleStance,
+  classifyAdjudicationDecision,
+  buildStoryAdjudicationReport,
+  readStoryAdjudicationReport,
+  type StoryAdjudicationReport,
+} from '../../src/domain/editorial/story-adjudication';
+
+/**
+ * Phase 5.3 (V4) unit suite for the versioned story-ADJUDICATION report:
+ * the proposal layer OVER the same draft's discovery + assessment +
+ * matching reports. The rules are TRANSPARENT and DETERMINISTIC: ONLY an
+ * observed content-equality relation (the 5C-3 verified reuse locator)
+ * can produce a merge-READY PROPOSAL — and even that is NEVER executed;
+ * everything ambiguous, risky or incomplete is DEFERRED to review. There
+ * is NO threshold, NO confidence, NO similarity-based same-story claim,
+ * and NO production-data change anywhere.
+ */
+
+const SNAPSHOT = { sourceItemId: 'item-adj-1', contentHash: 'c'.repeat(64) };
+const STORY = 'story-current';
+
+type SignalKind = 'url' | 'content_hash' | 'title_key';
+
+interface SiblingTrio {
+  readonly discovery: CandidateDiscoveryReport;
+  readonly assessment: CandidateAssessmentReport;
+  readonly matching: CandidateMatchingReport;
+}
+
+function buildSiblings(input: {
+  readonly matches: readonly { readonly kind: SignalKind; readonly storyId: string }[];
+  readonly overflow?: boolean;
+}): SiblingTrio {
+  const lookups = [
+    { kind: 'url' as const, overflow: false },
+    { kind: 'content_hash' as const, overflow: false },
+    { kind: 'title_key' as const, overflow: input.overflow === true },
+  ];
+  const discovery = buildCandidateDiscoveryReport({
+    snapshot: SNAPSHOT,
+    storyId: STORY,
+    lookups,
+    matches: input.matches,
+  });
+  const assessment = buildCandidateAssessmentReport({ discovery });
+  const matching = buildCandidateMatchingReport({ discovery, assessment });
+  return { discovery, assessment, matching };
+}
+
+/** The parsed `document_json` shape the reader validates against. */
+function siblingDocument(
+  siblings: SiblingTrio,
+  storyAdjudication?: unknown,
+): Record<string, unknown> {
+  return {
+    candidateDiscovery: JSON.parse(JSON.stringify(siblings.discovery)),
+    candidateAssessment: JSON.parse(JSON.stringify(siblings.assessment)),
+    candidateMatching: JSON.parse(JSON.stringify(siblings.matching)),
+    ...(storyAdjudication !== undefined ? { storyAdjudication } : {}),
+  };
+}
+
+function makeReport(
+  matches: readonly { readonly kind: SignalKind; readonly storyId: string }[],
+  overflow = false,
+): StoryAdjudicationReport {
+  const { discovery, matching } = buildSiblings({ matches, overflow });
+  return buildStoryAdjudicationReport({ discovery, matching });
+}
+
+describe('story-adjudication constants', () => {
+  it('exposes version 1 with the fixed basis label', () => {
+    expect(STORY_ADJUDICATION_VERSION).toBe(1);
+    expect(STORY_ADJUDICATION_BASIS).toBe(
+      'candidate_matching_v1_with_discovery_v1_and_assessment_v1_at_lookup_moment',
+    );
+  });
+
+  it('defines exactly the two observable stances (no contradiction stance in v1)', () => {
+    expect([...STORY_ADJUDICATION_STANCES]).toEqual([
+      'content_equality_support_observed',
+      'similar_signals_no_same_story_evidence',
+    ]);
+  });
+
+  it('defines the fixed v1 defer-reason vocabulary', () => {
+    expect([...STORY_ADJUDICATION_DEFER_REASONS]).toEqual([
+      'no_candidates_observed',
+      'incomplete_coverage_probe_overflow',
+      'incomplete_coverage_candidates_truncated',
+      'multiple_content_equality_candidates_conflict',
+      'no_content_equality_support_observed',
+    ]);
+  });
+
+  it('carries the fixed limitation and unassessed sets', () => {
+    expect(STORY_ADJUDICATION_LIMITATIONS).toContain('proposal_only_never_executes');
+    expect(STORY_ADJUDICATION_LIMITATIONS).toContain('no_state_change_undo_not_applicable');
+    expect(STORY_ADJUDICATION_LIMITATIONS).toContain('ambiguous_or_risky_deferred');
+    expect(STORY_ADJUDICATION_LIMITATIONS).toContain('contradiction_not_observable_v1');
+    expect(STORY_ADJUDICATION_LIMITATIONS).toContain('no_production_data_change_v1');
+    expect([...STORY_ADJUDICATION_UNASSESSED]).toEqual([
+      'same_event',
+      'truth',
+      'source_independence',
+    ]);
+  });
+});
+
+describe('story-adjudication stance classification', () => {
+  it('maps ONLY the content-equality verdict to the support stance', () => {
+    expect(classifyAdjudicationStance('full_content_equality_observed')).toBe(
+      'content_equality_support_observed',
+    );
+    expect(classifyAdjudicationStance('shared_url_observed')).toBe(
+      'similar_signals_no_same_story_evidence',
+    );
+    expect(classifyAdjudicationStance('shared_title_observed')).toBe(
+      'similar_signals_no_same_story_evidence',
+    );
+    expect(classifyAdjudicationStance('multiple_signals_observed')).toBe(
+      'similar_signals_no_same_story_evidence',
+    );
+  });
+
+  it('marks merge eligibility ONLY for the support stance', () => {
+    expect(isMergeEligibleStance('content_equality_support_observed')).toBe(true);
+    expect(isMergeEligibleStance('similar_signals_no_same_story_evidence')).toBe(false);
+  });
+});
+
+describe('story-adjudication decision classification', () => {
+  const supported = (storyId: string) =>
+    ({
+      storyId,
+      verdict: 'full_content_equality_observed' as const,
+      score: 8,
+      stance: 'content_equality_support_observed' as const,
+      mergeEligible: true,
+    }) as const;
+  const similar = (storyId: string) =>
+    ({
+      storyId,
+      verdict: 'shared_title_observed' as const,
+      score: 1,
+      stance: 'similar_signals_no_same_story_evidence' as const,
+      mergeEligible: false,
+    }) as const;
+
+  it('defers with no_candidates_observed when nothing was observed', () => {
+    const verdict = classifyAdjudicationDecision({
+      candidatesTruncated: false,
+      overflowObserved: false,
+      entries: [],
+    });
+    expect(verdict.decision).toBe('no_adjudication_available');
+    expect([...verdict.deferReasons]).toEqual(['no_candidates_observed']);
+  });
+
+  it('defers with incomplete coverage on probe overflow — even with a support entry', () => {
+    const verdict = classifyAdjudicationDecision({
+      candidatesTruncated: false,
+      overflowObserved: true,
+      entries: [supported('story-b')],
+    });
+    expect(verdict.decision).toBe('defer_incomplete_coverage');
+    expect([...verdict.deferReasons]).toEqual(['incomplete_coverage_probe_overflow']);
+  });
+
+  it('defers with incomplete coverage on report truncation', () => {
+    const verdict = classifyAdjudicationDecision({
+      candidatesTruncated: true,
+      overflowObserved: false,
+      entries: [supported('story-b')],
+    });
+    expect(verdict.decision).toBe('defer_incomplete_coverage');
+    expect([...verdict.deferReasons]).toEqual(['incomplete_coverage_candidates_truncated']);
+  });
+
+  it('records BOTH coverage reasons when overflow AND truncation coexist', () => {
+    const verdict = classifyAdjudicationDecision({
+      candidatesTruncated: true,
+      overflowObserved: true,
+      entries: [supported('story-b')],
+    });
+    expect(verdict.decision).toBe('defer_incomplete_coverage');
+    expect([...verdict.deferReasons]).toEqual([
+      'incomplete_coverage_probe_overflow',
+      'incomplete_coverage_candidates_truncated',
+    ]);
+  });
+
+  it('defers on conflict when TWO candidates carry content-equality support', () => {
+    const verdict = classifyAdjudicationDecision({
+      candidatesTruncated: false,
+      overflowObserved: false,
+      entries: [supported('story-b'), supported('story-c'), similar('story-d')],
+    });
+    expect(verdict.decision).toBe('defer_conflict_multiple_supported');
+    expect([...verdict.deferReasons]).toEqual(['multiple_content_equality_candidates_conflict']);
+  });
+
+  it('proposes merge-ready ONLY for exactly one supported candidate at full coverage', () => {
+    const verdict = classifyAdjudicationDecision({
+      candidatesTruncated: false,
+      overflowObserved: false,
+      entries: [supported('story-b'), similar('story-d')],
+    });
+    expect(verdict.decision).toBe('merge_ready_proposed');
+    expect([...verdict.deferReasons]).toEqual([]);
+  });
+
+  it('reports no proposal when only similar signals were observed', () => {
+    const verdict = classifyAdjudicationDecision({
+      candidatesTruncated: false,
+      overflowObserved: false,
+      entries: [similar('story-d')],
+    });
+    expect(verdict.decision).toBe('no_merge_proposal_similar_signals_only');
+    expect([...verdict.deferReasons]).toEqual(['no_content_equality_support_observed']);
+  });
+});
+
+describe('story-adjudication builder', () => {
+  it('builds a merge-ready PROPOSAL (never executed) from one content-equality candidate', () => {
+    const report = makeReport([{ kind: 'content_hash', storyId: 'story-b' }]);
+    expect(report.adjudicationVersion).toBe(1);
+    expect(report.decision).toBe('merge_ready_proposed');
+    expect(report.entries.length).toBe(1);
+    expect(report.entries[0]).toMatchObject({
+      storyId: 'story-b',
+      verdict: 'full_content_equality_observed',
+      score: 8,
+      stance: 'content_equality_support_observed',
+      mergeEligible: true,
+    });
+    expect(report.counts).toEqual({ candidates: 1, supporting: 1 });
+    expect(report.conflicts).toEqual([]);
+    expect(report.execution).toEqual({
+      executed: false,
+      policy: 'proposal_only_no_state_change_v1',
+      reviewRequired: true,
+    });
+  });
+
+  it('is deterministic: same siblings → byte-identical report', () => {
+    const matches = [{ kind: 'title_key' as const, storyId: 'story-b' }];
+    const first = makeReport(matches);
+    const second = makeReport(matches);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it('never claims contradiction, source independence, truth, or same-event', () => {
+    const report = makeReport([{ kind: 'content_hash', storyId: 'story-b' }]);
+    expect(report.contradictionObserved).toBe(false);
+    expect(report.sourceIndependence).toBe('unassessed_similarity_is_not_independence');
+    expect(report.unassessed).toEqual(['same_event', 'truth', 'source_independence']);
+  });
+
+  it('still LISTS candidates under incomplete coverage but defers the decision', () => {
+    const report = makeReport([{ kind: 'title_key', storyId: 'story-b' }], true);
+    expect(report.decision).toBe('defer_incomplete_coverage');
+    expect(report.deferReasons).toEqual(['incomplete_coverage_probe_overflow']);
+    expect(report.entries.length).toBe(1);
+    expect(report.execution.executed).toBe(false);
+  });
+
+  it('defers with a typed conflict record when two candidates both match content', () => {
+    const report = makeReport([
+      { kind: 'content_hash', storyId: 'story-b' },
+      { kind: 'content_hash', storyId: 'story-c' },
+    ]);
+    expect(report.decision).toBe('defer_conflict_multiple_supported');
+    expect(report.conflicts).toEqual([
+      { kind: 'multiple_content_equality_candidates', storyIds: ['story-b', 'story-c'] },
+    ]);
+    expect(report.counts).toEqual({ candidates: 2, supporting: 2 });
+  });
+
+  it('reports no proposal for similar-only signals (title key is weak)', () => {
+    const report = makeReport([{ kind: 'title_key', storyId: 'story-b' }]);
+    expect(report.decision).toBe('no_merge_proposal_similar_signals_only');
+    expect(report.entries[0]).toMatchObject({
+      stance: 'similar_signals_no_same_story_evidence',
+      mergeEligible: false,
+    });
+    expect(report.conflicts).toEqual([]);
+  });
+
+  it('preserves the discovery limits verbatim', () => {
+    const report = makeReport([{ kind: 'url', storyId: 'story-b' }]);
+    expect(report.discoveryLimits).toEqual({
+      candidatesTruncated: false,
+      overflowObserved: false,
+      maxCandidates: 8,
+      indexedScope: 'index_version_sc1_only',
+      historicalBackfill: false,
+    });
+  });
+
+  it('rejects a matching report that does not mirror its own discovery', () => {
+    const { discovery, matching } = buildSiblings({
+      matches: [{ kind: 'title_key', storyId: 'story-b' }],
+    });
+    const forged = { ...matching, storyId: 'story-elsewhere' } as typeof matching;
+    expect(() => buildStoryAdjudicationReport({ discovery, matching: forged })).toThrowError(
+      'story_adjudication_basis_mismatch',
+    );
+  });
+});
+
+describe('story-adjudication reader', () => {
+  it('reads absent when the document carries no storyAdjudication key', () => {
+    expect(readStoryAdjudicationReport({ candidateDiscovery: {} })).toEqual({ kind: 'absent' });
+    expect(readStoryAdjudicationReport('not-an-object')).toEqual({ kind: 'malformed' });
+    expect(readStoryAdjudicationReport(null)).toEqual({ kind: 'malformed' });
+  });
+
+  it('round-trips a stored report byte-identically', () => {
+    const siblings = buildSiblings({
+      matches: [
+        { kind: 'content_hash', storyId: 'story-b' },
+        { kind: 'title_key', storyId: 'story-d' },
+      ],
+    });
+    const report = buildStoryAdjudicationReport(siblings);
+    const stored = JSON.parse(JSON.stringify(report)) as unknown;
+    const read = readStoryAdjudicationReport(siblingDocument(siblings, stored));
+    expect(read).toMatchObject({ kind: 'story_adjudication_v1' });
+    if (read.kind === 'story_adjudication_v1') {
+      expect(JSON.stringify(read.report)).toBe(JSON.stringify(report));
+    }
+  });
+
+  it('returns unsupported_version for a future version claim', () => {
+    const siblings = buildSiblings({ matches: [{ kind: 'content_hash', storyId: 'story-b' }] });
+    const report = buildStoryAdjudicationReport(siblings);
+    const forged = { ...report, adjudicationVersion: 2 };
+    const read = readStoryAdjudicationReport(siblingDocument(siblings, forged));
+    expect(read).toMatchObject({ kind: 'unsupported_version', adjudicationVersion: 2 });
+  });
+
+  it('marks a payload without ALL THREE valid siblings malformed', () => {
+    const siblings = buildSiblings({ matches: [{ kind: 'content_hash', storyId: 'story-b' }] });
+    const report = buildStoryAdjudicationReport(siblings);
+
+    // The matching sibling removed from the document:
+    const noMatching = siblingDocument(siblings, JSON.parse(JSON.stringify(report)));
+    delete noMatching['candidateMatching'];
+    expect(readStoryAdjudicationReport(noMatching)).toEqual({ kind: 'malformed' });
+
+    // The assessment sibling removed from the document:
+    const noAssessment = siblingDocument(siblings, JSON.parse(JSON.stringify(report)));
+    delete noAssessment['candidateAssessment'];
+    expect(readStoryAdjudicationReport(noAssessment)).toEqual({ kind: 'malformed' });
+
+    // The discovery sibling removed from the document:
+    const noDiscovery = siblingDocument(siblings, JSON.parse(JSON.stringify(report)));
+    delete noDiscovery['candidateDiscovery'];
+    expect(readStoryAdjudicationReport(noDiscovery)).toEqual({ kind: 'malformed' });
+  });
+
+  it('rejects stored lies: wrong decision, counts, stance, execution, conflicts', () => {
+    const matches = [
+      { kind: 'content_hash' as const, storyId: 'story-b' },
+      { kind: 'content_hash' as const, storyId: 'story-c' },
+    ];
+    const siblings = buildSiblings({ matches });
+    const report = buildStoryAdjudicationReport(siblings);
+
+    const decisionLie = { ...report, decision: 'merge_ready_proposed' as const };
+    expect(
+      readStoryAdjudicationReport(siblingDocument(siblings, decisionLie)),
+    ).toEqual({ kind: 'malformed' });
+
+    const countsLie = { ...report, counts: { candidates: 2, supporting: 0 } };
+    expect(
+      readStoryAdjudicationReport(siblingDocument(siblings, countsLie)),
+    ).toEqual({ kind: 'malformed' });
+
+    const stanceLie = {
+      ...report,
+      entries: report.entries.map((entry) => ({
+        ...entry,
+        stance: 'similar_signals_no_same_story_evidence' as const,
+      })),
+    };
+    expect(
+      readStoryAdjudicationReport(siblingDocument(siblings, stanceLie)),
+    ).toEqual({ kind: 'malformed' });
+
+    const executionLie = {
+      ...report,
+      execution: {
+        executed: true,
+        policy: 'proposal_only_no_state_change_v1',
+        reviewRequired: true,
+      },
+    };
+    expect(
+      readStoryAdjudicationReport(siblingDocument(siblings, executionLie)),
+    ).toEqual({ kind: 'malformed' });
+
+    const conflictsLie = { ...report, conflicts: [] };
+    expect(
+      readStoryAdjudicationReport(siblingDocument(siblings, conflictsLie)),
+    ).toEqual({ kind: 'malformed' });
+
+    const contradictionLie = { ...report, contradictionObserved: true };
+    expect(
+      readStoryAdjudicationReport(siblingDocument(siblings, contradictionLie)),
+    ).toEqual({ kind: 'malformed' });
+
+    const independenceLie = {
+      ...report,
+      sourceIndependence: 'independence_confirmed_by_correlated_signals',
+    };
+    expect(
+      readStoryAdjudicationReport(siblingDocument(siblings, independenceLie)),
+    ).toEqual({ kind: 'malformed' });
+
+    const limitationsLie = {
+      ...report,
+      limitations: report.limitations.filter((label) => label !== 'title_signal_is_weak'),
+    };
+    expect(
+      readStoryAdjudicationReport(siblingDocument(siblings, limitationsLie)),
+    ).toEqual({ kind: 'malformed' });
+  });
+
+  it('rejects an identity mirror lie (snapshot mismatch)', () => {
+    const siblings = buildSiblings({ matches: [{ kind: 'title_key', storyId: 'story-b' }] });
+    const report = buildStoryAdjudicationReport(siblings);
+    const forged = {
+      ...report,
+      snapshot: { sourceItemId: 'item-other', contentHash: SNAPSHOT.contentHash },
+    };
+    expect(
+      readStoryAdjudicationReport(siblingDocument(siblings, forged)),
+    ).toEqual({ kind: 'malformed' });
+  });
+
+  it('re-derives a merge-ready proposal decision from the siblings on read', () => {
+    const siblings = buildSiblings({ matches: [{ kind: 'content_hash', storyId: 'story-b' }] });
+    const report = buildStoryAdjudicationReport(siblings);
+    const read = readStoryAdjudicationReport(
+      siblingDocument(siblings, JSON.parse(JSON.stringify(report))),
+    );
+    expect(read).toMatchObject({ kind: 'story_adjudication_v1' });
+    if (read.kind === 'story_adjudication_v1') {
+      expect(read.report.decision).toBe('merge_ready_proposed');
+      expect(read.report.entries[0]).toMatchObject({
+        storyId: 'story-b',
+        score: 8,
+        mergeEligible: true,
+      });
+    }
+  });
+});

@@ -1,0 +1,248 @@
+{
+  "class": "DESIGN-LAB Phase 4.3 step 2 REAL-poll-pipeline workload — LOCAL workerd proxy units; wallMsLocal is LOCAL WALL TIME, NOT cloud CPU; sequential consumption is NOT cloud concurrency evidence; NOT cloud quota/billing evidence",
+  "instrument": "audit-tools/trace/d1-instrument.ts v3 (R112-03 corrected units)",
+  "pipeline": "REAL end-to-end wiring: scheduleDueSources -> durable job -> dispatchDueJobs -> engine claim -> per-hop authorizeIngestionUnit -> scripted network fake -> REAL RSS connector classification/normalize -> accepted ownership-fenced commit -> job terminal",
+  "freeQuotaNote": "D1 Free row \"Queries per Worker invocation = 50\": the mapping of LOCAL executionApiCallAttempts onto that quota row is a separate documented question (both interpretations carried in free-plan/ documents); no cloud conclusion is drawn",
+  "rows": [
+    {
+      "schedule": {
+        "api": 6,
+        "stmt": 8
+      },
+      "dispatch": {
+        "api": 4,
+        "stmt": 4
+      },
+      "consume": {
+        "api": 12,
+        "stmt": 14
+      },
+      "executionApiCallAttempts": 22,
+      "statementsAttempted": 26,
+      "statementsCompleted": 26,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRowsWrittenDelta": 20,
+      "metaRowsWrittenPresenceDelta": 14,
+      "metaRecordsUnavailableDelta": 0,
+      "wallMsLocal": 27,
+      "rawHttpRequests": 1,
+      "units": "xAPI = execution-API call attempts (terminal + batch, v3 instrument); STMT = statements attempted; rows = LOCAL meta rows_written deltas WHEN available (unavailable = labeled, never zero-filled)",
+      "honesty": "DESIGN-LAB, LOCAL workerd proxy only; wallMsLocal is LOCAL WALL TIME, NOT cloud CPU; sequential envelope consumption is NOT cloud concurrency evidence; no cloud quota/billing conclusion",
+      "outcome": {
+        "jobsCreated": 1,
+        "envelopes": 1,
+        "nextPollAt": 1770000300000,
+        "consecutiveFailures": 0
+      },
+      "id": "W-01",
+      "scenario": "single source, 1 new item, 1 hop, changed (scheduler->claim->authorize->fetch->commit)",
+      "sources": 1,
+      "itemsCommitted": 1
+    },
+    {
+      "schedule": {
+        "api": 6,
+        "stmt": 8
+      },
+      "dispatch": {
+        "api": 4,
+        "stmt": 4
+      },
+      "consume": {
+        "api": 111,
+        "stmt": 212
+      },
+      "executionApiCallAttempts": 121,
+      "statementsAttempted": 224,
+      "statementsCompleted": 224,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRowsWrittenDelta": 713,
+      "metaRowsWrittenPresenceDelta": 212,
+      "metaRecordsUnavailableDelta": 0,
+      "wallMsLocal": 89,
+      "rawHttpRequests": 1,
+      "units": "xAPI = execution-API call attempts (terminal + batch, v3 instrument); STMT = statements attempted; rows = LOCAL meta rows_written deltas WHEN available (unavailable = labeled, never zero-filled)",
+      "honesty": "DESIGN-LAB, LOCAL workerd proxy only; wallMsLocal is LOCAL WALL TIME, NOT cloud CPU; sequential envelope consumption is NOT cloud concurrency evidence; no cloud quota/billing conclusion",
+      "outcome": {
+        "jobsCreated": 1,
+        "inserted": 100
+      },
+      "id": "W-02",
+      "scenario": "single source, 100 new items (connector cap), 1 hop, changed",
+      "sources": 1,
+      "itemsCommitted": 100
+    },
+    {
+      "schedule": {
+        "api": 6,
+        "stmt": 8
+      },
+      "dispatch": {
+        "api": 4,
+        "stmt": 4
+      },
+      "consume": {
+        "api": 11,
+        "stmt": 12
+      },
+      "executionApiCallAttempts": 21,
+      "statementsAttempted": 24,
+      "statementsCompleted": 24,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRowsWrittenDelta": 12,
+      "metaRowsWrittenPresenceDelta": 12,
+      "metaRecordsUnavailableDelta": 0,
+      "wallMsLocal": 18,
+      "rawHttpRequests": 1,
+      "units": "xAPI = execution-API call attempts (terminal + batch, v3 instrument); STMT = statements attempted; rows = LOCAL meta rows_written deltas WHEN available (unavailable = labeled, never zero-filled)",
+      "honesty": "DESIGN-LAB, LOCAL workerd proxy only; wallMsLocal is LOCAL WALL TIME, NOT cloud CPU; sequential envelope consumption is NOT cloud concurrency evidence; no cloud quota/billing conclusion",
+      "outcome": {
+        "itemsAfter": 3,
+        "etagPreserved": true,
+        "cursorPreserved": true,
+        "requestsToday": 2
+      },
+      "id": "W-03",
+      "scenario": "single source, 304 not_modified second poll (conditional GET, validators preserved)",
+      "sources": 1,
+      "itemsCommitted": 0
+    },
+    {
+      "schedule": {
+        "api": 6,
+        "stmt": 8
+      },
+      "dispatch": {
+        "api": 4,
+        "stmt": 4
+      },
+      "consume": {
+        "api": 14,
+        "stmt": 18
+      },
+      "executionApiCallAttempts": 24,
+      "statementsAttempted": 30,
+      "statementsCompleted": 30,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRowsWrittenDelta": 28,
+      "metaRowsWrittenPresenceDelta": 18,
+      "metaRecordsUnavailableDelta": 0,
+      "wallMsLocal": 21,
+      "rawHttpRequests": 2,
+      "units": "xAPI = execution-API call attempts (terminal + batch, v3 instrument); STMT = statements attempted; rows = LOCAL meta rows_written deltas WHEN available (unavailable = labeled, never zero-filled)",
+      "honesty": "DESIGN-LAB, LOCAL workerd proxy only; wallMsLocal is LOCAL WALL TIME, NOT cloud CPU; sequential envelope consumption is NOT cloud concurrency evidence; no cloud quota/billing conclusion",
+      "outcome": {
+        "rawRequests": 2,
+        "requestsToday": 2
+      },
+      "id": "W-04",
+      "scenario": "single source, 301 redirect + 200 (2 hops, per-hop authorization)",
+      "sources": 1,
+      "itemsCommitted": 2
+    },
+    {
+      "schedule": {
+        "api": 6,
+        "stmt": 8
+      },
+      "dispatch": {
+        "api": 4,
+        "stmt": 4
+      },
+      "consume": {
+        "api": 11,
+        "stmt": 12
+      },
+      "executionApiCallAttempts": 21,
+      "statementsAttempted": 24,
+      "statementsCompleted": 24,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRowsWrittenDelta": 13,
+      "metaRowsWrittenPresenceDelta": 12,
+      "metaRecordsUnavailableDelta": 0,
+      "wallMsLocal": 15,
+      "rawHttpRequests": 1,
+      "units": "xAPI = execution-API call attempts (terminal + batch, v3 instrument); STMT = statements attempted; rows = LOCAL meta rows_written deltas WHEN available (unavailable = labeled, never zero-filled)",
+      "honesty": "DESIGN-LAB, LOCAL workerd proxy only; wallMsLocal is LOCAL WALL TIME, NOT cloud CPU; sequential envelope consumption is NOT cloud concurrency evidence; no cloud quota/billing conclusion",
+      "outcome": {
+        "consecutiveFailures": 1,
+        "lastError": "http_status_error"
+      },
+      "id": "W-05",
+      "scenario": "single source, HTTP 500 (provider failure, adaptive backoff, zero items)",
+      "sources": 1,
+      "itemsCommitted": 0
+    },
+    {
+      "schedule": {
+        "api": 6,
+        "stmt": 8
+      },
+      "dispatch": {
+        "api": 4,
+        "stmt": 4
+      },
+      "consume": {
+        "api": 111,
+        "stmt": 212
+      },
+      "executionApiCallAttempts": 121,
+      "statementsAttempted": 224,
+      "statementsCompleted": 224,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRowsWrittenDelta": 713,
+      "metaRowsWrittenPresenceDelta": 212,
+      "metaRecordsUnavailableDelta": 0,
+      "wallMsLocal": 97,
+      "rawHttpRequests": 1,
+      "units": "xAPI = execution-API call attempts (terminal + batch, v3 instrument); STMT = statements attempted; rows = LOCAL meta rows_written deltas WHEN available (unavailable = labeled, never zero-filled)",
+      "honesty": "DESIGN-LAB, LOCAL workerd proxy only; wallMsLocal is LOCAL WALL TIME, NOT cloud CPU; sequential envelope consumption is NOT cloud concurrency evidence; no cloud quota/billing conclusion",
+      "outcome": {
+        "feedBytes": 326775,
+        "longestCanonicalUrlChars": 2042,
+        "inserted": 100
+      },
+      "id": "W-06",
+      "scenario": "single source, 100 items at max documented shape (URL ~2KiB + title/excerpt 512 caps), changed",
+      "sources": 1,
+      "itemsCommitted": 100
+    },
+    {
+      "schedule": {
+        "api": 12,
+        "stmt": 26
+      },
+      "dispatch": {
+        "api": 10,
+        "stmt": 10
+      },
+      "consume": {
+        "api": 96,
+        "stmt": 120
+      },
+      "executionApiCallAttempts": 123,
+      "statementsAttempted": 161,
+      "statementsCompleted": 161,
+      "statementsNotConfirmedCompleted": 0,
+      "metaRowsWrittenDelta": 190,
+      "metaRowsWrittenPresenceDelta": 120,
+      "metaRecordsUnavailableDelta": 0,
+      "wallMsLocal": 106,
+      "rawHttpRequests": 8,
+      "units": "xAPI = execution-API call attempts (terminal + batch, v3 instrument); STMT = statements attempted; rows = LOCAL meta rows_written deltas WHEN available (unavailable = labeled, never zero-filled)",
+      "honesty": "DESIGN-LAB, LOCAL workerd proxy only; wallMsLocal is LOCAL WALL TIME, NOT cloud CPU; sequential envelope consumption is NOT cloud concurrency evidence; no cloud quota/billing conclusion",
+      "outcome": {
+        "jobsCreatedFirstPass": 7,
+        "jobsCreatedOverlappingPass": 0,
+        "envelopes": 7,
+        "totalFeedsConfigured": 8,
+        "rawRequests": 8,
+        "consumeXapiPerSourceLocal": 13.71
+      },
+      "id": "W-07",
+      "scenario": "7 RSS sources (8 feed URLs), one pass, 2 items per feed + overlapping second pass absorbed (0 jobs); envelopes consumed SEQUENTIALLY",
+      "sources": 7,
+      "itemsCommitted": 14
+    }
+  ]
+}
