@@ -39,8 +39,9 @@ posts, v1.46.0 / schema 10) is PR #21 (branch
 shadow run over 10 live Tier A items (7 drafted, 1 leak draft
 shadow-only, 3 rejected by the discount/unofficial-port filters,
 evidence in `docs/reviews/SLICE_08_SHADOW_RUN.md`); first 3 test posts
-through the deployed inbound pipeline in a controlled window, flags
-off and mode back to paused immediately after. The Phase
+are paste-ready in the shadow doc — not sent in this session, sending
+awaits the owner's paste in a controlled window; final state verified:
+mode `paused`, flags off, `published_posts` 0. The Phase
 2A record below is the historical account of that phase; the current
 phase state lives in `docs/ROADMAP.md`.
 

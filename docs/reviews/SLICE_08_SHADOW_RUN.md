@@ -1,7 +1,7 @@
 # Slice 8 — Shadow Run (same-day, dry-run, NO posts)
 
 Date: 2026-11-20 (feeds pulled 21:32–21:33 UTC) · Branch: `slice/08-soul-shadow-first-posts`
-Soul: v1 (`docs/soul/SOUL_v1.md`, SHA-256 `8383dfe23f064ff540e864589a76a4bcc72f58d54359a7dca08409b9f458ef47`)
+Soul: v1 (`docs/soul/SOUL_v1.md`, SHA-256 `324e56c6a8448aec26c6a17e50902116da019d20b73cf6e959ca1b6cc4749bf6`)
 
 **This is a SAME-DAY shadow batch, not the 7–14 day shadow from DESIGN §13.**
 It proves the pipeline's Golden criteria on live items in one day; the

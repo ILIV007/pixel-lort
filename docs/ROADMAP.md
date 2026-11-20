@@ -1920,12 +1920,15 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       `docs/reviews/SLICE_08_SHADOW_RUN.md`): 7 drafted, 1 leak draft
       (shadow-only, never posted), 3 rejected by the discount filter /
       unofficial-port rule. First 3 test posts (GTA VI official day-one
-      sales; Hounded PS5 2027; Zenless Zone Zero v3.4, December 2)
-      through the deployed inbound pipeline in a controlled window
-      (ADMIN_POST_ENABLED + ADMIN_POST_LIVE_PUBLISH_ENABLED on only
-      while the owner pastes, AI stays off, mode back to `paused` and
-      flags off immediately after); no cron/schedule wired; no replies
-      to own posts (deferred — no discussion group). 7 new tests
+      sales; Hounded PS5 2027; Zenless Zone Zero v3.4, December 2) are
+      paste-ready in `docs/reviews/SLICE_08_SHADOW_RUN.md` — NOT sent in
+      this session; sending awaits the owner's paste into @Pixel_IVbot
+      PV in a controlled window (ADMIN_POST_ENABLED +
+      ADMIN_POST_LIVE_PUBLISH_ENABLED on only while pasting, AI stays
+      off, mode back to `paused` and flags off immediately after).
+      Final state verified: mode `paused`, flags off,
+      `published_posts` 0. No cron/schedule wired; no replies to own
+      posts (deferred — no discussion group). 7 new tests
       (migration-0010 + soul-stamp, registered in `test:db`).
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
