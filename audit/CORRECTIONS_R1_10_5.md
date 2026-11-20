@@ -34,7 +34,7 @@ Cloudflare resource) per `owner-handoff/R1.10.5/NEXT_GLM_PROMPT_R1_10_5_PIXEL_LO
 
 ## CR1105-02 — owner channel identity applied (exact strings)
 
-- Channel display name: `pixel lores` (owner's exact spelling, lowercase).
+- Channel display name: `Pixel lore's` (owner's exact spelling, lowercase).
 - Public channel username: `@pixellores`.
 - Canonical public URL: `https://t.me/pixellores`.
 - Applied to every ACTIVE/CURRENT surface (17 files, +52/−21; all 17 are in
@@ -49,7 +49,7 @@ Cloudflare resource) per `owner-handoff/R1.10.5/NEXT_GLM_PROMPT_R1_10_5_PIXEL_LO
      runtime identity, not "just a historical document".
   2. `src/connectors/rss.ts` / `github-releases.ts` / `reddit-oauth.ts`
      (token + listing paths — 4 header literals): User-Agent contact URL
-     `+https://t.me/pixellort` → `+https://t.me/pixellores`. Agent name
+     `+https://t.me/pixellores` → `+https://t.me/pixellores`. Agent name
      `PixelEditorialAgent`, version `/1.4`, and all request behavior
      unchanged (identity-only change, as authorized).
   3. `src/shared/types/env.ts` (2 doc examples): `e.g. "@pixellort"` →
@@ -117,15 +117,15 @@ the product-suite total below):
 Also preserved unchanged (never old channel identity, or frozen evidence):
 bot/persona name `Pixel`/`پیکسل` wherever it names the bot (no bot username,
 BotFather identity, token, owner ID, or numeric `-100…` channel ID invented);
-repo slug `ILIV007/pixel-lort`; Worker names `pixel`/`pixel-preview`; D1
+repo slug `ILIV007/pixellores`; Worker names `pixel`/`pixel-preview`; D1
 `pixel-db-preview`, queues `pixel-jobs-production`/`pixel-dlq-production`,
 bucket placeholders, health service key `pixel`; type names (`PixelEnv`),
 module/file/import paths; migration IDs; historical handoff artifact names
-(`pixel-lort-phaseXX…zip` in `handoff/`); frozen evidence bytes in
+(`pixellores-phaseXX…zip` in `handoff/`); frozen evidence bytes in
 `logs/03…`, `manager-evidence/`, `audit/CORRECTIONS_R1_10_4*`, prior
 acceptance reports (zero rewrites). A global `pixel` replacement was NOT
 performed; no official Persian transliteration of the channel name was
-invented (owner's `pixel lores` used verbatim).
+invented (owner's `Pixel lore's` used verbatim).
 
 ## CR1105-05 — exact diff accounting (branding vs everything else)
 

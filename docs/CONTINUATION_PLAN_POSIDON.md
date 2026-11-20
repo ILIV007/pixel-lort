@@ -1,4 +1,4 @@
-# Pixel Lores — continuation plan and operational handoff
+# Pixel lore's — continuation plan and operational handoff
 
 Status snapshot: baseline `5fdb6ff7faac9024c1a0593701b652ade2b6eabc`, branch `review/r1.10.3-sql-design`, PR #11. Always re-read the actual remote and CI: this is not a live monitor. This plan is not an assertion that engineering, shadow or live rollout has completed.
 

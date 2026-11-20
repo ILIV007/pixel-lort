@@ -33,7 +33,7 @@ survive between tool calls in this environment). A later poll script
 deleted its own short-lived device_code file on exit, which made one
 still-valid authorization unclaimable. The owner then directed (explicit,
 authorized) use of a fine-grained PAT supplied in chat for
-ILIV007/pixel-lort work only. Hygiene facts:
+ILIV007/pixellores work only. Hygiene facts:
 
 - The token was used from a mode-600 file OUTSIDE the repository, never
   embedded in remote URLs, git config, commits, logs, ZIPs, or bundles.

@@ -59,7 +59,7 @@ test at posidon-review/R1.10.4.1/fixture-roundtrip.test.mjs:9:1
   
   30 !== 2048
   
-      at TestContext.<anonymous> (file:///home/z/pixel-lort-review/posidon-review/R1.10.4.1/fixture-roundtrip.test.mjs:13:9)
+      at TestContext.<anonymous> (file:///home/z/pixellores-review/posidon-review/R1.10.4.1/fixture-roundtrip.test.mjs:13:9)
       at Test.runInAsyncScope (node:async_hooks:227:14)
       at Test.run (node:internal/test_runner/test:1402:25)
       at Test.start (node:internal/test_runner/test:1262:17)
@@ -81,7 +81,7 @@ test at posidon-review/R1.10.4.1/fixture-roundtrip.test.mjs:9:1
 ℹ todo 0
 ℹ duration_ms 55.206659
 
- RUN  v4.1.11 /home/z/pixel-lort-review
+ RUN  v4.1.11 /home/z/pixellores-review
 
  ❯ audit-tools/trace/manager-r11041-boundary.test.ts (3 tests | 1 failed) 26ms
    × CE1: plan claims S3 missing-column probe throws at construction before any submitted statement 4ms

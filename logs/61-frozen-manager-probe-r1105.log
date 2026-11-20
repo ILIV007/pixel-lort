@@ -1,5 +1,5 @@
 
- RUN  v4.1.11 /home/z/my-project/pixel-lort-pub
+ RUN  v4.1.11 /home/z/my-project/pixellores-pub
 
 stdout | audit-tools/manager-probes/design-counterexamples.test.ts > Posidon independent R1.10.2 design and instrumentation controls > CE1 failed batch must not count its submitted statements as successfully completed
 POSIDON[CE1] {"batchCompleted":0,"batchFailed":1,"batchResultRecords":0,"executionApiCallAttempts":1,"executionApiCallsCompleted":0,"executionApiCallsFailed":1,"statementsAttempted":2,"statementsCompleted":0,"statementsNotConfirmedCompleted":2,"metaRecordsAvailable":0,"metaRecordsUnavailable":0,"metaReservoirRetained":0,"metaReservoirDropped":0,"metaReservoirTruncated":false}

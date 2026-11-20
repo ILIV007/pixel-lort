@@ -26,7 +26,7 @@
 # implies EDITORIAL_ENABLED or AI_ENABLED.
 # EDITORIAL_MATCHING_ENABLED=false
 # EDITORIAL_ADJUDICATION_ENABLED=false
-# Intended owner value since R1.10.5 (owner channel identity: pixel lores;
+# Intended owner value since R1.10.5 (owner channel identity: Pixel lore's;
 # non-secret per ADR-0009): TARGET_CHANNEL=@pixellores
 # TARGET_CHANNEL=@pixellores
 # Phase 6 AI adapter gates (non-secret; ADR-0041). Ships OFF: with

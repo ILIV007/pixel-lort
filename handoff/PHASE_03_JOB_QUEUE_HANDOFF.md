@@ -154,7 +154,7 @@ without re-sending every dead-letter row forever.
 
 ## 7. Delivery
 
-- Single artifact: `pixel-lort-phase03-job-queue-v1.3.0.zip` — full working
+- Single artifact: `pixellores-phase03-job-queue-v1.3.0.zip` — full working
   tree + complete `.git` history at the archive root; tracked
   `.env.example`/`.dev.vars.example` INCLUDED; node_modules, dist, .wrangler,
   coverage, logs, real env/secret files, and prior ZIPs excluded; index file
@@ -209,7 +209,7 @@ Verification for this round (measured, no totals chased): reviewer
 regression suite 6/6; jobs-related suites 92/92; full gate + test:db +
 preview dry-run re-run on the bumped version 1.3.1 — all green (numbers in
 the final report). Version touch points aligned to 1.3.1 by
-`scripts/check-versions.mjs`. Artifact: `pixel-lort-phase03-job-queue-v1.3.1.zip`
+`scripts/check-versions.mjs`. Artifact: `pixellores-phase03-job-queue-v1.3.1.zip`
 (full tree + complete `.git`, same packaging and verification recipe as
 §7). **STOP — awaiting independent review of the corrective release; no
 activation, provisioning, or Phase 4 work performed.**
@@ -282,7 +282,7 @@ install): full suite **632 tests / 49 files, all passing**; `test:db`
 suite (v1.3.0 round) 6/6; secret scan **207 files, 0 findings**;
 `check:versions` 1.3.1 / schema 3; lint + format:check + typecheck clean;
 preview wrangler dry-run binds JOBS/DLQ/DB with APP_VERSION 1.3.1.
-Artifact: `pixel-lort-phase03-job-queue-v1.3.1.zip` (REBUILT — the single
+Artifact: `pixellores-phase03-job-queue-v1.3.1.zip` (REBUILT — the single
 current final artifact; full tree + complete `.git`, same packaging recipe).
 **STOP — awaiting independent review; no activation, provisioning, or
 Phase 4 work performed.**

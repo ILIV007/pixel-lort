@@ -277,7 +277,7 @@ NULL — plus recovery to `known_v4_ownership` once exact metadata returns.
 are NOT accessible in this environment.** Searched: every shipped handoff
 ZIP (no `.git/`, no packs/bundles), the local filesystem (only an unrelated
 Phase-2A repository), and the documented remote
-(`https://i/ILIV007/pixel-lort.git`) is redacted in all shipped docs and was
+(`https://i/ILIV007/pixellores.git`) is redacted in all shipped docs and was
 never reachable from this sandbox. Per the prompt, this is disclosed rather
 than papered over, and NO substitute is asserted to be a Git archive. What
 WAS used, with exact provenance:

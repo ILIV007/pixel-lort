@@ -1,7 +1,7 @@
 # Pixel
 
 **Pixel** is a Persian-language autonomous Telegram gaming editorial system for the
-**pixel lores** channel (`@pixellores`, https://t.me/pixellores). It collects gaming signals from registered
+**Pixel lore's** channel (`@pixellores`, https://t.me/pixellores). It collects gaming signals from registered
 sources, builds verified stories with evidence, drafts Persian-language posts with an
 editorial persona, and publishes to Telegram under explicit trust, budget, and
 scheduling policies.

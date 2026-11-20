@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-02 (Asia/Tehran)
 - **Branch:** `phase/01a-data-foundation` (clean working tree)
-- **Artifact:** `pixel-lort-phase01a-v1.1.1.zip` — the ONLY handoff artifact
+- **Artifact:** `pixellores-phase01a-v1.1.1.zip` — the ONLY handoff artifact
   (complete working tree + complete `.git` history; `handoff/PHASE_01A_HANDOFF.md` included).
 - **Revision:** supersedes the v1.1.0 artifact — includes the Phase 1A review
   correction commit (see §13). The four original Phase 1A commits were NOT

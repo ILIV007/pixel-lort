@@ -1,5 +1,5 @@
 
- RUN  v4.1.11 /home/z/my-project/pixel-lort-pub
+ RUN  v4.1.11 /home/z/my-project/pixellores-pub
 
  ✓ tests/integration/round18-r10-budget-authority.test.ts (38 tests) 460ms
 stdout | tests/integration/round16-d01-policy-pause.test.ts > entrypoints — production cron/queue wiring (gate OFF) > cron (gate OFF) dispatches only enabled types and spends no ingestion budget

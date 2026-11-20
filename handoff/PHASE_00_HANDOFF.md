@@ -4,12 +4,12 @@
 - **Verdict:** Phase 0 **ACCEPTED** (independent validation by Alexios)
 - **Branch:** `phase/00-foundation` — clean working tree
 - **Integration commit:** the single merge commit `chore: align phase zero with GitHub repository` (hash reported in the delivery message)
-- **Artifact policy:** this repository ZIP (`pixel-lort-phase00-v1.0.0.zip`) is the **only** handoff artifact; source-only ZIPs and standalone report files are retired.
+- **Artifact policy:** this repository ZIP (`pixellores-phase00-v1.0.0.zip`) is the **only** handoff artifact; source-only ZIPs and standalone report files are retired.
 
 ## 1. Repository identity
 
 - Working copy: `/home/z/my-project/pixel`
-- Remote: `origin` = `https://github.com/ILIV007/pixel-lort.git` (fetch + push)
+- Remote: `origin` = `https://github.com/ILIV007/pixellores.git` (fetch + push)
 - Remote head: `45acd449238ffad29daff200ab378e0ea33d25c1` — "Initial commit"
   (one-line README, MIT LICENSE, Copyright (c) 2026 ILIYA)
 

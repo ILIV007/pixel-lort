@@ -21,7 +21,7 @@ All matched files use Prettier code style!
 > vitest run
 
 
- RUN  v4.1.11 /home/z/my-project/pixel-lort-pub
+ RUN  v4.1.11 /home/z/my-project/pixellores-pub
 
  ✓ tests/integration/round18-r10-budget-authority.test.ts (38 tests) 440ms
  ✓ tests/integration/round19-r09-ownership.test.ts (17 tests) 334ms
