@@ -23,8 +23,8 @@ Epic free-games connector + Tier V anchors + live watchlists, v1.43.0 /
 schema 8) is PR #18 (branch
 `slice/05-game-links-epic-watchlists`, commit 7b52541). Slice 6 (post
 management — pins + housekeeping — + near-dup detection, v1.44.0 /
-schema 9) is PR TBD (branch
-`slice/06-post-management-near-dup`, commit TBD). The Phase
+schema 9) is PR #19 (branch
+`slice/06-post-management-near-dup`, commit 63bdbf7). The Phase
 2A record below is the historical account of that phase; the current
 phase state lives in `docs/ROADMAP.md`.
 
