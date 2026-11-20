@@ -16,7 +16,9 @@ scheduling policies.
 Phases 0, 1A, 1B-preview, 2A, 2B, and 3 are done. PR #11 (v1.41.0 /
 schema 6) is merged to `main` (commit 5517390, repo rename to
 `pixellores`); Phases 4–13 are implemented on `main` behind fail-closed
-flags, and the live preview runs `main` (v1.42.0 / schema 7). The Phase
+flags, and the live preview runs `main` (v1.42.0 / schema 7). Slice 4
+(inbound AI-admin pipeline, v1.42.0 / schema 7) is PR #17 (branch
+`slice/04-inbound-pipeline`, commit 2043360). The Phase
 2A record below is the historical account of that phase; the current
 phase state lives in `docs/ROADMAP.md`.
 

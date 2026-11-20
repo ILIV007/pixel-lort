@@ -7,7 +7,7 @@
   "sourceCommit": "f055afbc2da3ecc348709a9fc43c8cf8a5c38eb7",
   "sourceTree": "0abfa0edcc6ea810a16474e76daee9c402b8187c",
   "sourceBranch": "slice/04-inbound-pipeline",
-  "reviewPullRequest": "https://github.com/ILIV007/pixellores/pull/11",
+  "reviewPullRequest": "https://github.com/ILIV007/pixellores/pull/17",
   "artifactFilename": null,
   "deliveryHead": "NOT RECORDABLE IN-REPO — a commit cannot contain its own hash; the delivery HEAD/tree SHAs are reported in the round delivery message and preserved by Posidon's independent review/backup, and sourceCommit stays the SEPARATE baseline identity this round was built on",
   "purpose": "Merge candidate for draft PR #11 to main: v1.41.0 / schema 6 with Phases 4-13 implemented behind fail-closed flags; this commit adds the B2 dev-advisory fix (npm overrides forcing sharp 0.35.5 and undici 7.30.1), retargets the PR base to main, and refreshes the docs status (README, ROADMAP, PR body). Gates on the final tree: npm run check exit 0 (206 files / 2815 tests), npm run test:db exit 0 (75 files / 861 tests), CI Phase 0 quality gate success on the retargeted base. Known carries: B3 real-D1 changes() fence smoke test pending; OD-009/OD-010 open owner decisions; issue #8 admin management not yet implemented; R2/KV not provisioned.",
