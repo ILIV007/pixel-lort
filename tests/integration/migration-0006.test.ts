@@ -12,7 +12,7 @@ import { createDbExecutor } from '../../src/adapters/db/db-executor';
  *  1. apply ONLY migrations 0001..0005 -> a genuine schema-v5 database;
  *  2. populate admin post versions using ONLY v5 columns (captured rows
  *     carry a real source_update_id and no editorial columns);
- *  3. apply the real append-only plan -> ONLY 0006 is pending;
+ *  3. apply the 0006-stopped plan -> ONLY 0006 is pending;
  *  4. schema version becomes 6 with the 0006 migration id;
  *  5. every legacy captured row survives byte-identically: the same
  *     envelope/fingerprint/source_update_id, editorial columns NULL —
@@ -24,7 +24,8 @@ import { createDbExecutor } from '../../src/adapters/db/db-executor';
  *  7. the partial UNIQUE index admits one editorial-derived version and
  *     rejects a second derivation of the SAME editorial draft version
  *     (while a DIFFERENT editorial draft version converts freely);
- *  8. applying migrations twice is a no-op.
+ *  8. applying the 0006-stopped plan twice is a no-op; the FULL plan
+ *     continues the chain to version 7 (0007, slice 4).
  *
  * Remote application is NEVER performed here: this helper materializes
  * schemas for offline tests only (ADR-0019); a real database receives 0006
@@ -36,6 +37,16 @@ const db: D1Database = env.DB;
 
 const V5_ONLY: readonly MigrationDescriptor[] = MIGRATIONS.filter(
   (migration) => migration.version <= 5,
+);
+
+/**
+ * Slice 4 — the 0006-stopped plan: the linear chain stopped at the
+ * version-6 intermediate state. The full plan now continues to 0007, so
+ * the "ONLY 0006 is pending" step is proven against THIS plan; the full
+ * plan's continuation to 7 is asserted separately in the first test.
+ */
+const V6_ONLY: readonly MigrationDescriptor[] = MIGRATIONS.filter(
+  (migration) => migration.version <= 6,
 );
 
 const executor = createDbExecutor(db);
@@ -89,20 +100,22 @@ beforeEach(async () => {
   if (result.observedVersion === 0) {
     await seedLegacyCapturedVersion();
   }
-  // Upgrade to the real append-only plan — on the first run ONLY 0006 is
+  // Upgrade to the 0006-stopped plan — on the first run ONLY 0006 is
   // pending; on later tests this is an idempotent no-op. Either way the
-  // database ends at version 6.
-  const upgrade = await applyMigrations(db);
-  expect(upgrade.finalVersion).toBe(6);
+  // 0006 shape is present: the version is 6 on the first run, and 7 on
+  // later runs (the first test's full-plan assertion already landed the
+  // database at 7 — the stopped plan never rolls it back).
+  const upgrade = await applyMigrations(db, V6_ONLY);
+  expect(upgrade.finalVersion).toBeGreaterThanOrEqual(6);
 });
 
 describe('R1.22 — migration 0006: editorial→post provenance (schema 5 → 6)', () => {
   it('applies exactly 0006 as the only pending step on a fresh schema-v5 database', async () => {
     // This assertion is meaningful ONLY on the file's first run (storage
     // persists across tests within the file); the beforeEach already
-    // upgraded the database, so the honest re-derivation is: the full plan
-    // applied nothing further and the version/migration-id pair is 6/0006.
-    const rerun = await applyMigrations(db);
+    // upgraded the database, so the honest re-derivation is: the 0006-stopped
+    // plan applied nothing further and the version/migration-id pair is 6/0006.
+    const rerun = await applyMigrations(db, V6_ONLY);
     expect(rerun.applied).toEqual([]);
     expect(rerun.finalVersion).toBe(6);
     expect(await appliedSchemaVersion()).toBe(6);
@@ -110,6 +123,19 @@ describe('R1.22 — migration 0006: editorial→post provenance (schema 5 → 6)
       sql: `SELECT value FROM schema_metadata WHERE key = 'migration_id'`,
     });
     expect(idRow?.value).toBe('0006_admin_post_editorial_source');
+
+    // The FULL plan continues the linear chain past 0006: exactly 0007 is
+    // pending (first run) and the database lands at version 7 with the
+    // 0007 migration id. Later tests in this file observe the v7 state;
+    // the 0006 provenance contracts below are unaffected by 0007.
+    const full = await applyMigrations(db);
+    expect(full.applied.map((migration) => migration.id)).toEqual(['0007_inbound_pipeline']);
+    expect(full.finalVersion).toBe(7);
+    expect(await appliedSchemaVersion()).toBe(7);
+    const fullIdRow = await executor.first<{ value: string }>({
+      sql: `SELECT value FROM schema_metadata WHERE key = 'migration_id'`,
+    });
+    expect(fullIdRow?.value).toBe('0007_inbound_pipeline');
   });
 
   it('preserves every legacy captured row byte-identically with NULL editorial provenance', async () => {
@@ -203,8 +229,11 @@ describe('R1.22 — migration 0006: editorial→post provenance (schema 5 → 6)
   });
 
   it('re-running the full plan is a no-op (append-only idempotence)', async () => {
+    // Land at the linear final state first (this test must hold even when
+    // run alone, without the first test having applied 0007 already).
+    await applyMigrations(db);
     const rerun = await applyMigrations(db);
     expect(rerun.applied).toEqual([]);
-    expect(rerun.finalVersion).toBe(6);
+    expect(rerun.finalVersion).toBe(7);
   });
 });

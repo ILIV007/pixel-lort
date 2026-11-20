@@ -14,8 +14,12 @@ import { findOpenCaptureSession } from '../../src/adapters/db/admin-post-store';
  * REAL D1:
  * - registration happens ONLY with the `draft.create` permission, in a
  *   PRIVATE chat, from a FRESH (non-edited) message;
- * - an ordinary admin message OUTSIDE a session creates and changes NO
- *   post data and produces NO feedback (legacy parity);
+ * - Slice 4: an ordinary admin message OUTSIDE a session creates NO
+ *   admin-post DRAFT data — but it no longer stays silent either: it
+ *   enters the inbound pipeline (DESIGN §10.1/§10.2), which answers per
+ *   the publish mode (here: live publish off -> DISABLED reply). Offline
+ *   (no BOT_TOKEN) that reply cannot be delivered -> honest 503, and
+ *   nothing is published or recorded;
  * - inside a session, edits / media / non-text / oversize inputs are
  *   rejected explicitly and never store anything;
  * - /post_cancel always closes the session; /post_status always reveals it.
@@ -91,6 +95,13 @@ async function versionCount(): Promise<number> {
   return row?.count ?? 0;
 }
 
+async function tableCount(table: string): Promise<number> {
+  const row = await executor.first<{ count: number }>({
+    sql: `SELECT COUNT(*) AS count FROM ${table}`,
+  });
+  return row?.count ?? 0;
+}
+
 beforeEach(async () => {
   await applyMigrations(env.DB);
   executor = createDbExecutor(env.DB);
@@ -110,12 +121,18 @@ beforeEach(async () => {
 });
 
 describe('R1.20-R1 — the explicit capture session (real webhook, real D1)', () => {
-  it('an ordinary admin message OUTSIDE a session creates NO post data and stays silent', async () => {
+  it('an ordinary admin message OUTSIDE a session creates NO admin-post draft data (it enters the inbound pipeline)', async () => {
     await seedAdmin(EDITOR_ID, 'editor');
     const outcome = await deliver(FLAG_ON_ENV, textUpdate(9100, EDITOR_ID, 'یک پیام عادی'));
-    // No session -> silent legacy noop: no reply (200), nothing stored.
-    expect(outcome.status).toBe(200);
+    // Slice 4: no session -> the message enters the inbound pipeline, which
+    // answers per the publish mode (live publish off -> DISABLED reply).
+    // Offline that reply cannot be delivered (honest 503), and the live
+    // gate stops before any send or record: no draft data, no published
+    // post, no approval row.
+    expect(outcome.status).toBe(503);
     expect(await versionCount()).toBe(0);
+    expect(await tableCount('published_posts')).toBe(0);
+    expect(await tableCount('inbound_approvals')).toBe(0);
     expect(
       await executor.first<{ count: number }>({
         sql: 'SELECT COUNT(*) AS count FROM admin_post_drafts',
@@ -143,11 +160,14 @@ describe('R1.20-R1 — the explicit capture session (real webhook, real D1)', ()
     await deliver(FLAG_ON_ENV, textUpdate(9105, EDITOR_ID, '/post_cancel'));
     expect(await findOpenCaptureSession(executor, EDITOR_ID)).toBeNull();
 
-    // The NEXT ordinary message is an ordinary message again — silent,
-    // no new version, no state change.
+    // The NEXT ordinary message is an ordinary message again — no new
+    // version, no state change. Slice 4: it enters the inbound pipeline
+    // instead of staying silent (offline -> the DISABLED reply cannot be
+    // delivered, honest 503), and the live gate records nothing.
     const after = await deliver(FLAG_ON_ENV, textUpdate(9106, EDITOR_ID, 'پیام عادی بعدی'));
-    expect(after.status).toBe(200);
+    expect(after.status).toBe(503);
     expect(await versionCount()).toBe(2);
+    expect(await tableCount('published_posts')).toBe(0);
     const draft = await executor.first<{ status: string }>({
       sql: 'SELECT status FROM admin_post_drafts',
     });
@@ -168,9 +188,11 @@ describe('R1.20-R1 — the explicit capture session (real webhook, real D1)', ()
       // The localized insufficient_permission denial is an outbound reply.
       expect(denied.status).toBe(503);
       expect(await findOpenCaptureSession(executor, id)).toBeNull();
-      // Even so, a plain text stays a silent ordinary message.
+      // Even so, a plain text enters the inbound pipeline (slice 4) — no
+      // capture session, no draft data; offline the reply is undeliverable.
       const outcome = await deliver(FLAG_ON_ENV, textUpdate(updateId + 10, id, 'متن'));
-      expect(outcome.status).toBe(200);
+      expect(outcome.status).toBe(503);
+      expect(await tableCount('published_posts')).toBe(0);
     }
     expect(await versionCount()).toBe(0);
   });

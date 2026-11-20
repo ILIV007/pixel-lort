@@ -18,7 +18,8 @@ import { MIGRATIONS, applyMigrations, splitSqlStatements } from '../helpers/migr
 
 const db: D1Database = env.DB;
 
-/** All 27 approved blueprint tables + the application `schema_metadata` table. */
+/** All 27 approved blueprint tables + the application `schema_metadata` table
+ *  + the 5 admin-post tables (0005) + the 2 inbound tables (0007). */
 const EXPECTED_TABLES: readonly string[] = [
   'admins',
   'admin_action_tokens',
@@ -38,11 +39,13 @@ const EXPECTED_TABLES: readonly string[] = [
   'entities',
   'entity_aliases',
   'evidence',
+  'inbound_approvals',
   'jobs',
   'media_assets',
   'media_usages',
   'publications',
   'publication_messages',
+  'published_posts',
   'schema_metadata',
   'settings',
   'source_items',
@@ -57,7 +60,8 @@ const EXPECTED_TABLES: readonly string[] = [
 
 /** All 29 approved blueprint indexes + the Phase 2A lifecycle index (0002)
  *  + the Phase 3 DLQ-reconciliation index (0003) + the R09 ownership index
- *  (0004) + the R1.20-R admin-post pipeline indexes (0005). */
+ *  (0004) + the R1.20-R admin-post pipeline indexes (0005) + the editorial
+ *  provenance index (0006) + the slice-4 inbound indexes (0007). */
 const EXPECTED_INDEXES: readonly string[] = [
   'idx_admin_post_drafts_creator',
   'idx_admin_post_preview_sessions_source',
@@ -75,6 +79,8 @@ const EXPECTED_INDEXES: readonly string[] = [
   'idx_evidence_source',
   'idx_entity_alias_lookup',
   'idx_fingerprints_story',
+  'idx_inbound_approvals_pending',
+  'idx_inbound_approvals_state',
   'idx_jobs_aggregate',
   'idx_jobs_dlq_pending',
   'idx_jobs_due',
@@ -85,6 +91,8 @@ const EXPECTED_INDEXES: readonly string[] = [
   'idx_media_visual',
   'idx_publications_due',
   'idx_publications_story',
+  'idx_published_posts_created',
+  'idx_published_posts_source',
   'idx_reputation_source_time',
   'idx_source_items_hash',
   'idx_source_items_status',
@@ -130,15 +138,15 @@ beforeEach(async () => {
 });
 
 describe('migration application', () => {
-  it('applies every migration as an atomic batch and reports metadata (schema v6, linear chain)', async () => {
+  it('applies every migration as an atomic batch and reports metadata (schema v7, linear chain)', async () => {
     expect(await namedTables()).toEqual([...EXPECTED_TABLES].sort());
 
     const metadata = await db
       .prepare(`SELECT key, value FROM schema_metadata ORDER BY key`)
       .all<{ key: string; value: string }>();
     const byKey = new Map(metadata.results.map((row) => [row.key, row.value]));
-    expect(byKey.get('schema_version')).toBe('6');
-    expect(byKey.get('migration_id')).toBe('0006_admin_post_editorial_source');
+    expect(byKey.get('schema_version')).toBe('7');
+    expect(byKey.get('migration_id')).toBe('0007_inbound_pipeline');
     expect(byKey.get('applied_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -164,15 +172,15 @@ describe('migration application', () => {
 });
 
 describe('schema contracts', () => {
-  it('creates exactly the 33 expected tables (27 approved + schema_metadata + 5 admin-post)', async () => {
+  it('creates exactly the 35 expected tables (27 approved + schema_metadata + 5 admin-post + 2 inbound)', async () => {
     const tables = await namedTables();
-    expect(tables).toHaveLength(33);
+    expect(tables).toHaveLength(35);
     expect(tables).toEqual([...EXPECTED_TABLES].sort());
   });
 
-  it('creates exactly the 38 expected indexes (29 approved + lifecycle + DLQ + ownership + 5 admin-post + 1 editorial provenance)', async () => {
+  it('creates exactly the 42 expected indexes (29 approved + lifecycle + DLQ + ownership + 5 admin-post + 1 editorial provenance + 4 inbound)', async () => {
     const indexes = await namedIndexes();
-    expect(indexes).toHaveLength(38);
+    expect(indexes).toHaveLength(42);
     expect(indexes).toEqual([...EXPECTED_INDEXES].sort());
   });
 

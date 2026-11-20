@@ -1793,6 +1793,42 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       start/capture paths. Settings only — no posts are sent and no
       publishing/scheduler path is enabled. 36 REAL-D1 tests registered
       in test:db.
+- [x] Slice 4 — inbound AI-admin pipeline (app 1.42.0, schema 7 — DDL
+      0007): an owner-sent post in the bot's PV flows clean -> classify
+      (14 gaming categories, signal-only leak/rumor/crack) -> AI rewrite
+      with the Pixel persona under ai-policy-v2 (Gemma primary, Qwen 3.8
+      alternate, Gemini unwired; any failure falls back to the cleaned
+      text — never fabricates) -> preservation check (every URL, version,
+      price, platform, date must survive or the rewrite is dropped) ->
+      Persian format + normalization -> rich decision (rich only when
+      the source carried entities AND the text was not rewritten; a
+      definitive rich failure falls back to classic HTML for the same
+      part, an uncertain failure is never retried) -> route per mode
+      (`auto` direct; `safe-auto` sends signal-only categories to
+      approval; `approval` shows a 24h-expiring preview with single-use
+      approve/reject tokens; `paused` rejects with "bot is off", nothing
+      queued) -> publish + PV copy + a `published_posts` row, so an edit
+      of the source message re-runs the pipeline and edits the channel
+      post in place (same shape) or deletes + re-sends (shape changed);
+      edits override every mode including paused, and the media file
+      itself can never change through an edit. Owner posts never consume
+      the daily cap — they are recorded in the separate `daily_posts_owner`
+      bucket and stay visible in stats. Documents and albums are rejected
+      explicitly (slice-8 media work, never silent drops); magnet links
+      are never published. Dedupe: the webhook update_id atomic claim
+      plus one pending approval per source message (partial unique index)
+      and one published row per source message. Migration 0007 adds
+      `published_posts` + `inbound_approvals` (append-only, CHECKs +
+      indexes enforced at the database level). Wiring: the admin-post
+      capture delegates to the pipeline when no session is open; the
+      ingress routes `inbound.*` callbacks through the action-aware
+      dispatcher AND through a pre-read in the `admin_post_callback`
+      path (the router sends every `a:` callback to the admin-post
+      service unless a dispatcher gate is on — the pre-read keeps
+      inbound tokens from being burned by the wrong service). No live
+      flags flipped; live end-to-end publishing stays slice 8's job.
+      45 unit + 26 REAL-D1 tests registered in test:db (plus 1
+      owner-stats case in the admin-panel suite).
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ◒ (implemented on this branch, draft PR #11; PARTIAL — zod GHSA closed at runtime, dev advisories fixed by overrides)

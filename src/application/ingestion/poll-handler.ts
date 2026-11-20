@@ -216,6 +216,8 @@ export function createSourcePollHandler(
       // retired v4-with-0005-id shape (admin post tables WITHOUT the
       // ownership column) stays legacy. Anything unreadable/unknown stops
       // before every effect.
+      // Slice 4: version 7 (0007 on top of 0006) proves the same
+      // ownership state plus the inbound pipeline tables.
       const capability = await resolveSchemaCapability(options.executor);
       if (capability.kind === 'unresolved') {
         options.logger?.warn('ingestion.poll.capability_unresolved', {
@@ -226,7 +228,8 @@ export function createSourcePollHandler(
       const ownershipEnabled =
         capability.kind === 'known_v4_ownership' ||
         capability.kind === 'known_v5_admin_post' ||
-        capability.kind === 'known_v6_editorial_post';
+        capability.kind === 'known_v6_editorial_post' ||
+        capability.kind === 'known_v7_inbound';
       let ownedHoldUntilMs: number | null = null;
       if (ownershipEnabled) {
         const acquisition = await acquirePollOwnership(options.executor, {

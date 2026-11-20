@@ -319,8 +319,14 @@ export type TelegramAction =
       readonly role: AdminRole;
       readonly uiLanguage: AdminUiLanguage;
       readonly updateId: number;
-      /** Fresh message vs edit — an edit NEVER enters the pipeline. */
+      /** Fresh message vs edit — an edit NEVER enters the capture session. */
       readonly kind: 'message' | 'edited_message';
+      /**
+       * Slice 4: the source message id (present for message/edited_message)
+       * — the inbound pipeline's edit anchor when no capture session is
+       * open. Absent for updates without a message id.
+       */
+      readonly sourceMessageId?: number;
       /** Bounded text when present; undefined = absent or beyond the 4096 bound. */
       readonly text: string | undefined;
       readonly hasText: boolean;
@@ -1110,6 +1116,7 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
             uiLanguage: uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE,
             updateId: update.updateId,
             kind: 'edited_message',
+            sourceMessageId: update.messageId,
             text: update.text,
             hasText: update.hasText === true,
             richText: update.richText,
@@ -1133,6 +1140,7 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
           uiLanguage: uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE,
           updateId: update.updateId,
           kind: 'message',
+          sourceMessageId: update.messageId,
           text: update.text,
           hasText: update.hasText === true,
           richText: update.richText,

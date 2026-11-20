@@ -33,10 +33,10 @@ const UNKNOWN_ID = 2000000006;
 /** A fake Bot API that ALSO captures reply_markup and callback answers. */
 function createCapturingBotApi(): {
   client: TelegramBotApiClient;
-  sends: { chatId: number; text: string; keyboardTokens: string[] }[];
+  sends: { chatId: number | string; text: string; keyboardTokens: string[] }[];
   answers: string[];
 } {
-  const sends: { chatId: number; text: string; keyboardTokens: string[] }[] = [];
+  const sends: { chatId: number | string; text: string; keyboardTokens: string[] }[] = [];
   const answers: string[] = [];
   const client: TelegramBotApiClient = {
     async getMe() {

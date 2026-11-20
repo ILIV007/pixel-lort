@@ -4,6 +4,7 @@ import migration0003 from '../../migrations/0003_job_dlq_delivery.sql?raw';
 import migration0004Candidate from '../../migrations/0004_source_poll_ownership.sql?raw';
 import migration0005 from '../../migrations/0005_admin_post_pipeline.sql?raw';
 import migration0006 from '../../migrations/0006_admin_post_editorial_source.sql?raw';
+import migration0007 from '../../migrations/0007_inbound_pipeline.sql?raw';
 import migration0002Synthetic from '../fixtures/migration-0002-synthetic.sql?raw';
 
 /**
@@ -65,9 +66,13 @@ export interface MigrationDescriptor {
  *      provenance: nullable source_update_id + the per-version editorial
  *      link + the partial unique conversion index, ON TOP of the admin post
  *      pipeline)
+ *   -> 0007_inbound_pipeline (v7, the slice-4 inbound AI-admin pipeline:
+ *      published_posts (the source-message edit anchor + channel message
+ *      ids) + inbound_approvals (the 24-hour approval preview with its
+ *      guarded state machine), ON TOP of the editorial provenance)
  * The order here is exactly the order real Wrangler applies the files
  * (lexical filename order, one atomic batch per file), so a database that
- * walked the whole chain reports schema 6 with ALL capabilities present.
+ * walked the whole chain reports schema 7 with ALL capabilities present.
  * All candidates remain LOCAL-ONLY until the owner separately authorizes
  * remote application.
  *
@@ -82,6 +87,7 @@ export const MIGRATIONS: readonly MigrationDescriptor[] = [
   { id: '0004_source_poll_ownership', version: 4, sql: migration0004Candidate },
   { id: '0005_admin_post_pipeline', version: 5, sql: migration0005 },
   { id: '0006_admin_post_editorial_source', version: 6, sql: migration0006 },
+  { id: '0007_inbound_pipeline', version: 7, sql: migration0007 },
 ];
 
 /**

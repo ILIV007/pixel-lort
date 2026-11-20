@@ -113,6 +113,8 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
   // i.e. before every source/job/state effect. An unreadable capability
   // must never be interpreted as permission to run unfenced legacy
   // ingestion (CE1).
+  // Slice 4: v7 (0007 on top of 0006) is the new LINEAR final state and
+  // takes the ownership path exactly like v6.
   const capability = await resolveSchemaCapability(executor);
   if (capability.kind === 'unresolved') {
     logger?.warn('ingestion.schedule.capability_unresolved', {
@@ -123,7 +125,8 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
   const ownershipEnabled =
     capability.kind === 'known_v4_ownership' ||
     capability.kind === 'known_v5_admin_post' ||
-    capability.kind === 'known_v6_editorial_post';
+    capability.kind === 'known_v6_editorial_post' ||
+    capability.kind === 'known_v7_inbound';
 
   // Catalog completeness probe (R08): which registry sources are missing
   // a `sources` row or a `source_state` row — even when the table is NOT

@@ -18,6 +18,7 @@ import {
   checkPublishGate,
   readPublishingSettings,
   readTodayCounts,
+  recordOwnerPublication,
   recordPublication,
   setDailyCap,
   setPublishMode,
@@ -65,10 +66,10 @@ const TOMORROW_TEHRAN = '2025-10-10';
 /** A fake Bot API that ALSO captures reply_markup and callback answers. */
 function createCapturingBotApi(): {
   client: TelegramBotApiClient;
-  sends: { chatId: number; text: string; keyboardTokens: string[] }[];
+  sends: { chatId: number | string; text: string; keyboardTokens: string[] }[];
   answers: string[];
 } {
-  const sends: { chatId: number; text: string; keyboardTokens: string[] }[] = [];
+  const sends: { chatId: number | string; text: string; keyboardTokens: string[] }[] = [];
   const answers: string[] = [];
   const client: TelegramBotApiClient = {
     async getMe() {
@@ -509,6 +510,7 @@ describe('the daily cap: next-day rule, D1 counter, Tehran-midnight reset, P0 by
       tehranDate: TODAY_TEHRAN,
       counted: 0,
       p0Bypass: 0,
+      owner: 0,
       published: 0,
     });
     await recordPublication(executor, { isP0: false, nowMs: NOW });
@@ -518,14 +520,34 @@ describe('the daily cap: next-day rule, D1 counter, Tehran-midnight reset, P0 by
       tehranDate: TODAY_TEHRAN,
       counted: 2,
       p0Bypass: 1,
+      owner: 0,
       published: 3,
     });
     expect(await readTodayCounts(executor, { nowMs: NOW + DAY_MS })).toEqual({
       tehranDate: TOMORROW_TEHRAN,
       counted: 0,
       p0Bypass: 0,
+      owner: 0,
       published: 0,
     });
+  });
+
+  it('counts owner-sent inbound posts separately: visible in stats, never consuming the cap', async () => {
+    const executor = createDbExecutor(env.DB);
+    await recordOwnerPublication(executor, { nowMs: NOW });
+    await recordOwnerPublication(executor, { nowMs: NOW });
+    const counts = await readTodayCounts(executor, { nowMs: NOW });
+    expect(counts).toEqual({
+      tehranDate: TODAY_TEHRAN,
+      counted: 0,
+      p0Bypass: 0,
+      owner: 2,
+      published: 2,
+    });
+    // The gate still sees an empty cap: owner posts never consume it.
+    const gate = await checkPublishGate(executor, { priority: 'normal', nowMs: NOW });
+    expect(gate.decision).toEqual({ allowed: true, bypass: false, p0: false });
+    expect(gate.counted).toBe(0);
   });
 
   it('the cap binds at 15, a P0 still publishes past it and is marked', async () => {
@@ -541,7 +563,13 @@ describe('the daily cap: next-day rule, D1 counter, Tehran-midnight reset, P0 by
     expect(p0.decision).toEqual({ allowed: true, bypass: true, p0: true });
     await recordPublication(executor, { isP0: true, nowMs: NOW });
     const after = await readTodayCounts(executor, { nowMs: NOW });
-    expect(after).toEqual({ tehranDate: TODAY_TEHRAN, counted: 15, p0Bypass: 1, published: 16 });
+    expect(after).toEqual({
+      tehranDate: TODAY_TEHRAN,
+      counted: 15,
+      p0Bypass: 1,
+      owner: 0,
+      published: 16,
+    });
   });
 });
 

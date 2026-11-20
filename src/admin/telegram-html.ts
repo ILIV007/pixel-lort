@@ -173,6 +173,11 @@ export function telegramCode(text: string): TelegramSafeHtml {
   return `<code>${escapeTelegramHtml(text)}</code>` as TelegramSafeHtml;
 }
 
+/** Emit a <blockquote>…</blockquote> fragment with escaped content. */
+export function telegramBlockquote(text: string): TelegramSafeHtml {
+  return `<blockquote>${escapeTelegramHtml(text)}</blockquote>` as TelegramSafeHtml;
+}
+
 /**
  * Emit an <a href="…">…</a> fragment. The target must validate as a safe
  * https URL (URL-parsed, credential-free, hazard-free — ADR-0029); the

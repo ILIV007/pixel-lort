@@ -106,16 +106,17 @@ describe('migration 0002 — populated schema-v1 database upgrades to schema v2'
       '0004_source_poll_ownership',
       '0005_admin_post_pipeline',
       '0006_admin_post_editorial_source',
+      '0007_inbound_pipeline',
     ]);
-    expect(result.finalVersion).toBe(6);
-    expect(await appliedSchemaVersion()).toBe(6);
+    expect(result.finalVersion).toBe(7);
+    expect(await appliedSchemaVersion()).toBe(7);
 
     const metadata = await db
       .prepare(`SELECT key, value FROM schema_metadata ORDER BY key`)
       .all<{ key: string; value: string }>();
     const byKey = new Map(metadata.results.map((row) => [row.key, row.value]));
-    expect(byKey.get('schema_version')).toBe('6');
-    expect(byKey.get('migration_id')).toBe('0006_admin_post_editorial_source');
+    expect(byKey.get('schema_version')).toBe('7');
+    expect(byKey.get('migration_id')).toBe('0007_inbound_pipeline');
     expect(byKey.get('applied_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     // The UPDATE statements did not duplicate metadata rows.
     expect(metadata.results).toHaveLength(3);
@@ -191,10 +192,10 @@ describe('migration 0002 — populated schema-v1 database upgrades to schema v2'
     await applyMigrations(db);
     const again = await applyMigrations(db);
 
-    expect(again.observedVersion).toBe(6);
+    expect(again.observedVersion).toBe(7);
     expect(again.applied).toEqual([]);
-    expect(again.finalVersion).toBe(6);
-    expect(await appliedSchemaVersion()).toBe(6);
+    expect(again.finalVersion).toBe(7);
+    expect(await appliedSchemaVersion()).toBe(7);
 
     // No duplicate rows anywhere: legacy rows are exactly the three seeded.
     const updates = await db

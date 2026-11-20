@@ -130,6 +130,7 @@ import type { AdminQueueViewService } from './publishing/queue-view-service';
 import type { AdminQueueDispositionService } from './publishing/queue-disposition-service';
 import type { AdminStoryViewService } from './publishing/story-view-service';
 import type { AdminPostButtons, AdminPostService } from './admin-post/admin-post-service';
+import type { InboundPipelineService } from './inbound/inbound-pipeline-service';
 import type { AdminAlbumCaptureService } from './media/album-capture-service';
 import type { AdminManageService } from './admin-manage/admin-manage-service';
 import type { AdminPanelService } from './admin-panel/admin-panel-service';
@@ -244,6 +245,14 @@ export interface TelegramIngressDeps {
    */
   readonly adminPost?: AdminPostService;
   /**
+   * Slice 4: the injected inbound AI-admin pipeline service that owns the
+   * `inbound.*` token callbacks (approval previews) the dispatcher routes.
+   * It is also the delegate of `adminPost.capture` when no capture session
+   * is open — the wiring lives in the admin-post service, not here. Absent
+   * = retryable wiring failure, never a silent skip.
+   */
+  readonly inbound?: InboundPipelineService;
+  /**
    * Issue #8: the injected owner-only admin management service that
    * executes the typed `admin_manage_*` actions the router emits while
    * the `ADMIN_MANAGE_ENABLED` gate is ON, and the `admins.*` token
@@ -290,6 +299,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     adminPost,
     adminManage,
     adminPanel,
+    inbound,
     clock,
     logger,
   } = deps;
@@ -407,6 +417,34 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     }
 
     if (action.type === 'admin_post_callback') {
+      // Slice 4: an `inbound.*` token (approval preview) can arrive here
+      // when only the admin-post gate is on — the router sends every `a:`
+      // callback to the admin-post service unless a dispatcher gate
+      // (panel/queue/admins) is on. Pre-read the token's server-side
+      // action (no consume) and hand inbound tokens to the inbound
+      // service; every other token keeps the exact R1.20-R admin-post
+      // path below, including its invalid-token wording.
+      const tokenRow = await executor.first<{ readonly action: string }>({
+        sql: 'SELECT action FROM admin_action_tokens WHERE id = ?',
+        params: [action.token],
+      });
+      if (tokenRow !== null && tokenRow.action.startsWith('inbound.')) {
+        if (inbound === undefined) {
+          logger.warn('telegram.action.inbound_unavailable', { action: action.type });
+          throw new AppError('service_unavailable');
+        }
+        const inboundResult = await inbound.handleCallback({
+          telegramUserId: action.telegramUserId,
+          role: action.role,
+          uiLanguage: action.uiLanguage,
+          token: action.token,
+        });
+        await requireBotApi('admin_post_callback').answerCallbackQuery({
+          callbackQueryId: action.callbackQueryId,
+          text: inboundResult.callbackText,
+        });
+        return;
+      }
       const result = await adminPost.handleCallback({
         telegramUserId: action.telegramUserId,
         role: action.role,
@@ -433,11 +471,13 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
           });
         case 'admin_post_capture':
           return adminPost.capture({
+            chatId: action.chatId,
             telegramUserId: action.telegramUserId,
             role: action.role,
             uiLanguage: action.uiLanguage,
             updateId: action.updateId,
             kind: action.kind,
+            sourceMessageId: action.sourceMessageId,
             text: action.text,
             hasText: action.hasText,
             richText: action.richText,
@@ -493,8 +533,15 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
         // anywhere); the control message (label + buttons) travels separately
         // so the content text and its UTF-16 offsets are never altered by
         // admin surface data.
-        const rich = requireRichApi('admin_post_preview');
-        await sendAdminPostContent(rich, action.chatId, result.content);
+        // Slice 4: a classic-decided preview carries `classicText` instead —
+        // it renders as classic HTML so the preview shows the exact form
+        // that will be published.
+        if (result.classicText !== undefined) {
+          await sendSafely(action.chatId, result.classicText, 'admin_post_preview_classic');
+        } else {
+          const rich = requireRichApi('admin_post_preview');
+          await sendAdminPostContent(rich, action.chatId, result.content);
+        }
         await sendSafely(action.chatId, result.control, 'admin_post_control', result.buttons);
         return;
       }
@@ -751,6 +798,27 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
             role: action.role,
             uiLanguage: ui,
             token: action.token,
+          });
+          return;
+        }
+        if (tokenRow.action.startsWith('inbound.')) {
+          // Slice 4: the inbound pipeline service owns these tokens
+          // (approval previews); its own consume/validate flow applies
+          // (the token is NOT consumed through any other path). Absent
+          // service = the honest retryable wiring failure.
+          if (inbound === undefined) {
+            logger.warn('telegram.action.inbound_unavailable', { action: action.type });
+            throw new AppError('service_unavailable');
+          }
+          const result = await inbound.handleCallback({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: ui,
+            token: action.token,
+          });
+          await requireBotApi('action_token_callback').answerCallbackQuery({
+            callbackQueryId: action.callbackQueryId,
+            text: result.callbackText,
           });
           return;
         }

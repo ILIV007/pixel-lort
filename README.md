@@ -11,12 +11,12 @@ scheduling policies.
 - **Timezone:** `Asia/Tehran`
 - **Authoritative specification:** [`docs/blueprint/v1/`](docs/blueprint/README.md)
 
-## Current implementation status — v1.41.0 / schema 6 (merged to `main`)
+## Current implementation status — v1.42.0 / schema 7 (merged to `main`)
 
 Phases 0, 1A, 1B-preview, 2A, 2B, and 3 are done. PR #11 (v1.41.0 /
 schema 6) is merged to `main` (commit 5517390, repo rename to
 `pixellores`); Phases 4–13 are implemented on `main` behind fail-closed
-flags, and the live preview runs `main` (v1.41.0 / schema 6). The Phase
+flags, and the live preview runs `main` (v1.42.0 / schema 7). The Phase
 2A record below is the historical account of that phase; the current
 phase state lives in `docs/ROADMAP.md`.
 

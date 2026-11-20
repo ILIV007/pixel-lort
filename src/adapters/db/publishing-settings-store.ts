@@ -63,6 +63,12 @@ export const PUBLISHING_EVENT_SETTINGS_KEY = 'publishing.event_mode';
 export const PUBLICATION_BUDGET_SCOPE = 'publication';
 export const PUBLICATION_BUDGET_KEY = 'daily_posts';
 export const PUBLICATION_P0_BUDGET_KEY = 'daily_posts_p0';
+/**
+ * Slice 4 — owner-sent inbound posts are EXEMPT from the daily cap (DESIGN
+ * §9.2 proposal) but VISIBLE in stats: they count in their own bucket, never
+ * in `daily_posts`, so they can never consume the automatic cap.
+ */
+export const PUBLICATION_OWNER_BUDGET_KEY = 'daily_posts_owner';
 
 /** Deterministic audit actions (one per applied change). */
 export const PUBLISHING_AUDIT_ACTIONS = {
@@ -88,7 +94,9 @@ export interface TodayCounts {
   readonly counted: number;
   /** P0 publications that bypassed the cap. */
   readonly p0Bypass: number;
-  /** All publications today (counted + P0 bypass). */
+  /** Owner-sent inbound publications (cap-exempt, slice 4). */
+  readonly owner: number;
+  /** All publications today (counted + P0 bypass + owner). */
   readonly published: number;
 }
 
@@ -536,7 +544,8 @@ export async function readTodayCounts(
   const tehranDate = tehranBudgetDay(input.nowMs);
   const counted = await readBudgetRow(executor, PUBLICATION_BUDGET_KEY, tehranDate);
   const p0Bypass = await readBudgetRow(executor, PUBLICATION_P0_BUDGET_KEY, tehranDate);
-  return { tehranDate, counted, p0Bypass, published: counted + p0Bypass };
+  const owner = await readBudgetRow(executor, PUBLICATION_OWNER_BUDGET_KEY, tehranDate);
+  return { tehranDate, counted, p0Bypass, owner, published: counted + p0Bypass + owner };
 }
 
 /**
@@ -573,6 +582,45 @@ export async function recordPublication(
         input.nowMs,
         PUBLICATION_BUDGET_SCOPE,
         budgetKey,
+        tehranDate,
+      ],
+    },
+  ]);
+  return readTodayCounts(executor, input);
+}
+
+/**
+ * Slice 4 — record one successful OWNER-sent inbound publication in
+ * today's Tehran bucket. It increments ONLY the owner bucket: the post is
+ * visible in stats (`published`) but never consumes the automatic daily
+ * cap. Same UPDATE + INSERT atomic pair as `recordPublication`.
+ */
+export async function recordOwnerPublication(
+  executor: DbExecutor,
+  input: { readonly nowMs: number },
+): Promise<TodayCounts> {
+  const tehranDate = tehranBudgetDay(input.nowMs);
+  await executor.batch([
+    {
+      sql: `UPDATE budgets
+              SET requests = requests + 1, updated_at = ?
+            WHERE scope = ? AND budget_key = ? AND bucket_date = ?`,
+      params: [input.nowMs, PUBLICATION_BUDGET_SCOPE, PUBLICATION_OWNER_BUDGET_KEY, tehranDate],
+    },
+    {
+      sql: `INSERT INTO budgets (scope, budget_key, bucket_date, requests, input_tokens, output_tokens, bytes_transferred, updated_at)
+            SELECT ?, ?, ?, 1, 0, 0, 0, ?
+             WHERE NOT EXISTS (
+               SELECT 1 FROM budgets
+                WHERE scope = ? AND budget_key = ? AND bucket_date = ?
+             )`,
+      params: [
+        PUBLICATION_BUDGET_SCOPE,
+        PUBLICATION_OWNER_BUDGET_KEY,
+        tehranDate,
+        input.nowMs,
+        PUBLICATION_BUDGET_SCOPE,
+        PUBLICATION_OWNER_BUDGET_KEY,
         tehranDate,
       ],
     },

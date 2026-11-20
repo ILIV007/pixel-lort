@@ -55,15 +55,16 @@ it('an unknown applied version is NOT healthy for the application expecting the 
   // 0005 -> 5); the health gate must report healthy for the matching
   // expectation and reject an unknown version fail-closed.
   // R1.22: the shipped LOCAL-ONLY chain now ends at schema 6.
-  expect((await checkSchemaHealth(db, 6)).ok).toBe(true);
-  await env.DB.prepare("UPDATE schema_metadata SET value='7' WHERE key='schema_version'").run();
-  expect(await checkSchemaHealth(db, 6)).toMatchObject({
+  // Slice 4: the shipped LINEAR chain now ends at schema 7 (0007).
+  expect((await checkSchemaHealth(db, 7)).ok).toBe(true);
+  await env.DB.prepare("UPDATE schema_metadata SET value='8' WHERE key='schema_version'").run();
+  expect(await checkSchemaHealth(db, 7)).toMatchObject({
     ok: false,
     reason: 'schema_version_mismatch',
-    observedSchemaVersion: 7,
+    observedSchemaVersion: 8,
   });
   // Restore so later tests in this file observe the shipped version.
-  await env.DB.prepare("UPDATE schema_metadata SET value='6' WHERE key='schema_version'").run();
+  await env.DB.prepare("UPDATE schema_metadata SET value='7' WHERE key='schema_version'").run();
 });
 
 it('adding the partial unique index fails if legacy outstanding duplicates exist', async () => {
