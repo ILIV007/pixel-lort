@@ -486,7 +486,7 @@ describe('AI outcome mapping (ADR-0042 §5)', () => {
       classifyAiOutcome({
         kind: 'refusal',
         provider: 'workers-ai',
-        modelId: '@cf/meta/llama-3.1-8b-instruct-fp8',
+        modelId: '@cf/google/gemma-4-26b-a4b-it',
         reason: 'provider_safety_refusal',
         attempts: [],
       }),
@@ -527,7 +527,7 @@ describe('AI outcome mapping (ADR-0042 §5)', () => {
         usage: [
           {
             provider: 'workers-ai',
-            modelId: '@cf/meta/llama-3.1-8b-instruct-fp8',
+            modelId: '@cf/google/gemma-4-26b-a4b-it',
             promptVersion: 'pixel-news-draft-v1',
             inputTokens: 100,
             outputTokens: 30,
@@ -536,7 +536,7 @@ describe('AI outcome mapping (ADR-0042 §5)', () => {
         attempts: [
           {
             provider: 'workers-ai',
-            modelId: '@cf/meta/llama-3.1-8b-instruct-fp8',
+            modelId: '@cf/google/gemma-4-26b-a4b-it',
             promptVersion: 'pixel-news-draft-v1',
             outcome: 'succeeded',
             durationMs: 25,
@@ -548,7 +548,7 @@ describe('AI outcome mapping (ADR-0042 §5)', () => {
     );
     expect(observed).toMatchObject({
       provider: 'workers-ai',
-      model: '@cf/meta/llama-3.1-8b-instruct-fp8',
+      model: '@cf/google/gemma-4-26b-a4b-it',
       status: 'succeeded',
       inputTokens: 100,
       outputTokens: 30,
@@ -564,7 +564,7 @@ describe('AI outcome mapping (ADR-0042 §5)', () => {
         attempts: [
           {
             provider: 'workers-ai',
-            modelId: '@cf/meta/llama-3.1-8b-instruct-fp8',
+            modelId: '@cf/google/gemma-4-26b-a4b-it',
             promptVersion: 'pixel-news-draft-v1',
             outcome: 'invalid_output',
             durationMs: 12,
@@ -597,12 +597,12 @@ describe('AI outcome mapping (ADR-0042 §5)', () => {
       {
         kind: 'refusal',
         provider: 'workers-ai',
-        modelId: '@cf/qwen/qwen3-30b-a3b-fp8',
+        modelId: '@cf/qwen/qwen3.8-27b',
         reason: 'provider_safety_refusal',
         attempts: [
           {
             provider: 'workers-ai',
-            modelId: '@cf/qwen/qwen3-30b-a3b-fp8',
+            modelId: '@cf/qwen/qwen3.8-27b',
             promptVersion: 'pixel-news-draft-v1',
             outcome: 'refused',
             durationMs: 9,
@@ -614,7 +614,7 @@ describe('AI outcome mapping (ADR-0042 §5)', () => {
     );
     expect(observed).toMatchObject({
       provider: 'workers-ai',
-      model: '@cf/qwen/qwen3-30b-a3b-fp8',
+      model: '@cf/qwen/qwen3.8-27b',
       status: 'failed',
       errorCode: 'provider_safety_refusal',
     });

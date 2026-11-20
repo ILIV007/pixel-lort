@@ -3,6 +3,15 @@
 - **Status:** Implemented in owner round 1.10.6 (recovery round 1.10.6-R);
   runtime OFF by default. NOT a deployment, activation, or live-inference
   approval.
+- **Amendment 2026-11-20 (ai-policy-v2):** the two Workers AI ids this ADR
+  pinned (`@cf/meta/llama-3.1-8b-instruct-fp8`, `@cf/qwen/qwen3-30b-a3b-fp8`)
+  were retired by Cloudflare on 2026-11-20 (catalog
+  `planned_deprecation_date: 2026-11-20`). `src/domain/ai/policy.ts`
+  (`ai-policy-v2`) replaces them with `@cf/google/gemma-4-26b-a4b-it`
+  (primary) and `@cf/qwen/qwen3.8-27b` (alternate), each verified live
+  2026-11-20 via the Workers AI models endpoint and a live inference call.
+  The decision text below is the historical 1.10.6 record and is left
+  unchanged; the live allowlist is `ai-policy-v2`.
 - **Phase:** 6 (adapter foundation only; story engine, fact guard, durable
   caller wiring, and channel publishing are explicitly NOT included)
 - **Date:** 2026-10-28
