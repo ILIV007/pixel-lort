@@ -14,16 +14,26 @@
  * alternate", THIS version ships the lightweight 8B default plus the Qwen3
  * alternate; the 70B-fast candidate intentionally stays out of the active
  * list. Gemini: only gemini-2.5-flash-lite is listed, and its ELIGIBILITY
- * stays UNVERIFIED (see AI_PROVIDER_ELIGIBILITY_V1) — unsupported or
+ * stays UNVERIFIED (see AI_PROVIDER_ELIGIBILITY_V2) — unsupported or
  * unverified candidates stay disabled rather than inventing a free
  * entitlement. gemini-3.1-flash-lite is NOT listed: its support status was
  * not verifiable in this round.
+ *
+ * SUPERSEDED (ai-policy-v1, 2026-11-20): Cloudflare retired BOTH v1
+ * Workers AI ids on 2026-11-20 (the catalog lists
+ * `planned_deprecation_date: 2026-11-20` for each). ai-policy-v2 replaces
+ * them with @cf/google/gemma-4-26b-a4b-it (primary) and
+ * @cf/qwen/qwen3.8-27b (alternate). Both v2 ids were verified live on
+ * 2026-11-20 via the Cloudflare Workers AI models endpoint (catalog
+ * lookup, Text Generation, no deprecation date, no paid-plan gate) AND a
+ * live inference call each (HTTP 200, success true). glm-5.3 was
+ * considered and NOT adopted: the catalog marks it require_workers_paid.
  */
 
 import type { AiProvider } from './types';
 
 /** Version marker for the shipped allowlist/eligibility set. */
-export const AI_POLICY_VERSION = 'ai-policy-v1';
+export const AI_POLICY_VERSION = 'ai-policy-v2';
 
 /** Version marker for the shipped prompt contract (see ./prompt.ts). */
 export const AI_PROMPT_VERSION = 'pixel-news-draft-v1';
@@ -53,7 +63,7 @@ export interface AiModelRecord {
   readonly role: AiModelRole;
   /**
    * Gemini entries additionally require verified Free-tier eligibility
-   * (AI_PROVIDER_ELIGIBILITY_V1); `requiresEligibility` is false only for
+   * (AI_PROVIDER_ELIGIBILITY_V2); `requiresEligibility` is false only for
    * the Workers-AI binding path, whose gate is the binding + flag itself.
    */
   readonly requiresEligibility: boolean;
@@ -63,15 +73,15 @@ export interface AiModelRecord {
  * The ONLY models this policy version may call, in ladder order:
  * Workers AI primary → Workers AI alternate → (conditional) Gemini.
  */
-export const AI_MODEL_ALLOWLIST_V1: readonly AiModelRecord[] = [
+export const AI_MODEL_ALLOWLIST_V2: readonly AiModelRecord[] = [
   {
-    modelId: '@cf/meta/llama-3.1-8b-instruct-fp8',
+    modelId: '@cf/google/gemma-4-26b-a4b-it',
     provider: 'workers-ai',
     role: 'primary',
     requiresEligibility: false,
   },
   {
-    modelId: '@cf/qwen/qwen3-30b-a3b-fp8',
+    modelId: '@cf/qwen/qwen3.8-27b',
     provider: 'workers-ai',
     role: 'alternate',
     requiresEligibility: false,
@@ -95,7 +105,7 @@ export const AI_MODEL_ALLOWLIST_V1: readonly AiModelRecord[] = [
  * operator round verifies current official Free-tier docs and records the
  * verification. Unknown eligibility => typed deferred, zero network.
  */
-export const AI_PROVIDER_ELIGIBILITY_V1: Readonly<
+export const AI_PROVIDER_ELIGIBILITY_V2: Readonly<
   Record<AiProvider, 'binding_gated' | 'unverified_free_tier'>
 > = {
   'workers-ai': 'binding_gated',
@@ -118,12 +128,12 @@ export const AI_DAILY_REQUEST_ATTEMPT_CAPS: Readonly<Record<AiProvider, number>>
 
 /** All allowlist entries for one provider, in ladder order. */
 export function listModelsForProvider(provider: AiProvider): readonly AiModelRecord[] {
-  return AI_MODEL_ALLOWLIST_V1.filter((model) => model.provider === provider);
+  return AI_MODEL_ALLOWLIST_V2.filter((model) => model.provider === provider);
 }
 
 /** True iff the model id is in THIS policy version's allowlist. */
 export function isAllowedModel(provider: AiProvider, modelId: string): boolean {
-  return AI_MODEL_ALLOWLIST_V1.some(
+  return AI_MODEL_ALLOWLIST_V2.some(
     (model) => model.provider === provider && model.modelId === modelId,
   );
 }

@@ -222,7 +222,7 @@ describe('Gemini adapter — status and body classification', () => {
 
 describe('Workers AI adapter — binding boundary', () => {
   const BASE = {
-    modelId: '@cf/meta/llama-3.1-8b-instruct-fp8',
+    modelId: '@cf/google/gemma-4-26b-a4b-it',
     messages: [{ role: 'user' as const, content: 'x' }],
     maxOutputTokens: 768,
     deadlineAtMs: OK_DEADLINE,
@@ -283,7 +283,7 @@ describe('Workers AI adapter — binding boundary', () => {
     const outcome = await direct.complete(BASE);
     expect(outcome).toMatchObject({ kind: 'ok', rawText: '{"ok":true}' });
     expect(seen).toHaveLength(1);
-    expect(seen[0]?.model).toBe('@cf/meta/llama-3.1-8b-instruct-fp8');
+    expect(seen[0]?.model).toBe('@cf/google/gemma-4-26b-a4b-it');
     const inputs = seen[0]?.inputs as { messages: unknown[]; max_tokens: number };
     expect(inputs.max_tokens).toBe(768);
     expect(inputs.messages).toHaveLength(1);

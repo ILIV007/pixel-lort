@@ -2,7 +2,7 @@
  * Versioned policy/bounds for the `event_relation` task (Phase 5E-1 —
  * R1.17, ADR-0045). Immutable, testable constants — the shared provider
  * allowlist, eligibility and daily attempt caps are NOT changed by this
- * task (AI_MODEL_ALLOWLIST_V1 / AI_DAILY_REQUEST_ATTEMPT_CAPS stay the
+ * task (AI_MODEL_ALLOWLIST_V2 / AI_DAILY_REQUEST_ATTEMPT_CAPS stay the
  * single authority the task shares with drafting; no separate budget
  * bucket exists to bypass the shared provider cap).
  */

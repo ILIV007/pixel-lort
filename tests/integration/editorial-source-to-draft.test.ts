@@ -420,7 +420,7 @@ describe('scenario 1 — one news → story + source_report + evidence + ai_run 
     expect(aiRun).toMatchObject({
       task: 'news_draft',
       provider: 'workers-ai',
-      model: '@cf/meta/llama-3.1-8b-instruct-fp8',
+      model: '@cf/google/gemma-4-26b-a4b-it',
       prompt_version: 'pixel-news-draft-v1',
       status: 'succeeded',
       input_tokens: 42,

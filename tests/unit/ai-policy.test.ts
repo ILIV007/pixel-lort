@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   AI_BOUNDS,
   AI_DAILY_REQUEST_ATTEMPT_CAPS,
-  AI_MODEL_ALLOWLIST_V1,
+  AI_MODEL_ALLOWLIST_V2,
   AI_POLICY_VERSION,
   AI_PROMPT_VERSION,
-  AI_PROVIDER_ELIGIBILITY_V1,
+  AI_PROVIDER_ELIGIBILITY_V2,
   isAllowedModel,
   listModelsForProvider,
 } from '../../src/domain/ai/policy';
@@ -21,9 +21,9 @@ import {
  * ADR-0041). These pin the fail-closed/free-only policy surface.
  */
 
-describe('AI model policy (ai-policy-v1)', () => {
+describe('AI model policy (ai-policy-v2)', () => {
   it('ships a small immutable allowlist: CF primary + CF alternate + conditional Gemini', () => {
-    expect(AI_MODEL_ALLOWLIST_V1).toHaveLength(3);
+    expect(AI_MODEL_ALLOWLIST_V2).toHaveLength(3);
     expect(listModelsForProvider('workers-ai').map((model) => model.role)).toEqual([
       'primary',
       'alternate',
@@ -32,7 +32,7 @@ describe('AI model policy (ai-policy-v1)', () => {
   });
 
   it('uses only explicit model ids — never the literal "auto"', () => {
-    for (const model of AI_MODEL_ALLOWLIST_V1) {
+    for (const model of AI_MODEL_ALLOWLIST_V2) {
       expect(model.modelId).not.toBe('auto');
       expect(model.modelId.length).toBeGreaterThan(0);
     }
@@ -42,16 +42,22 @@ describe('AI model policy (ai-policy-v1)', () => {
     const gemini = listModelsForProvider('gemini');
     expect(gemini).toHaveLength(1);
     expect(gemini[0]?.requiresEligibility).toBe(true);
-    expect(AI_PROVIDER_ELIGIBILITY_V1.gemini).toBe('unverified_free_tier');
-    expect(AI_PROVIDER_ELIGIBILITY_V1['workers-ai']).toBe('binding_gated');
+    expect(AI_PROVIDER_ELIGIBILITY_V2.gemini).toBe('unverified_free_tier');
+    expect(AI_PROVIDER_ELIGIBILITY_V2['workers-ai']).toBe('binding_gated');
   });
 
   it('rejects unknown model ids for every provider', () => {
-    expect(isAllowedModel('workers-ai', '@cf/meta/llama-3.1-8b-instruct-fp8')).toBe(true);
+    expect(isAllowedModel('workers-ai', '@cf/google/gemma-4-26b-a4b-it')).toBe(true);
+    expect(isAllowedModel('workers-ai', '@cf/qwen/qwen3.8-27b')).toBe(true);
     expect(isAllowedModel('workers-ai', 'auto')).toBe(false);
     expect(isAllowedModel('workers-ai', 'gpt-4o')).toBe(false);
     expect(isAllowedModel('gemini', 'gemini-2.5-flash-lite')).toBe(true);
     expect(isAllowedModel('gemini', 'gemini-pro-unlisted')).toBe(false);
+  });
+
+  it('rejects the retired ai-policy-v1 Workers AI ids (Cloudflare decommission 2026-11-20)', () => {
+    expect(isAllowedModel('workers-ai', '@cf/meta/llama-3.1-8b-instruct-fp8')).toBe(false);
+    expect(isAllowedModel('workers-ai', '@cf/qwen/qwen3-30b-a3b-fp8')).toBe(false);
   });
 
   it('pins the validated application bounds', () => {
@@ -66,7 +72,7 @@ describe('AI model policy (ai-policy-v1)', () => {
   it('defines per-provider app attempt caps in explicit attempt units', () => {
     expect(AI_DAILY_REQUEST_ATTEMPT_CAPS['workers-ai']).toBeGreaterThan(0);
     expect(AI_DAILY_REQUEST_ATTEMPT_CAPS.gemini).toBeGreaterThan(0);
-    expect(AI_POLICY_VERSION).toBe('ai-policy-v1');
+    expect(AI_POLICY_VERSION).toBe('ai-policy-v2');
   });
 });
 

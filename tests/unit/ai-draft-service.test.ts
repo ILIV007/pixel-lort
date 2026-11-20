@@ -224,7 +224,7 @@ describe('AI draft service — ladder, budget, and outcomes', () => {
       expect(outcome.draft.headlineFa).toBe('تیتر خبر');
       expect(outcome.usage[0]).toMatchObject({
         provider: 'workers-ai',
-        modelId: '@cf/meta/llama-3.1-8b-instruct-fp8',
+        modelId: '@cf/google/gemma-4-26b-a4b-it',
         promptVersion: 'pixel-news-draft-v1',
         inputTokens: 120,
         outputTokens: 64,
@@ -242,8 +242,8 @@ describe('AI draft service — ladder, budget, and outcomes', () => {
     const outcome = await buildService().generateNewsDraft(VALID_REQUEST);
     expect(outcome.kind).toBe('draft');
     expect(cfPort.calls.map((call) => call.modelId)).toEqual([
-      '@cf/meta/llama-3.1-8b-instruct-fp8',
-      '@cf/qwen/qwen3-30b-a3b-fp8',
+      '@cf/google/gemma-4-26b-a4b-it',
+      '@cf/qwen/qwen3.8-27b',
     ]);
     if (outcome.kind === 'draft') {
       expect(outcome.attempts.map((attempt) => attempt.outcome)).toEqual([
