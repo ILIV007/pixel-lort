@@ -202,6 +202,13 @@ export const SCHEMA_INBOUND_PIPELINE_MIGRATION_ID = '0007_inbound_pipeline';
  * the inbound pipeline).
  */
 export const SCHEMA_LIVE_WATCHLISTS_MIGRATION_ID = '0008_live_watchlists';
+/**
+ * Slice 6 — identifies the version-9 linear shape (the post-management +
+ * near-dup tables: channel_pins, story_merges, quality_rejections,
+ * channel_post_deletes on top of the live watchlists).
+ */
+export const POST_MANAGEMENT_SCHEMA_VERSION = 9;
+export const SCHEMA_POST_MANAGEMENT_MIGRATION_ID = '0009_post_management_near_dup';
 
 /** The distinct, typed capability states (R19-01 — no boolean merge). */
 export type SchemaCapability =
@@ -274,6 +281,16 @@ export type SchemaCapability =
       readonly appliedSchemaVersion: 8;
     }
   | {
+      /**
+       * Slice 6: the LINEAR final candidate state — 0009 applied on top
+       * of 0008. ALL capabilities are present, plus the post-management
+       * + near-dup tables (0009). Every ingestion path treats this state
+       * exactly like the ownership mode.
+       */
+      readonly kind: 'known_v9_post_management';
+      readonly appliedSchemaVersion: 9;
+    }
+  | {
       readonly kind: 'unresolved';
       readonly reason: SchemaCapabilityUnresolvedReason;
     };
@@ -303,13 +320,23 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
   if (parsed === 3) {
     return { kind: 'known_v3_legacy', appliedSchemaVersion: 3 };
   }
-  if (parsed === 4 || parsed === 5 || parsed === 6 || parsed === 7 || parsed === 8) {
+  if (
+    parsed === 4 ||
+    parsed === 5 ||
+    parsed === 6 ||
+    parsed === 7 ||
+    parsed === 8 ||
+    parsed === 9
+  ) {
     // The migration_id distinguishes the shapes a version number alone can
     // never prove: at version 4 the ownership column exists ONLY under the
     // 0004 id; at version 5 the linear chain requires the 0005 id (and
     // implies 0004's changes); at version 6 the linear chain requires the
     // 0006 id (and implies 0004+0005's changes); at version 7 the linear
-    // chain requires the 0007 id (and implies 0004+0005+0006's changes).
+    // chain requires the 0007 id (and implies 0004+0005+0006's changes);
+    // at version 8 the linear chain requires the 0008 id (and implies
+    // 0004..0007's changes); at version 9 the linear chain requires the
+    // 0009 id (and implies 0004..0008's changes).
     // Anything else is UNRESOLVED — no invented valid shapes.
     let idRow: { value: string } | null;
     try {
@@ -349,6 +376,9 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
     }
     if (parsed === 8 && idRow.value === SCHEMA_LIVE_WATCHLISTS_MIGRATION_ID) {
       return { kind: 'known_v8_live_watchlists', appliedSchemaVersion: 8 };
+    }
+    if (parsed === 9 && idRow.value === SCHEMA_POST_MANAGEMENT_MIGRATION_ID) {
+      return { kind: 'known_v9_post_management', appliedSchemaVersion: 9 };
     }
     return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
   }

@@ -103,6 +103,11 @@ import {
 import type { MediaAssetStore, MediaGroupSendInputV1 } from '../../domain/media/media-ports';
 import { isPublishableRightsStatus } from '../../domain/media/media-usage';
 import { mapContentTypeToMixCategory, scanJitterForCandidate } from './scheduler-policy';
+import {
+  pinChannelPost,
+  readPostManagementSettings,
+} from '../../adapters/db/post-management-store';
+import { randomToken } from '../../domain/admin-post/fingerprint';
 
 /** The channel transport seam (the ONLY artificial piece in tests). */
 export interface PublicationChannelTransport {
@@ -293,6 +298,20 @@ export function createPublicationScheduler(deps: {
   readonly mediaTransport?: PublicationMediaGroupTransport;
   /** The ledger the album binding is verified against — REQUIRED with the media seam. */
   readonly mediaAssets?: Pick<MediaAssetStore, 'findAssetsByUrls'>;
+  /**
+   * Slice 6 — the P0 auto-pin seam. OPTIONAL: without it, a sent P0 is
+   * never pinned (the panel toggle alone cannot pin). When present, a
+   * terminally-sent P0 publication pins its FIRST channel message
+   * through this transport + the durable pin ledger, best-effort: a
+   * pin failure is logged and the outcome stays `sent` — a pin never
+   * fails a publication.
+   */
+  readonly autoPin?: {
+    readonly pin: (input: {
+      readonly chatId: number | string;
+      readonly messageId: number;
+    }) => Promise<boolean>;
+  };
   readonly sendGate: { readonly enabled: boolean };
   readonly contextProvider: PublicationPolicyContextProvider;
   readonly clock: Clock;
@@ -314,6 +333,55 @@ export function createPublicationScheduler(deps: {
     throw new AppError('config_invalid');
   }
   const scanLimit = Math.max(1, Math.min(64, Math.floor(deps.scanLimit ?? DEFAULT_SCAN_LIMIT)));
+
+  /**
+   * Slice 6 — the P0 auto-pin AFTER a terminal `sent`: the panel toggle
+   * is the authority (OFF ⇒ skip silently), the priority class must be
+   * P0 (score >= 90), and the pin is best-effort — ANY failure is
+   * logged and swallowed, never thrown into the send path (a pin never
+   * fails a publication, and a healed/re-sent publication re-pins
+   * idempotently through the ledger's already-pinned no-op).
+   */
+  async function maybeAutoPinP0(input: {
+    readonly publicationId: string;
+    readonly priority: number;
+    readonly messageId: number;
+    readonly nowMs: number;
+  }): Promise<void> {
+    if (deps.autoPin === undefined) {
+      return;
+    }
+    try {
+      const classified = classifyPriority(input.priority);
+      if (!classified.ok || classified.value.class !== 'P0') {
+        return;
+      }
+      const settings = await readPostManagementSettings(deps.executor);
+      if (!settings.autoPinP0Enabled) {
+        return;
+      }
+      const pinned = await deps.autoPin.pin({
+        chatId: destination,
+        messageId: input.messageId,
+      });
+      if (!pinned) {
+        deps.logger.warn('publication.scheduler.auto_pin_failed');
+        return;
+      }
+      await pinChannelPost(deps.executor, {
+        id: `pin:${randomToken()}`,
+        channelMessageId: input.messageId,
+        postRefType: 'publication',
+        postRefId: input.publicationId,
+        pinnedBy: 0,
+        nowMs: input.nowMs,
+      });
+    } catch (error) {
+      deps.logger.warn('publication.scheduler.auto_pin_failed', {
+        error: error instanceof Error ? error.name : 'unknown',
+      });
+    }
+  }
 
   /**
    * THE LEDGER BINDING + THE SEND-TIME RIGHTS GATE (the ADR-0060 binding,
@@ -825,6 +893,16 @@ export function createPublicationScheduler(deps: {
         generation,
         nowMs,
       });
+      if (terminal.kind === 'written') {
+        // Slice 6 — a terminally-sent P0 pins itself (toggle-gated,
+        // best-effort: never fails the publication).
+        await maybeAutoPinP0({
+          publicationId: row.id,
+          priority: row.priority,
+          messageId: sent.messageId,
+          nowMs,
+        });
+      }
       return terminal.kind === 'written'
         ? { publicationId: row.id, draftId: row.draft_id, outcome: 'sent' }
         : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };
@@ -1170,6 +1248,19 @@ export function createPublicationScheduler(deps: {
       generation,
       nowMs,
     });
+    if (terminal.kind === 'written') {
+      // Slice 6 — a terminally-sent P0 album pins its FIRST message
+      // (toggle-gated, best-effort: never fails the publication).
+      const firstMessage = sentMessages[0];
+      if (firstMessage !== undefined) {
+        await maybeAutoPinP0({
+          publicationId: row.id,
+          priority: row.priority,
+          messageId: firstMessage.messageId,
+          nowMs,
+        });
+      }
+    }
     return terminal.kind === 'written'
       ? { publicationId: row.id, draftId: row.draft_id, outcome: 'sent' }
       : { publicationId: row.id, draftId: row.draft_id, outcome: 'fence_rejected' };

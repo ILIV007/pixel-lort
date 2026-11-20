@@ -307,6 +307,25 @@ export interface TelegramMessageDeleteClient {
   }): Promise<boolean>;
 }
 
+/**
+ * Slice 6 — the pin capability for post management (DESIGN §10.7: the
+ * bot pins/unpins its own channel posts; P0 auto-pin). Kept SEPARATE
+ * from `TelegramBotApiClient` so every existing consumer/fake stays
+ * untouched. Pinning a channel message needs the bot to be a channel
+ * administrator with post rights (verified live for @pixellores:
+ * administrator, can_post_messages + can_manage_chat).
+ */
+export interface TelegramPinClient {
+  pinChatMessage(input: {
+    readonly chatId: number | string;
+    readonly messageId: number;
+  }): Promise<boolean>;
+  unpinChatMessage(input: {
+    readonly chatId: number | string;
+    readonly messageId: number;
+  }): Promise<boolean>;
+}
+
 export interface TelegramBotApiClient {
   getMe(): Promise<{ readonly id: number; readonly username?: string }>;
   sendMessage(input: TelegramSendMessageInput): Promise<TelegramSentMessage>;
@@ -395,7 +414,7 @@ async function readResponseBounded(response: Response): Promise<string> {
 
 export function createBotApiClient(
   options: BotApiClientOptions,
-): TelegramBotApiClient & TelegramRichTextClient & TelegramMessageDeleteClient {
+): TelegramBotApiClient & TelegramRichTextClient & TelegramMessageDeleteClient & TelegramPinClient {
   const { botToken, logger } = options;
   const fetchImpl = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   const timeoutMs = options.timeoutMs ?? DEFAULT_TELEGRAM_API_TIMEOUT_MS;
@@ -703,6 +722,29 @@ export function createBotApiClient(
     async deleteMessage(input) {
       return callMethod(
         'deleteMessage',
+        {
+          chat_id: input.chatId,
+          message_id: input.messageId,
+        },
+        (result) => (result === true ? true : null),
+      );
+    },
+
+    // ---- Slice 6: pin / unpin (post management) ------------------------
+    async pinChatMessage(input) {
+      return callMethod(
+        'pinChatMessage',
+        {
+          chat_id: input.chatId,
+          message_id: input.messageId,
+        },
+        (result) => (result === true ? true : null),
+      );
+    },
+
+    async unpinChatMessage(input) {
+      return callMethod(
+        'unpinChatMessage',
         {
           chat_id: input.chatId,
           message_id: input.messageId,

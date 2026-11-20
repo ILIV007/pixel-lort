@@ -51,9 +51,9 @@ async function appliedSchemaVersion(): Promise<number> {
   return row === null ? 0 : Number.parseInt(row.value, 10);
 }
 
-// Slice 5: the first test below advances the shared per-file database to
-// version 8 (the full plan continues past 0007 with exactly 0008). Later
-// tests' beforeEach therefore sees finalVersion 8, not 7 — the flag keeps
+// Slice 6: the first test below advances the shared per-file database to
+// version 9 (the full plan continues past 0007 with exactly 0008 + 0009). Later
+// tests' beforeEach therefore sees finalVersion 9, not 7 — the flag keeps
 // the version assertion honest about which state the file is in.
 let fullPlanApplied = false;
 
@@ -63,12 +63,12 @@ beforeEach(async () => {
   await applyMigrations(db, V6_ONLY);
   // Upgrade to the V7-capped plan — on the first run ONLY 0007 is
   // pending; on later tests this is an idempotent no-op. Either way the
-  // database ends at version 7 (the full default plan continues to 8;
+  // database ends at version 7 (the full default plan continues to 9;
   // see the first test below) — unless the first test already advanced
-  // the shared database to 8, in which case the capped plan is a no-op
-  // at version 8.
+  // the shared database to 9, in which case the capped plan is a no-op
+  // at version 9.
   const upgrade = await applyMigrations(db, V7_ONLY);
-  expect(upgrade.finalVersion).toBe(fullPlanApplied ? 8 : 7);
+  expect(upgrade.finalVersion).toBe(fullPlanApplied ? 9 : 7);
 });
 
 describe('slice 4 — migration 0007: inbound pipeline tables (schema 6 → 7)', () => {
@@ -82,13 +82,16 @@ describe('slice 4 — migration 0007: inbound pipeline tables (schema 6 → 7)',
     });
     expect(idRow?.value).toBe('0007_inbound_pipeline');
     // The full default plan continues the linear chain past 0007: exactly
-    // 0008 is pending and the database lands at version 8.
+    // 0008 + 0009 are pending and the database lands at version 9.
     const full = await applyMigrations(db);
-    expect(full.applied.map((migration) => migration.id)).toEqual(['0008_live_watchlists']);
-    expect(full.finalVersion).toBe(8);
-    expect(await appliedSchemaVersion()).toBe(8);
-    // The shared per-file database is now at version 8; later tests'
-    // beforeEach must expect 8, not 7.
+    expect(full.applied.map((migration) => migration.id)).toEqual([
+      '0008_live_watchlists',
+      '0009_post_management_near_dup',
+    ]);
+    expect(full.finalVersion).toBe(9);
+    expect(await appliedSchemaVersion()).toBe(9);
+    // The shared per-file database is now at version 9; later tests'
+    // beforeEach must expect 9, not 7.
     fullPlanApplied = true;
   });
 

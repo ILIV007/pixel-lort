@@ -76,6 +76,7 @@ describe('migration plan validation (pure — no database access)', () => {
       '0006_admin_post_editorial_source',
       '0007_inbound_pipeline',
       '0008_live_watchlists',
+      '0009_post_management_near_dup',
     ]);
     expect(REAL_V2.version).toBe(2);
     expect(MIGRATIONS[2]!.version).toBe(3);
@@ -84,6 +85,7 @@ describe('migration plan validation (pure — no database access)', () => {
     expect(MIGRATIONS[5]!.version).toBe(6);
     expect(MIGRATIONS[6]!.version).toBe(7);
     expect(MIGRATIONS[7]!.version).toBe(8);
+    expect(MIGRATIONS[8]!.version).toBe(9);
     expect(() => validateMigrationPlan(MIGRATIONS)).not.toThrow();
     expect(() => validateMigrationPlan(PLAN_V1_SYNTHETIC_V2)).not.toThrow();
   });
@@ -208,7 +210,7 @@ describe('applyMigrations — incremental, future-safe semantics', () => {
     expect(again.finalVersion).toBe(2);
     // The synthetic plan stops at version 2, so the REAL plan upgrades the
     // database incrementally by applying ONLY the pending 0003 + 0004 + 0005
-    // + 0006 + 0007 + 0008 (slice 5: the LINEAR default plan continues to version 8).
+    // + 0006 + 0007 + 0008 + 0009 (slice 6: the LINEAR default plan continues to version 9).
     expect(andAgain.observedVersion).toBe(2);
     expect(andAgain.applied.map((migration) => migration.id)).toEqual([
       '0003_job_dlq_delivery',
@@ -217,14 +219,15 @@ describe('applyMigrations — incremental, future-safe semantics', () => {
       '0006_admin_post_editorial_source',
       '0007_inbound_pipeline',
       '0008_live_watchlists',
+      '0009_post_management_near_dup',
     ]);
-    expect(andAgain.finalVersion).toBe(8);
+    expect(andAgain.finalVersion).toBe(9);
 
     // No duplicate probe rows: the version-2 statements did not run again.
     const count = await db.prepare(`SELECT COUNT(*) AS n FROM migration_v2_probe`).first<{
       n: number;
     }>();
     expect(count?.n).toBe(1);
-    expect(await appliedSchemaVersion()).toBe(8);
+    expect(await appliedSchemaVersion()).toBe(9);
   });
 });

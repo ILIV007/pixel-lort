@@ -282,6 +282,22 @@ export function resolveJobsEngine(env: WorkerEnv, logger?: Logger): EngineResolu
           // AI_ENABLED.
           enabled: editorial.config.EDITORIAL_FACT_GUARD_ENABLED,
         },
+        nearDup: {
+          // Slice 6 (DESIGN §10.1): the near-dup adjudication is WIRED
+          // ON inside the already-gated editorial pipeline — the step
+          // only ever SUPPRESSES a second post (merge as update / hold
+          // for review), never creates one, and runs strictly before any
+          // provider work. It never implies EDITORIAL_ENABLED or
+          // AI_ENABLED.
+          enabled: true,
+        },
+        negativeCache: {
+          // Slice 6 (DESIGN §9.4): the 30-day negative cache is WIRED
+          // ON inside the already-gated editorial pipeline — a rejected
+          // fingerprint is never re-fed to AI. It never implies
+          // EDITORIAL_ENABLED or AI_ENABLED.
+          enabled: true,
+        },
         nowMs: () => clock.now(),
         logger,
       }) as never,

@@ -75,16 +75,16 @@ beforeEach(async () => {
 });
 
 describe('migration 0003 (jobs DLQ-delivery reconciliation)', () => {
-  it('upgrades a populated schema-v2 database through 0003 (and the appended 0004+0005+0006+0007 candidates)', async () => {
-    // R1.20-R1 + R1.22 + slice 4 + slice 5: the DEFAULT plan is the LINEAR chain to version 8
-    // (0004 -> 4, 0005 -> 5, 0006 -> 6, 0007 -> 7, 0008 -> 8), so the populated v2 database lands
-    // at 8 with the LAST applied id recorded. The 0003 column and index
+  it('upgrades a populated schema-v2 database through 0003 (and the appended 0004+0005+0006+0007+0008+0009 candidates)', async () => {
+    // R1.20-R1 + R1.22 + slice 4 + slice 5 + slice 6: the DEFAULT plan is the LINEAR chain to version 9
+    // (0004 -> 4, 0005 -> 5, 0006 -> 6, 0007 -> 7, 0008 -> 8, 0009 -> 9), so the populated v2 database lands
+    // at 9 with the LAST applied id recorded. The 0003 column and index
     // contracts below are unchanged.
-    expect(await appliedSchemaVersion()).toBe(8);
+    expect(await appliedSchemaVersion()).toBe(9);
     const id = await executor.first<{ value: string }>({
       sql: `SELECT value FROM schema_metadata WHERE key = 'migration_id'`,
     });
-    expect(id?.value).toBe('0008_live_watchlists');
+    expect(id?.value).toBe('0009_post_management_near_dup');
   });
 
   it('keeps legacy job rows valid; dlq_delivered_at reads NULL (reconcilable)', async () => {
@@ -119,8 +119,8 @@ describe('migration 0003 (jobs DLQ-delivery reconciliation)', () => {
 
   it('is idempotent (re-applying the full plan is a no-op)', async () => {
     await applyMigrations(db);
-    // R1.20-R1 + R1.22 + slice 4 + slice 5: the full LINEAR default plan lands at version 8.
-    expect(await appliedSchemaVersion()).toBe(8);
+    // R1.20-R1 + R1.22 + slice 4 + slice 5 + slice 6: the full LINEAR default plan lands at version 9.
+    expect(await appliedSchemaVersion()).toBe(9);
     const rows = await executor.first<{ n: number }>({
       sql: `SELECT COUNT(*) AS n FROM jobs`,
     });

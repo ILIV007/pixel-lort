@@ -10,8 +10,8 @@ import { createDbExecutor } from '../../src/adapters/db/db-executor';
  * schema-v7 database:
  *
  *  1. apply ONLY migrations 0001..0007 -> a genuine schema-v7 database;
- *  2. apply the real append-only plan -> ONLY 0008 is pending;
- *  3. schema version becomes 8 with the 0008 migration id;
+ *  2. apply the real append-only plan -> ONLY 0008 + 0009 are pending;
+ *  3. schema version becomes 9 with the 0009 migration id;
  *  4. the six watchlist tables exist with their CHECK/UNIQUE constraints
  *     enforced at the DATABASE level;
  *  5. applying migrations twice is a no-op.
@@ -43,23 +43,23 @@ beforeEach(async () => {
   // Build the version-7 baseline ONCE per test; storage persists across
   // tests WITHIN this file, so on later tests the V7 plan is a no-op.
   await applyMigrations(db, V7_ONLY);
-  // Upgrade to the real append-only plan — on the first run ONLY 0008 is
-  // pending; on later tests this is an idempotent no-op. Either way the
-  // database ends at version 8.
+  // Upgrade to the real append-only plan — on the first run ONLY 0008 +
+  // 0009 are pending; on later tests this is an idempotent no-op. Either way the
+  // database ends at version 9.
   const upgrade = await applyMigrations(db);
-  expect(upgrade.finalVersion).toBe(8);
+  expect(upgrade.finalVersion).toBe(9);
 });
 
 describe('slice 5 — migration 0008: live-watchlist tables (schema 7 → 8)', () => {
-  it('applies exactly 0008 as the only pending step on a fresh schema-v7 database', async () => {
+  it('applies 0008 + 0009 as the only pending steps on a fresh schema-v7 database', async () => {
     const rerun = await applyMigrations(db);
     expect(rerun.applied).toEqual([]);
-    expect(rerun.finalVersion).toBe(8);
-    expect(await appliedSchemaVersion()).toBe(8);
+    expect(rerun.finalVersion).toBe(9);
+    expect(await appliedSchemaVersion()).toBe(9);
     const idRow = await executor.first<{ value: string }>({
       sql: `SELECT value FROM schema_metadata WHERE key = 'migration_id'`,
     });
-    expect(idRow?.value).toBe('0008_live_watchlists');
+    expect(idRow?.value).toBe('0009_post_management_near_dup');
   });
 
   it('admits one entry per kind+key and rejects a duplicate', async () => {

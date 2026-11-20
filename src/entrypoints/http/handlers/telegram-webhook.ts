@@ -71,6 +71,7 @@ import {
 } from '../../../application/inbound/inbound-pipeline-service';
 import { createAdminManageService } from '../../../application/admin-manage/admin-manage-service';
 import { createAdminPanelService } from '../../../application/admin-panel/admin-panel-service';
+import { createPostManagementService } from '../../../application/publishing/post-management-service';
 import { createAuthorizationService } from '../../../admin/authorization';
 import { createCommandRouter } from '../../../admin/command-router';
 import { createDbExecutor } from '../../../adapters/db/db-executor';
@@ -340,6 +341,24 @@ export async function handleTelegramWebhook(
             }),
           deleteMessage: (input) => botApi.deleteMessage(input),
         };
+  // Slice 6: the post-management service owns pins/housekeeping and the
+  // in-place edit capture. Wired ONLY while the panel gate is ON AND a
+  // target channel is configured (the panel is its only caller surface);
+  // the service itself never sends a post and never enables any publish
+  // or scheduler path. Without BOT_TOKEN the transport is undefined and
+  // pin/delete/edit report honestly as unavailable (the ledger is never
+  // written for a call that never happened).
+  const postManagement =
+    panelEnabled && phase2.config.targetChannel !== undefined
+      ? createPostManagementService({
+          executor,
+          clock: systemClock,
+          channelChatId: phase2.config.targetChannel,
+          transport: botApi,
+          logger: ctx.logger,
+        })
+      : undefined;
+
   const inboundPipeline = createInboundPipelineService({
     executor,
     clock: systemClock,
@@ -461,8 +480,13 @@ export async function handleTelegramWebhook(
           executor,
           clock: systemClock,
           ownerTelegramId: phase2.config.ownerTelegramId,
+          postManagement,
         })
       : undefined,
+    // Slice 6: the in-place edit capture is consumed by the ingress
+    // (a text message completes an open edit instead of starting a
+    // new admin post). Wired ONLY while the panel gate is ON.
+    postManagement,
     // Offline mode without BOT_TOKEN: noop actions complete; outbound
     // actions fail retryably (never silently skipped-and-acked).
     botApi,

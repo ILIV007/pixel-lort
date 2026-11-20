@@ -6,6 +6,7 @@
  *   `/menu mode`    mode screen
  *   `/menu cap`     cap screen
  *   `/menu event`   event screen
+ *   `/menu posts`   channel-post housekeeping screen (slice 6)
  *
  * Validation happens BEFORE any store access:
  * - The remainder must be a single token — newlines, control characters
@@ -21,7 +22,7 @@ export type MenuArgumentParse =
   | { readonly kind: 'screen'; readonly screen: Exclude<PanelScreen, 'main'> }
   | { readonly kind: 'invalid' };
 
-const MENU_SCREENS: readonly string[] = ['mode', 'cap', 'event'];
+const MENU_SCREENS: readonly string[] = ['mode', 'cap', 'event', 'posts'];
 
 function isMenuScreen(value: string): value is Exclude<PanelScreen, 'main'> {
   return (MENU_SCREENS as readonly string[]).includes(value);

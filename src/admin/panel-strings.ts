@@ -8,12 +8,13 @@
  */
 import type { AdminUiLanguage } from './ui-language';
 import type { PublishMode } from '../domain/publishing/publishing-settings';
+import type { RetentionRule } from '../domain/publishing/post-management';
 
 /** The allowlisted admin-panel command word (the slice-3 screen). */
 export const MENU_COMMAND = 'menu' as const;
 
 /** Panel screens: one job per screen, max 3–4 buttons per screen. */
-export type PanelScreen = 'main' | 'mode' | 'cap' | 'event';
+export type PanelScreen = 'main' | 'mode' | 'cap' | 'event' | 'posts';
 
 export interface AdminPanelUiStrings {
   /** /help line advertising the admin panel (gated). */
@@ -55,6 +56,38 @@ export interface AdminPanelUiStrings {
   readonly eventOnButton: string;
   readonly eventOffButton: string;
   readonly eventHint: string;
+  /** Main panel: the active pin line. */
+  readonly mainPinLabel: string;
+  readonly mainPinNone: string;
+  readonly postsButton: string;
+  /** Posts screen (slice 6 — housekeeping). */
+  readonly postsTitle: string;
+  readonly postsEmpty: string;
+  readonly postsFilterAll: string;
+  readonly postsFilterExpired: string;
+  readonly postsAutoPinLabel: string;
+  readonly postsAutoPinOnButton: string;
+  readonly postsAutoPinOffButton: string;
+  readonly postsRetentionLine: (rule: RetentionRule) => string;
+  readonly postsRetentionOnButton: string;
+  readonly postsRetentionOffButton: string;
+  readonly postsHint: string;
+  /** Post detail screen (slice 6). */
+  readonly postDetailTitle: string;
+  readonly postDetailCategoryLabel: string;
+  readonly postDetailPublishedLabel: string;
+  readonly postDetailPinnedLabel: string;
+  readonly postDetailExpiredLabel: string;
+  readonly postDetailPinButton: string;
+  readonly postDetailUnpinButton: string;
+  readonly postDetailEditButton: string;
+  readonly postDetailDeleteButton: string;
+  /** Delete confirmation (slice 6). */
+  readonly deleteConfirmTitle: string;
+  readonly deleteConfirmButton: string;
+  readonly deleteCancelButton: string;
+  /** Edit capture prompt (slice 6). */
+  readonly editPrompt: string;
   /** Shared navigation. */
   readonly backButton: string;
   /** Callback answers (toasts). */
@@ -66,6 +99,24 @@ export interface AdminPanelUiStrings {
   readonly callbackCapNoChange: (cap: number) => string;
   readonly callbackEventOn: string;
   readonly callbackEventOff: string;
+  readonly callbackPostMgmtUnavailable: string;
+  readonly callbackPinned: string;
+  readonly callbackAlreadyPinned: string;
+  readonly callbackPinFailed: string;
+  readonly callbackUnpinned: string;
+  readonly callbackNotPinned: string;
+  readonly callbackDeleted: string;
+  readonly callbackDeleteFailed: string;
+  readonly callbackEditStarted: string;
+  /** Slice 6 — the edit-capture completion replies (ingress, not panel). */
+  readonly callbackEditDone: string;
+  readonly callbackEditFailed: string;
+  readonly callbackEditFailedRetryable: string;
+  readonly callbackEditInvalidText: string;
+  readonly callbackAutoPinOn: string;
+  readonly callbackAutoPinOff: string;
+  readonly callbackRetentionOn: string;
+  readonly callbackRetentionOff: string;
 }
 
 export const ADMIN_PANEL_STRINGS: Readonly<Record<AdminUiLanguage, AdminPanelUiStrings>> = {
@@ -104,6 +155,34 @@ export const ADMIN_PANEL_STRINGS: Readonly<Record<AdminUiLanguage, AdminPanelUiS
     eventOnButton: 'Turn event ON',
     eventOffButton: 'Turn event OFF',
     eventHint: 'While active, the minimum gap is 8–15 minutes.',
+    mainPinLabel: 'Pinned:',
+    mainPinNone: 'none',
+    postsButton: 'Posts',
+    postsTitle: 'Channel posts',
+    postsEmpty: 'No published posts yet.',
+    postsFilterAll: 'All',
+    postsFilterExpired: 'Expired',
+    postsAutoPinLabel: 'Auto-pin P0:',
+    postsAutoPinOnButton: 'Auto-pin P0: ON',
+    postsAutoPinOffButton: 'Auto-pin P0: OFF',
+    postsRetentionLine: (rule) =>
+      `Retention: ${rule.enabled ? 'on' : 'off'} — expired after ${rule.defaultDays}d (${rule.freeGameDays}d for free games).`,
+    postsRetentionOnButton: 'Retention: ON',
+    postsRetentionOffButton: 'Retention: OFF',
+    postsHint: 'Tap a post to open it. Send /menu for the main panel.',
+    postDetailTitle: 'Post',
+    postDetailCategoryLabel: 'Category:',
+    postDetailPublishedLabel: 'Published:',
+    postDetailPinnedLabel: 'Pinned:',
+    postDetailExpiredLabel: 'Expired:',
+    postDetailPinButton: 'Pin',
+    postDetailUnpinButton: 'Unpin',
+    postDetailEditButton: 'Edit',
+    postDetailDeleteButton: 'Delete',
+    deleteConfirmTitle: 'Delete this post?',
+    deleteConfirmButton: 'Yes, delete',
+    deleteCancelButton: 'Cancel',
+    editPrompt: 'Send the new text for this post now (30 minutes).',
     backButton: '‹ Back',
     callbackInvalidToken: 'This button is no longer valid.',
     callbackPermissionDenied:
@@ -119,6 +198,23 @@ export const ADMIN_PANEL_STRINGS: Readonly<Record<AdminUiLanguage, AdminPanelUiS
     callbackCapNoChange: (cap) => `Daily cap is already ${cap}.`,
     callbackEventOn: 'Event mode ON — the daily cap is lifted.',
     callbackEventOff: 'Event mode OFF.',
+    callbackPostMgmtUnavailable: 'Post management is not available right now.',
+    callbackPinned: 'Post pinned.',
+    callbackAlreadyPinned: 'This post is already pinned.',
+    callbackPinFailed: 'Pin failed — the post was not pinned.',
+    callbackUnpinned: 'Post unpinned.',
+    callbackNotPinned: 'This post is not pinned.',
+    callbackDeleted: 'Post deleted.',
+    callbackDeleteFailed: 'Delete failed — the post was not deleted.',
+    callbackEditStarted: 'Edit started — send the new text now.',
+    callbackEditDone: 'Post edited.',
+    callbackEditFailed: 'Edit failed — the post was not changed.',
+    callbackEditFailedRetryable: 'Edit failed for now — send the new text again to retry.',
+    callbackEditInvalidText: 'The new text must be 1–4096 characters.',
+    callbackAutoPinOn: 'Auto-pin P0 ON — very big news pins itself.',
+    callbackAutoPinOff: 'Auto-pin P0 OFF.',
+    callbackRetentionOn: 'Retention ON.',
+    callbackRetentionOff: 'Retention OFF.',
   },
   fa: {
     helpMenuLine: '/menu — پنل مدیریت (حالت، سقف روزانه، ایونت)',
@@ -153,6 +249,34 @@ export const ADMIN_PANEL_STRINGS: Readonly<Record<AdminUiLanguage, AdminPanelUiS
     eventOnButton: 'روشن‌کردن ایونت',
     eventOffButton: 'خاموش‌کردن ایونت',
     eventHint: 'تا وقتی فعال است، حداقل فاصله ۸ تا ۱۵ دقیقه است.',
+    mainPinLabel: 'پین‌شده:',
+    mainPinNone: 'هیچ',
+    postsButton: 'پست‌ها',
+    postsTitle: 'پست‌های چنل',
+    postsEmpty: 'هنوز پستی منتشر نشده است.',
+    postsFilterAll: 'همه',
+    postsFilterExpired: 'منقضی‌شده',
+    postsAutoPinLabel: 'پین خودکار P0:',
+    postsAutoPinOnButton: 'پین خودکار P0: روشن',
+    postsAutoPinOffButton: 'پین خودکار P0: خاموش',
+    postsRetentionLine: (rule) =>
+      `نگهداری: ${rule.enabled ? 'روشن' : 'خاموش'} — انقضا بعد از ${rule.defaultDays} روز (${rule.freeGameDays} روز برای بازی رایگان).`,
+    postsRetentionOnButton: 'نگهداری: روشن',
+    postsRetentionOffButton: 'نگهداری: خاموش',
+    postsHint: 'برای بازکردن یک پست روی آن بزنید. برای پنل اصلی /menu را بفرستید.',
+    postDetailTitle: 'پست',
+    postDetailCategoryLabel: 'دسته:',
+    postDetailPublishedLabel: 'منتشرشده:',
+    postDetailPinnedLabel: 'پین‌شده:',
+    postDetailExpiredLabel: 'منقضی‌شده:',
+    postDetailPinButton: 'پین',
+    postDetailUnpinButton: 'آنپین',
+    postDetailEditButton: 'ادیت',
+    postDetailDeleteButton: 'حذف',
+    deleteConfirmTitle: 'این پست حذف شود؟',
+    deleteConfirmButton: 'بله، حذف کن',
+    deleteCancelButton: 'لغو',
+    editPrompt: 'متن جدید این پست را همین حالا بفرستید (۳۰ دقیقه).',
     backButton: '‹ بازگشت',
     callbackInvalidToken: 'این دکمه دیگر معتبر نیست.',
     callbackPermissionDenied:
@@ -168,5 +292,23 @@ export const ADMIN_PANEL_STRINGS: Readonly<Record<AdminUiLanguage, AdminPanelUiS
     callbackCapNoChange: (cap) => `سقف روزانه همین حالا ${cap} است.`,
     callbackEventOn: 'حالت ایونت روشن شد — سقف روزانه برداشته شد.',
     callbackEventOff: 'حالت ایونت خاموش شد.',
+    callbackPostMgmtUnavailable: 'مدیریت پست در حال حاضر در دسترس نیست.',
+    callbackPinned: 'پست پین شد.',
+    callbackAlreadyPinned: 'این پست همین حالا پین است.',
+    callbackPinFailed: 'پین ناموفق بود — پست پین نشد.',
+    callbackUnpinned: 'پین پست برداشته شد.',
+    callbackNotPinned: 'این پست پین نیست.',
+    callbackDeleted: 'پست حذف شد.',
+    callbackDeleteFailed: 'حذف ناموفق بود — پست حذف نشد.',
+    callbackEditStarted: 'ادیت شروع شد — متن جدید را همین حالا بفرستید.',
+    callbackEditDone: 'پست ویرایش شد.',
+    callbackEditFailed: 'ادیت ناموفق بود — پست تغییر نکرد.',
+    callbackEditFailedRetryable:
+      'ادیت فعلاً ناموفق بود — متن جدید را دوباره بفرستید تا دوباره تلاش شود.',
+    callbackEditInvalidText: 'متن جدید باید ۱ تا ۴۰۹۶ کاراکتر باشد.',
+    callbackAutoPinOn: 'پین خودکار P0 روشن شد — خبر خیلی بزرگ خودش پین می‌شود.',
+    callbackAutoPinOff: 'پین خودکار P0 خاموش شد.',
+    callbackRetentionOn: 'نگهداری روشن شد.',
+    callbackRetentionOff: 'نگهداری خاموش شد.',
   },
 };

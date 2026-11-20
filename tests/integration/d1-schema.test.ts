@@ -20,7 +20,8 @@ const db: D1Database = env.DB;
 
 /** All 27 approved blueprint tables + the application `schema_metadata` table
  *  + the 5 admin-post tables (0005) + the 2 inbound tables (0007) + the 6
- *  live-watchlist tables (0008). */
+ *  live-watchlist tables (0008) + the 4 post-management / near-dup tables
+ *  (0009). */
 const EXPECTED_TABLES: readonly string[] = [
   'admins',
   'admin_action_tokens',
@@ -33,6 +34,8 @@ const EXPECTED_TABLES: readonly string[] = [
   'ai_runs',
   'audit_events',
   'budgets',
+  'channel_pins',
+  'channel_post_deletes',
   'claims',
   'corrections',
   'draft_revisions',
@@ -47,6 +50,7 @@ const EXPECTED_TABLES: readonly string[] = [
   'publications',
   'publication_messages',
   'published_posts',
+  'quality_rejections',
   'schema_metadata',
   'settings',
   'source_items',
@@ -56,6 +60,7 @@ const EXPECTED_TABLES: readonly string[] = [
   'stories',
   'story_entities',
   'story_fingerprints',
+  'story_merges',
   'telegram_updates',
   'watchlist_aliases',
   'watchlist_entries',
@@ -69,7 +74,8 @@ const EXPECTED_TABLES: readonly string[] = [
  *  + the Phase 3 DLQ-reconciliation index (0003) + the R09 ownership index
  *  (0004) + the R1.20-R admin-post pipeline indexes (0005) + the editorial
  *  provenance index (0006) + the slice-4 inbound indexes (0007) + the
- *  slice-5 live-watchlist indexes (0008). */
+ *  slice-5 live-watchlist indexes (0008) + the slice-6 post-management /
+ *  near-dup indexes (0009). */
 const EXPECTED_INDEXES: readonly string[] = [
   'idx_admin_post_drafts_creator',
   'idx_admin_post_preview_sessions_source',
@@ -119,6 +125,13 @@ const EXPECTED_INDEXES: readonly string[] = [
   'idx_wl_expiry',
   'idx_sig_entry',
   'idx_sig_key',
+  'idx_channel_pins_one_active_per_message',
+  'idx_channel_pins_one_active_overall',
+  'idx_channel_pins_history',
+  'idx_story_merges_canonical',
+  'idx_story_merges_disposition',
+  'idx_quality_rejections_expiry',
+  'idx_channel_post_deletes_message',
 ];
 
 async function namedTables(): Promise<string[]> {
@@ -152,15 +165,15 @@ beforeEach(async () => {
 });
 
 describe('migration application', () => {
-  it('applies every migration as an atomic batch and reports metadata (schema v8, linear chain)', async () => {
+  it('applies every migration as an atomic batch and reports metadata (schema v9, linear chain)', async () => {
     expect(await namedTables()).toEqual([...EXPECTED_TABLES].sort());
 
     const metadata = await db
       .prepare(`SELECT key, value FROM schema_metadata ORDER BY key`)
       .all<{ key: string; value: string }>();
     const byKey = new Map(metadata.results.map((row) => [row.key, row.value]));
-    expect(byKey.get('schema_version')).toBe('8');
-    expect(byKey.get('migration_id')).toBe('0008_live_watchlists');
+    expect(byKey.get('schema_version')).toBe('9');
+    expect(byKey.get('migration_id')).toBe('0009_post_management_near_dup');
     expect(byKey.get('applied_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -186,15 +199,15 @@ describe('migration application', () => {
 });
 
 describe('schema contracts', () => {
-  it('creates exactly the 41 expected tables (27 approved + schema_metadata + 5 admin-post + 2 inbound + 6 live-watchlist)', async () => {
+  it('creates exactly the 45 expected tables (27 approved + schema_metadata + 5 admin-post + 2 inbound + 6 live-watchlist + 4 post-management/near-dup)', async () => {
     const tables = await namedTables();
-    expect(tables).toHaveLength(41);
+    expect(tables).toHaveLength(45);
     expect(tables).toEqual([...EXPECTED_TABLES].sort());
   });
 
-  it('creates exactly the 48 expected indexes (29 approved + lifecycle + DLQ + ownership + 5 admin-post + 1 editorial provenance + 4 inbound + 6 live-watchlist)', async () => {
+  it('creates exactly the 55 expected indexes (29 approved + lifecycle + DLQ + ownership + 5 admin-post + 1 editorial provenance + 4 inbound + 6 live-watchlist + 7 post-management/near-dup)', async () => {
     const indexes = await namedIndexes();
-    expect(indexes).toHaveLength(48);
+    expect(indexes).toHaveLength(55);
     expect(indexes).toEqual([...EXPECTED_INDEXES].sort());
   });
 

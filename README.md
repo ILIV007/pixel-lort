@@ -11,17 +11,20 @@ scheduling policies.
 - **Timezone:** `Asia/Tehran`
 - **Authoritative specification:** [`docs/blueprint/v1/`](docs/blueprint/README.md)
 
-## Current implementation status — v1.43.0 / schema 8 (branch `slice/05-game-links-epic-watchlists`)
+## Current implementation status — v1.44.0 / schema 9 (branch `slice/06-post-management-near-dup`)
 
 Phases 0, 1A, 1B-preview, 2A, 2B, and 3 are done. PR #11 (v1.41.0 /
 schema 6) is merged to `main` (commit 5517390, repo rename to
 `pixellores`); Phases 4–13 are implemented on `main` behind fail-closed
-flags, and the live preview runs `main` (v1.42.0 / schema 7). Slice 4
+flags, and the live preview runs `main` (v1.43.0 / schema 8). Slice 4
 (inbound AI-admin pipeline, v1.42.0 / schema 7) is PR #17 (branch
 `slice/04-inbound-pipeline`, commit 2043360). Slice 5 (game-page links +
 Epic free-games connector + Tier V anchors + live watchlists, v1.43.0 /
 schema 8) is PR #18 (branch
-`slice/05-game-links-epic-watchlists`, commit 7b52541). The Phase
+`slice/05-game-links-epic-watchlists`, commit 7b52541). Slice 6 (post
+management — pins + housekeeping — + near-dup detection, v1.44.0 /
+schema 9) is PR TBD (branch
+`slice/06-post-management-near-dup`, commit TBD). The Phase
 2A record below is the historical account of that phase; the current
 phase state lives in `docs/ROADMAP.md`.
 

@@ -76,6 +76,9 @@ import {
 import { roleHasPermission, type AdminRole } from '../../admin/roles';
 import type { AdminUiLanguage } from '../../admin/ui-language';
 import { randomToken } from '../../domain/admin-post/fingerprint';
+import type { ChannelPinRow, ChannelPostListRow } from '../../adapters/db/post-management-store';
+import type { PostManagementService } from '../publishing/post-management-service';
+import type { ChannelPostRefType } from '../../domain/publishing/post-management';
 
 /** The permission every panel token carries (held by every admin role). */
 export const ADMIN_PANEL_TOKEN_PERMISSION = 'dashboard.view';
@@ -86,9 +89,18 @@ export const ADMIN_PANEL_TOKEN_ACTIONS = {
   showMode: 'panel.show_mode',
   showCap: 'panel.show_cap',
   showEvent: 'panel.show_event',
+  showPosts: 'panel.show_posts',
+  showPost: 'panel.show_post',
   setMode: 'panel.set_mode',
   setCap: 'panel.set_cap',
   setEvent: 'panel.set_event',
+  pinPost: 'panel.pin_post',
+  unpinPost: 'panel.unpin_post',
+  deleteRequest: 'panel.delete_request',
+  deleteConfirm: 'panel.delete_confirm',
+  setAutoPin: 'panel.set_auto_pin',
+  setRetention: 'panel.set_retention',
+  startEdit: 'panel.start_edit',
 } as const;
 
 /** The bounded token TTL of the panel buttons. */
@@ -153,8 +165,26 @@ export interface AdminPanelService {
   }): Promise<PublishGateCheck>;
 }
 
+/** One post reference, as carried by the panel's post tokens. */
+export interface PanelPostRef {
+  readonly refType: ChannelPostRefType;
+  readonly refId: string;
+  readonly channelMessageId: number;
+}
+
+/** The posts-screen filter (all vs expired-only). */
+export type PanelPostsFilter = 'all' | 'expired';
+
 type AdminPanelPayload =
-  | { readonly op: 'show'; readonly screen: PanelScreen }
+  | { readonly op: 'show'; readonly screen: PanelScreen; readonly filter?: PanelPostsFilter }
+  | ({ readonly op: 'show_post' } & PanelPostRef)
+  | ({ readonly op: 'pin_post' } & PanelPostRef)
+  | { readonly op: 'unpin_post'; readonly channelMessageId: number }
+  | ({ readonly op: 'delete_request' } & PanelPostRef)
+  | ({ readonly op: 'delete_confirm' } & PanelPostRef)
+  | { readonly op: 'set_auto_pin'; readonly enabled: boolean }
+  | { readonly op: 'set_retention'; readonly enabled: boolean }
+  | ({ readonly op: 'start_edit' } & PanelPostRef)
   | { readonly op: 'set_mode'; readonly mode: PublishMode }
   | { readonly op: 'set_cap'; readonly cap: number }
   | { readonly op: 'set_event'; readonly active: boolean };
@@ -167,6 +197,24 @@ interface PanelState {
   readonly eventActive: boolean;
   readonly counts: TodayCounts;
   readonly tehranDate: string;
+  readonly activePin: ChannelPinRow | null;
+}
+
+function parsePostRef(record: Record<string, unknown>): PanelPostRef | null {
+  const refType = record['refType'];
+  const refId = record['refId'];
+  const channelMessageId = record['channelMessageId'];
+  if (
+    (refType !== 'publication' && refType !== 'inbound') ||
+    typeof refId !== 'string' ||
+    refId.length === 0 ||
+    typeof channelMessageId !== 'number' ||
+    !Number.isSafeInteger(channelMessageId) ||
+    channelMessageId <= 0
+  ) {
+    return null;
+  }
+  return { refType, refId, channelMessageId };
 }
 
 function parsePayload(payloadJson: string): AdminPanelPayload | null {
@@ -182,10 +230,47 @@ function parsePayload(payloadJson: string): AdminPanelPayload | null {
   const record = parsed as Record<string, unknown>;
   if (record.op === 'show' && typeof record.screen === 'string') {
     const screen = record.screen;
-    if (screen === 'main' || screen === 'mode' || screen === 'cap' || screen === 'event') {
-      return { op: 'show', screen };
+    if (
+      screen === 'main' ||
+      screen === 'mode' ||
+      screen === 'cap' ||
+      screen === 'event' ||
+      screen === 'posts'
+    ) {
+      const filter = record['filter'];
+      if (filter !== undefined && filter !== 'all' && filter !== 'expired') {
+        return null;
+      }
+      return {
+        op: 'show',
+        screen,
+        ...(filter !== undefined ? { filter: filter as PanelPostsFilter } : {}),
+      };
     }
     return null;
+  }
+  if (
+    record.op === 'show_post' ||
+    record.op === 'pin_post' ||
+    record.op === 'delete_request' ||
+    record.op === 'delete_confirm' ||
+    record.op === 'start_edit'
+  ) {
+    const ref = parsePostRef(record);
+    return ref === null ? null : { op: record.op, ...ref };
+  }
+  if (record.op === 'unpin_post' && typeof record['channelMessageId'] === 'number') {
+    const channelMessageId = record['channelMessageId'];
+    if (!Number.isSafeInteger(channelMessageId) || channelMessageId <= 0) {
+      return null;
+    }
+    return { op: 'unpin_post', channelMessageId };
+  }
+  if (record.op === 'set_auto_pin' && typeof record['enabled'] === 'boolean') {
+    return { op: 'set_auto_pin', enabled: record['enabled'] };
+  }
+  if (record.op === 'set_retention' && typeof record['enabled'] === 'boolean') {
+    return { op: 'set_retention', enabled: record['enabled'] };
   }
   if (record.op === 'set_mode' && typeof record.mode === 'string' && isPublishMode(record.mode)) {
     return { op: 'set_mode', mode: record.mode };
@@ -204,8 +289,14 @@ export function createAdminPanelService(deps: {
   readonly clock: Clock;
   /** The bootstrap owner id (server config) — the protected identity. */
   readonly ownerTelegramId?: number;
+  /**
+   * Slice 6 — the post-management service behind the posts screens.
+   * OPTIONAL: without it the posts screens answer "unavailable"
+   * honestly and the mode/cap/event screens keep working untouched.
+   */
+  readonly postManagement?: PostManagementService;
 }): AdminPanelService {
-  const { executor, clock, ownerTelegramId } = deps;
+  const { executor, clock, ownerTelegramId, postManagement } = deps;
 
   /**
    * Settle the event's lazy expiry BEFORE any read or callback: a
@@ -230,6 +321,7 @@ export function createAdminPanelService(deps: {
     const capInForce = effectiveDailyCap(settings.cap, tehranDate);
     const pending =
       settings.cap.changedTehranDate === tehranDate && settings.cap.cap !== capInForce;
+    const activePin = postManagement === undefined ? null : await postManagement.activePin();
     return {
       mode: settings.mode,
       capInForce,
@@ -238,6 +330,7 @@ export function createAdminPanelService(deps: {
       eventActive,
       counts,
       tehranDate,
+      activePin,
     };
   }
 
@@ -280,7 +373,9 @@ export function createAdminPanelService(deps: {
           ? ADMIN_PANEL_TOKEN_ACTIONS.showMode
           : input.screen === 'cap'
             ? ADMIN_PANEL_TOKEN_ACTIONS.showCap
-            : ADMIN_PANEL_TOKEN_ACTIONS.showEvent;
+            : input.screen === 'posts'
+              ? ADMIN_PANEL_TOKEN_ACTIONS.showPosts
+              : ADMIN_PANEL_TOKEN_ACTIONS.showEvent;
     return mintToken({
       telegramUserId: input.telegramUserId,
       action,
@@ -318,6 +413,9 @@ export function createAdminPanelService(deps: {
       escapeTelegramHtml(
         `${s.mainEventLabel} ${state.eventActive ? s.mainEventOn : s.mainEventOff}`,
       ),
+      escapeTelegramHtml(
+        `${s.mainPinLabel} ${state.activePin === null ? s.mainPinNone : `#${state.activePin.channelMessageId}`}`,
+      ),
     ];
     if (state.eventActive) {
       parts.push(escapeTelegramHtml(s.eventActiveLine));
@@ -329,10 +427,11 @@ export function createAdminPanelService(deps: {
         ),
       );
     }
-    const [modeToken, capToken, eventToken] = await Promise.all([
+    const [modeToken, capToken, eventToken, postsToken] = await Promise.all([
       showButtons({ telegramUserId: input.telegramUserId, screen: 'mode', nowMs: input.nowMs }),
       showButtons({ telegramUserId: input.telegramUserId, screen: 'cap', nowMs: input.nowMs }),
       showButtons({ telegramUserId: input.telegramUserId, screen: 'event', nowMs: input.nowMs }),
+      showButtons({ telegramUserId: input.telegramUserId, screen: 'posts', nowMs: input.nowMs }),
     ]);
     return {
       kind: 'reply',
@@ -343,6 +442,7 @@ export function createAdminPanelService(deps: {
           button(capToken, s.capButton),
           button(eventToken, s.eventButton),
         ],
+        [button(postsToken, s.postsButton)],
       ],
     };
   }
@@ -476,11 +576,259 @@ export function createAdminPanelService(deps: {
     };
   }
 
+  /**
+   * Slice 6 — the housekeeping list screen. A LIST screen by nature: one
+   * open-button per listed post (capped at 5), one filter toggle, the
+   * auto-pin toggle, the retention toggle, and Back. The toggles live
+   * here because they ARE the housekeeping screen's job — the mode/cap/
+   * event screens keep their own 3–4-button shape untouched.
+   */
+  async function renderPosts(input: {
+    readonly telegramUserId: number;
+    readonly role: AdminRole;
+    readonly uiLanguage: AdminUiLanguage;
+    readonly filter: PanelPostsFilter;
+    readonly nowMs: number;
+  }): Promise<AdminPanelReplyResult> {
+    const s = ADMIN_PANEL_STRINGS[input.uiLanguage];
+    if (postManagement === undefined) {
+      return {
+        kind: 'reply',
+        text: escapeTelegramHtml(s.callbackPostMgmtUnavailable),
+      };
+    }
+    const [posts, autoPinEnabled, retention] = await Promise.all([
+      postManagement.listPosts({
+        telegramUserId: input.telegramUserId,
+        role: input.role,
+        filters: { status: input.filter, limit: 5 },
+      }),
+      postManagement.autoPinEnabled(),
+      postManagement.retentionRule(),
+    ]);
+    const parts: TelegramSafeHtml[] = [
+      telegramBold(s.postsTitle),
+      escapeTelegramHtml(s.postsRetentionLine(retention)),
+    ];
+    if (posts.length === 0) {
+      parts.push(escapeTelegramHtml(s.postsEmpty));
+    }
+    for (const post of posts) {
+      parts.push(escapeTelegramHtml(formatPostLine(post)));
+    }
+    parts.push(escapeTelegramHtml(s.postsHint));
+    const postTokens = await Promise.all(
+      posts.map((post) =>
+        mintToken({
+          telegramUserId: input.telegramUserId,
+          action: ADMIN_PANEL_TOKEN_ACTIONS.showPost,
+          payload: {
+            op: 'show_post',
+            refType: post.refType,
+            refId: post.refId,
+            channelMessageId: post.channelMessageId,
+          },
+          nowMs: input.nowMs,
+        }),
+      ),
+    );
+    const filterToken = await mintToken({
+      telegramUserId: input.telegramUserId,
+      action: ADMIN_PANEL_TOKEN_ACTIONS.showPosts,
+      payload: {
+        op: 'show',
+        screen: 'posts',
+        filter: input.filter === 'all' ? 'expired' : 'all',
+      },
+      nowMs: input.nowMs,
+    });
+    const autoPinToken = await mintToken({
+      telegramUserId: input.telegramUserId,
+      action: ADMIN_PANEL_TOKEN_ACTIONS.setAutoPin,
+      payload: { op: 'set_auto_pin', enabled: !autoPinEnabled },
+      nowMs: input.nowMs,
+    });
+    const retentionToken = await mintToken({
+      telegramUserId: input.telegramUserId,
+      action: ADMIN_PANEL_TOKEN_ACTIONS.setRetention,
+      payload: { op: 'set_retention', enabled: !retention.enabled },
+      nowMs: input.nowMs,
+    });
+    const backToken = await showButtons({
+      telegramUserId: input.telegramUserId,
+      screen: 'main',
+      nowMs: input.nowMs,
+    });
+    const buttons: AdminPanelButtons = [
+      ...postTokens.map((token, index) => [button(token, `#${posts[index]!.channelMessageId}`)]),
+      [
+        button(filterToken, input.filter === 'all' ? s.postsFilterExpired : s.postsFilterAll),
+        button(autoPinToken, autoPinEnabled ? s.postsAutoPinOnButton : s.postsAutoPinOffButton),
+      ],
+      [
+        button(
+          retentionToken,
+          retention.enabled ? s.postsRetentionOnButton : s.postsRetentionOffButton,
+        ),
+        button(backToken, s.backButton),
+      ],
+    ];
+    return { kind: 'reply', text: composeTelegramHtml(parts), buttons };
+  }
+
+  /** One housekeeping list line: pin mark, message id, category, date, expiry. */
+  function formatPostLine(post: ChannelPostListRow): string {
+    const date = new Date(post.publishedAtMs).toISOString().slice(0, 10);
+    const pin = post.pinned ? '📌 ' : '';
+    const expired = post.expired ? ' · expired' : '';
+    const title =
+      post.title === null
+        ? ''
+        : ` · ${post.title.length > 40 ? `${post.title.slice(0, 40)}…` : post.title}`;
+    return `${pin}#${post.channelMessageId} · ${post.category} · ${date}${expired}${title}`;
+  }
+
+  async function renderPostDetail(input: {
+    readonly telegramUserId: number;
+    readonly role: AdminRole;
+    readonly uiLanguage: AdminUiLanguage;
+    readonly ref: PanelPostRef;
+    readonly nowMs: number;
+  }): Promise<AdminPanelReplyResult> {
+    const s = ADMIN_PANEL_STRINGS[input.uiLanguage];
+    if (postManagement === undefined) {
+      return {
+        kind: 'reply',
+        text: escapeTelegramHtml(s.callbackPostMgmtUnavailable),
+      };
+    }
+    const posts = await postManagement.listPosts({
+      telegramUserId: input.telegramUserId,
+      role: input.role,
+      filters: { status: 'all', limit: 50 },
+    });
+    const post = posts.find((row) => row.channelMessageId === input.ref.channelMessageId);
+    if (post === undefined) {
+      return {
+        kind: 'reply',
+        text: escapeTelegramHtml(s.postsEmpty),
+      };
+    }
+    const parts: TelegramSafeHtml[] = [
+      telegramBold(`${s.postDetailTitle} #${post.channelMessageId}`),
+      escapeTelegramHtml(`${s.postDetailCategoryLabel} ${post.category}`),
+      escapeTelegramHtml(
+        `${s.postDetailPublishedLabel} ${new Date(post.publishedAtMs).toISOString()}`,
+      ),
+      escapeTelegramHtml(`${s.postDetailPinnedLabel} ${post.pinned ? '📌' : '—'}`),
+      escapeTelegramHtml(`${s.postDetailExpiredLabel} ${post.expired ? 'yes' : 'no'}`),
+    ];
+    if (post.title !== null) {
+      parts.push(escapeTelegramHtml(post.title));
+    }
+    const pinToken = await mintToken({
+      telegramUserId: input.telegramUserId,
+      action: post.pinned ? ADMIN_PANEL_TOKEN_ACTIONS.unpinPost : ADMIN_PANEL_TOKEN_ACTIONS.pinPost,
+      payload: post.pinned
+        ? { op: 'unpin_post', channelMessageId: post.channelMessageId }
+        : {
+            op: 'pin_post',
+            refType: post.refType,
+            refId: post.refId,
+            channelMessageId: post.channelMessageId,
+          },
+      nowMs: input.nowMs,
+    });
+    const editToken = await mintToken({
+      telegramUserId: input.telegramUserId,
+      action: ADMIN_PANEL_TOKEN_ACTIONS.startEdit,
+      payload: {
+        op: 'start_edit',
+        refType: post.refType,
+        refId: post.refId,
+        channelMessageId: post.channelMessageId,
+      },
+      nowMs: input.nowMs,
+    });
+    const deleteToken = await mintToken({
+      telegramUserId: input.telegramUserId,
+      action: ADMIN_PANEL_TOKEN_ACTIONS.deleteRequest,
+      payload: {
+        op: 'delete_request',
+        refType: post.refType,
+        refId: post.refId,
+        channelMessageId: post.channelMessageId,
+      },
+      nowMs: input.nowMs,
+    });
+    const backToken = await showButtons({
+      telegramUserId: input.telegramUserId,
+      screen: 'posts',
+      nowMs: input.nowMs,
+    });
+    return {
+      kind: 'reply',
+      text: composeTelegramHtml(parts),
+      buttons: [
+        [
+          button(pinToken, post.pinned ? s.postDetailUnpinButton : s.postDetailPinButton),
+          button(editToken, s.postDetailEditButton),
+          button(deleteToken, s.postDetailDeleteButton),
+        ],
+        [button(backToken, s.backButton)],
+      ],
+    };
+  }
+
+  async function renderDeleteConfirm(input: {
+    readonly telegramUserId: number;
+    readonly uiLanguage: AdminUiLanguage;
+    readonly ref: PanelPostRef;
+    readonly nowMs: number;
+  }): Promise<AdminPanelReplyResult> {
+    const s = ADMIN_PANEL_STRINGS[input.uiLanguage];
+    const confirmToken = await mintToken({
+      telegramUserId: input.telegramUserId,
+      action: ADMIN_PANEL_TOKEN_ACTIONS.deleteConfirm,
+      payload: {
+        op: 'delete_confirm',
+        refType: input.ref.refType,
+        refId: input.ref.refId,
+        channelMessageId: input.ref.channelMessageId,
+      },
+      nowMs: input.nowMs,
+    });
+    const cancelToken = await mintToken({
+      telegramUserId: input.telegramUserId,
+      action: ADMIN_PANEL_TOKEN_ACTIONS.showPost,
+      payload: {
+        op: 'show_post',
+        refType: input.ref.refType,
+        refId: input.ref.refId,
+        channelMessageId: input.ref.channelMessageId,
+      },
+      nowMs: input.nowMs,
+    });
+    return {
+      kind: 'reply',
+      text: composeTelegramHtml([
+        telegramBold(s.deleteConfirmTitle),
+        escapeTelegramHtml(`#${input.ref.channelMessageId}`),
+      ]),
+      buttons: [
+        [button(confirmToken, s.deleteConfirmButton)],
+        [button(cancelToken, s.deleteCancelButton)],
+      ],
+    };
+  }
+
   async function renderScreen(input: {
     readonly telegramUserId: number;
+    readonly role: AdminRole;
     readonly uiLanguage: AdminUiLanguage;
     readonly screen: PanelScreen;
     readonly nowMs: number;
+    readonly postsFilter?: PanelPostsFilter;
   }): Promise<AdminPanelReplyResult> {
     const state = await loadState(input.nowMs);
     switch (input.screen) {
@@ -492,6 +840,14 @@ export function createAdminPanelService(deps: {
         return renderCap({ ...input, state });
       case 'event':
         return renderEvent({ ...input, state });
+      case 'posts':
+        return renderPosts({
+          telegramUserId: input.telegramUserId,
+          role: input.role,
+          uiLanguage: input.uiLanguage,
+          filter: input.postsFilter ?? 'all',
+          nowMs: input.nowMs,
+        });
     }
   }
 
@@ -509,7 +865,13 @@ export function createAdminPanelService(deps: {
           text: escapeTelegramHtml(ADMIN_PANEL_STRINGS[uiLanguage].permissionDenied),
         };
       }
-      return renderScreen({ telegramUserId, uiLanguage, screen: 'main', nowMs: clock.now() });
+      return renderScreen({
+        telegramUserId,
+        role,
+        uiLanguage,
+        screen: 'main',
+        nowMs: clock.now(),
+      });
     },
 
     async screen({ telegramUserId, role, uiLanguage, screen }) {
@@ -519,7 +881,7 @@ export function createAdminPanelService(deps: {
           text: escapeTelegramHtml(ADMIN_PANEL_STRINGS[uiLanguage].permissionDenied),
         };
       }
-      return renderScreen({ telegramUserId, uiLanguage, screen, nowMs: clock.now() });
+      return renderScreen({ telegramUserId, role, uiLanguage, screen, nowMs: clock.now() });
     },
 
     async handleCallback({ telegramUserId, role, uiLanguage, token }) {
@@ -543,12 +905,171 @@ export function createAdminPanelService(deps: {
       // stored-active event can never be toggled or rendered as active.
       await settleEvent(nowMs);
       if (payload.op === 'show') {
-        return renderScreen({ telegramUserId, uiLanguage, screen: payload.screen, nowMs });
+        return renderScreen({
+          telegramUserId,
+          role,
+          uiLanguage,
+          screen: payload.screen,
+          nowMs,
+          postsFilter: payload.filter,
+        });
+      }
+      if (payload.op === 'show_post') {
+        return renderPostDetail({
+          telegramUserId,
+          role,
+          uiLanguage,
+          ref: payload,
+          nowMs,
+        });
+      }
+      if (payload.op === 'delete_request') {
+        return renderDeleteConfirm({
+          telegramUserId,
+          uiLanguage,
+          ref: payload,
+          nowMs,
+        });
       }
       // Mutations: owner + chief_editor ONLY. The token burns and nothing
       // moves for any other role — the denial is the toast, never a write.
       if (!canChangePublishingSettings(role)) {
         return answer(s.callbackPermissionDenied);
+      }
+      // Slice 6 — post-management mutations delegate to the injected
+      // service (which re-checks the role — defense in depth). Without
+      // the service the toast is honest, never a pretend success.
+      if (payload.op === 'pin_post' || payload.op === 'unpin_post') {
+        if (postManagement === undefined) {
+          return answer(s.callbackPostMgmtUnavailable);
+        }
+        if (payload.op === 'pin_post') {
+          const outcome = await postManagement.pinPost({
+            telegramUserId,
+            role,
+            refType: payload.refType,
+            refId: payload.refId,
+            channelMessageId: payload.channelMessageId,
+          });
+          switch (outcome.kind) {
+            case 'pinned':
+              return answer(s.callbackPinned);
+            case 'already_pinned':
+              return answer(s.callbackAlreadyPinned);
+            case 'denied':
+              return answer(s.callbackPermissionDenied);
+            case 'transport_unavailable':
+              return answer(s.callbackPostMgmtUnavailable);
+            case 'pin_failed':
+              return answer(s.callbackPinFailed);
+          }
+        } else {
+          const outcome = await postManagement.unpinPost({
+            telegramUserId,
+            role,
+            channelMessageId: payload.channelMessageId,
+          });
+          switch (outcome.kind) {
+            case 'unpinned':
+              return answer(s.callbackUnpinned);
+            case 'not_pinned':
+              return answer(s.callbackNotPinned);
+            case 'denied':
+              return answer(s.callbackPermissionDenied);
+            case 'transport_unavailable':
+              return answer(s.callbackPostMgmtUnavailable);
+            case 'unpin_failed':
+              return answer(s.callbackPinFailed);
+          }
+        }
+      }
+      if (payload.op === 'delete_confirm') {
+        if (postManagement === undefined) {
+          return answer(s.callbackPostMgmtUnavailable);
+        }
+        const outcome = await postManagement.deletePost({
+          telegramUserId,
+          role,
+          refType: payload.refType,
+          refId: payload.refId,
+          channelMessageId: payload.channelMessageId,
+        });
+        if (outcome.kind === 'denied') {
+          return answer(s.callbackPermissionDenied);
+        }
+        if (outcome.kind === 'transport_unavailable') {
+          return answer(s.callbackPostMgmtUnavailable);
+        }
+        if (outcome.kind === 'delete_failed') {
+          return answer(s.callbackDeleteFailed);
+        }
+        // Deleted: the fresh posts list IS the confirmation (the post
+        // is gone from it). The toast text is lost on the reply path —
+        // the list carries the proof instead.
+        return renderPosts({
+          telegramUserId,
+          role,
+          uiLanguage,
+          filter: 'all',
+          nowMs,
+        });
+      }
+      if (payload.op === 'set_auto_pin') {
+        if (postManagement === undefined) {
+          return answer(s.callbackPostMgmtUnavailable);
+        }
+        const outcome = await postManagement.setAutoPin({
+          telegramUserId,
+          role,
+          enabled: payload.enabled,
+        });
+        if (outcome.kind === 'denied') {
+          return answer(s.callbackPermissionDenied);
+        }
+        if (outcome.kind === 'no_change') {
+          return answer(s.callbackNoChange);
+        }
+        return answer(payload.enabled ? s.callbackAutoPinOn : s.callbackAutoPinOff);
+      }
+      if (payload.op === 'set_retention') {
+        if (postManagement === undefined) {
+          return answer(s.callbackPostMgmtUnavailable);
+        }
+        const current = await postManagement.retentionRule();
+        const outcome = await postManagement.setRetention({
+          telegramUserId,
+          role,
+          rule: { ...current, enabled: payload.enabled },
+        });
+        if (outcome.kind === 'denied') {
+          return answer(s.callbackPermissionDenied);
+        }
+        if (outcome.kind === 'invalid') {
+          return answer(s.callbackInvalidToken);
+        }
+        if (outcome.kind === 'no_change') {
+          return answer(s.callbackNoChange);
+        }
+        return answer(payload.enabled ? s.callbackRetentionOn : s.callbackRetentionOff);
+      }
+      if (payload.op === 'start_edit') {
+        if (postManagement === undefined) {
+          return answer(s.callbackPostMgmtUnavailable);
+        }
+        const outcome = await postManagement.startEdit({
+          telegramUserId,
+          role,
+          refType: payload.refType,
+          refId: payload.refId,
+          channelMessageId: payload.channelMessageId,
+        });
+        if (outcome.kind === 'denied') {
+          return answer(s.callbackPermissionDenied);
+        }
+        return {
+          kind: 'reply',
+          text: escapeTelegramHtml(s.editPrompt),
+        };
       }
       if (payload.op === 'set_mode') {
         const outcome = await setPublishMode(executor, {
@@ -574,6 +1095,9 @@ export function createAdminPanelService(deps: {
             ? s.callbackCapSet(payload.cap, outcome.effectiveFrom)
             : s.callbackCapNoChange(payload.cap),
         );
+      }
+      if (payload.op !== 'set_event') {
+        return answer(s.callbackInvalidToken);
       }
       const outcome = await setEventMode(executor, {
         active: payload.active,
