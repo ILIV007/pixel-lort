@@ -25,12 +25,13 @@ schema 8) is PR #18 (branch
 management — pins + housekeeping — + near-dup detection, v1.44.0 /
 schema 9) is PR #19 (branch
 `slice/06-post-management-near-dup`, commit 63bdbf7). Slice 7 (R2/KV +
-media/albums, v1.45.0 / schema 9, ZERO DDL) is the current branch
-(`slice/07-r2-kv-media-albums`): KV namespace `pixel-cache-preview`
-provisioned via the API and wired as CACHE in the preview env; R2 NOT
-provisioned (API 403 code 10042 — the single owner dashboard action);
-native chunked albums, rich slideshows, caption-overflow reply chains,
-and the edit media guard, all fail-closed and tested. The Phase
+media/albums, v1.45.0 / schema 9, ZERO DDL) is PR #20 (branch
+`slice/07-r2-kv-media-albums`, commit ab97dbe): KV namespace
+`pixel-cache-preview` provisioned via the API and wired as CACHE in
+the preview env; R2 NOT provisioned (API 403 code 10042 — the single
+owner dashboard action); native chunked albums, rich slideshows,
+caption-overflow reply chains, and the edit media guard, all
+fail-closed and tested. The Phase
 2A record below is the historical account of that phase; the current
 phase state lives in `docs/ROADMAP.md`.
 
