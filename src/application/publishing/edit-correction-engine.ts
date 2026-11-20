@@ -56,6 +56,7 @@ import {
   type CorrectionClass,
   type CorrectionDisposition,
 } from '../../domain/publishing/edit-correction';
+import { assertEditsHaveNoMedia } from '../../domain/media/media-edit-guard';
 import { classifySendOutcome } from '../../domain/publishing/send-outcome';
 import {
   deriveCorrectionEdits,
@@ -116,6 +117,7 @@ export type ApplyCorrectionReport = {
     | 'not_supersedable'
     | 'no_edit_target'
     | 'edits_absent'
+    | 'media_replacement_refused'
     | 'misconfigured_transport_absent';
   readonly planReasons: readonly string[];
   readonly supersededPublications: readonly string[];
@@ -352,6 +354,25 @@ export function createEditCorrectionEngine(deps: {
         planReasons: plan.reasons,
         refusal: 'edits_absent',
       });
+    }
+    if (editDisposition) {
+      // Slice 7 — the MEDIA GUARD (DESIGN §10.2/§10.3): media files are
+      // NEVER replaced by edit, only the caption. The whole pass refuses
+      // typed BEFORE any supersede/link/edit write when ANY planned edit
+      // smuggles a media payload or an unknown shape — the caller must
+      // re-plan as a caption-only edit.
+      const mediaGuard = assertEditsHaveNoMedia(editRequests);
+      if (!mediaGuard.ok) {
+        deps.logger.warn('correction_engine.media_replacement_refused', {
+          publicationId: prior.id,
+          reason: mediaGuard.reason,
+        });
+        return noopReport({
+          disposition: plan.disposition,
+          planReasons: plan.reasons,
+          refusal: 'media_replacement_refused',
+        });
+      }
     }
 
     const recorded = new Map<number, RecordedMessage>(

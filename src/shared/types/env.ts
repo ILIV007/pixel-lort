@@ -275,6 +275,25 @@ export interface WorkerEnv {
    */
   readonly AI?: Ai;
   /**
+   * KV cache namespace (blueprint §4 binding name CACHE). Optional: only
+   * present where wrangler.jsonc declares it (preview — namespace
+   * `pixel-cache-preview`, provisioned 2026-11-21). Cache ONLY, never
+   * authoritative state; resolved through `resolveKvCache`, which fails
+   * typed (`kv_binding_absent`) when the binding is missing. With the
+   * binding absent every caller falls back to D1.
+   */
+  readonly CACHE?: KVNamespace;
+  /**
+   * R2 bucket for temporary rights-cleared media (blueprint §4 binding
+   * name MEDIA). Optional: only present where wrangler.jsonc declares it.
+   * NOT provisioned — R2 is not enabled on the Pixel account (API 403
+   * code 10042, 2026-11-21); enablement is the single owner dashboard
+   * action (Workers & Pages → R2 → enable). Resolved through
+   * `resolveR2MediaStorage`, which fails typed (`r2_binding_absent`)
+   * when the binding is missing; the media path refuses fail-closed.
+   */
+  readonly MEDIA?: R2Bucket;
+  /**
    * SECRET — Gemini API key (conditional; the Workers-AI-only path does
    * NOT require it). Values exist only via `wrangler secret put` or a
    * git-ignored `.dev.vars` file; never logged, echoed, or serialized.

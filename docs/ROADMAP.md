@@ -1879,6 +1879,30 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       `channel_pins` + `story_merges` + `quality_rejections` +
       `channel_post_deletes` (append-only, CHECKs + UNIQUEs enforced at
       the database level).
+- [x] Slice 7 — R2/KV + media/albums (app 1.45.0, schema 9 — ZERO DDL):
+      R2 is NOT provisioned — the Cloudflare API returns 403 code 10042
+      ("Please enable R2 through the Cloudflare Dashboard") on list and
+      create, so no bucket exists; the single owner dashboard action is
+      Workers & Pages → R2 → enable, after which `pixel-media-preview`
+      is created and the MEDIA binding wired. KV IS provisioned via the
+      API (namespace `pixel-cache-preview`, id
+      b9bfaa5757044549ad41e5f1022d1d03) and wired as the CACHE binding in
+      the preview env; cache only, never source of truth, fail-soft to
+      D1. Media/albums are built and tested regardless of R2: native
+      album via `sendMediaGroupChunked` (chunks of at most 10, trailing
+      single via sendPhoto/sendVideo, caption on chunk 0 only, first
+      failure stops, never retried); rich slideshow inside one rich
+      message for media + long text (album caption + reply-chain
+      continuations with i/N labels, entities remapped or counted when
+      dropped); caption overflow goes to a reply chain, NEVER silent
+      truncation (caption + continuations rejoin losslessly); media files
+      are never replaced by edit, only the caption (engine-level guard
+      refuses a smuggled media payload with zero effects). R2-absent
+      fail-closed (`resolveR2MediaStorage` → `r2_binding_absent`) and
+      KV-absent fail-soft (`resolveKvCache` → `kv_binding_absent`) are
+      pinned by tests, as is the wrangler.jsonc wiring (CACHE declared,
+      no active R2 binding). No live flags flipped; autonomous
+      publishing stays off. No migration (schema stays 9).
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ◒ (implemented on this branch, draft PR #11; PARTIAL — zod GHSA closed at runtime, dev advisories fixed by overrides)

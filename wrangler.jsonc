@@ -18,7 +18,7 @@
     "enabled": true,
   },
   "vars": {
-    "APP_VERSION": "1.44.0",
+    "APP_VERSION": "1.45.0",
     "ENVIRONMENT": "development",
     "LOG_LEVEL": "info",
     // Phase 1A build/schema metadata (non-secret — ADR-0020). APP_COMMIT is
@@ -186,6 +186,19 @@
   // "r2_buckets": [
   //   { "binding": "MEDIA", "bucket_name": "pixel-media-production" }  // preview: pixel-media-preview
   // ],
+  // Slice 7 (2026-11-21) — R2 is NOT provisioned: the API returns 403
+  // code 10042 ("Please enable R2 through the Cloudflare Dashboard") on
+  // both list and create, so NO bucket exists and NO r2_buckets binding
+  // is declared here (a declared binding to a nonexistent bucket would
+  // fail deploy). The ONE owner dashboard action is Workers & Pages →
+  // R2 → enable; after that, create `pixel-media-preview` and wire the
+  // binding in the preview env below. The code path is built and
+  // fail-closed meanwhile (`resolveR2MediaStorage` → r2_binding_absent).
+  //
+  // Slice 7 (2026-11-21) — KV cache namespace PROVISIONED via the API
+  // (`pixel-cache-preview`, id b9bfaa5757044549ad41e5f1022d1d03) and wired
+  // in the preview env below (binding CACHE). Cache only, never source
+  // of truth; absent binding fails soft to D1.
   //
   // Phase 6 (AI adapters) — Workers AI binding: DECLARED in the preview
   // environment below as configuration-as-code reconciliation of the
@@ -203,7 +216,7 @@
     "preview": {
       "name": "pixel-preview",
       "vars": {
-        "APP_VERSION": "1.44.0",
+        "APP_VERSION": "1.45.0",
         "ENVIRONMENT": "preview",
         "LOG_LEVEL": "info",
         "APP_COMMIT": "local-dev",
@@ -253,6 +266,20 @@
           "database_name": "pixel-db-preview",
           "database_id": "0212653a-b989-4953-9179-ddc01899c7f2",
           "migrations_dir": "migrations",
+        },
+      ],
+      // Slice 7 — KV cache namespace (blueprint §4 binding name CACHE).
+      // PROVISIONED 2026-11-21 via the Cloudflare API (namespace
+      // `pixel-cache-preview`, id b9bfaa5757044549ad41e5f1022d1d03).
+      // Cache only, never source of truth; the code resolves it through
+      // `resolveKvCache` and falls back to D1 when the binding is absent.
+      // R2 is NOT declared here: the bucket does not exist (R2 not
+      // enabled on the account — 403 code 10042) and a declared binding
+      // to a nonexistent bucket would fail deploy.
+      "kv_namespaces": [
+        {
+          "binding": "CACHE",
+          "id": "b9bfaa5757044549ad41e5f1022d1d03",
         },
       ],
       // Phase 3 Preview queue bindings (planned resource names per

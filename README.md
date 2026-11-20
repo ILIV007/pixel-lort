@@ -11,7 +11,7 @@ scheduling policies.
 - **Timezone:** `Asia/Tehran`
 - **Authoritative specification:** [`docs/blueprint/v1/`](docs/blueprint/README.md)
 
-## Current implementation status — v1.44.0 / schema 9 (branch `slice/06-post-management-near-dup`)
+## Current implementation status — v1.45.0 / schema 9 (branch `slice/07-r2-kv-media-albums`)
 
 Phases 0, 1A, 1B-preview, 2A, 2B, and 3 are done. PR #11 (v1.41.0 /
 schema 6) is merged to `main` (commit 5517390, repo rename to
@@ -24,7 +24,13 @@ schema 8) is PR #18 (branch
 `slice/05-game-links-epic-watchlists`, commit 7b52541). Slice 6 (post
 management — pins + housekeeping — + near-dup detection, v1.44.0 /
 schema 9) is PR #19 (branch
-`slice/06-post-management-near-dup`, commit 63bdbf7). The Phase
+`slice/06-post-management-near-dup`, commit 63bdbf7). Slice 7 (R2/KV +
+media/albums, v1.45.0 / schema 9, ZERO DDL) is the current branch
+(`slice/07-r2-kv-media-albums`): KV namespace `pixel-cache-preview`
+provisioned via the API and wired as CACHE in the preview env; R2 NOT
+provisioned (API 403 code 10042 — the single owner dashboard action);
+native chunked albums, rich slideshows, caption-overflow reply chains,
+and the edit media guard, all fail-closed and tested. The Phase
 2A record below is the historical account of that phase; the current
 phase state lives in `docs/ROADMAP.md`.
 
