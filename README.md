@@ -20,8 +20,8 @@ flags, and the live preview runs `main` (v1.42.0 / schema 7). Slice 4
 (inbound AI-admin pipeline, v1.42.0 / schema 7) is PR #17 (branch
 `slice/04-inbound-pipeline`, commit 2043360). Slice 5 (game-page links +
 Epic free-games connector + Tier V anchors + live watchlists, v1.43.0 /
-schema 8) is on branch `slice/05-game-links-epic-watchlists` (PR number
-to be filled in when the PR is opened). The Phase
+schema 8) is PR #18 (branch
+`slice/05-game-links-epic-watchlists`, commit 7b52541). The Phase
 2A record below is the historical account of that phase; the current
 phase state lives in `docs/ROADMAP.md`.
 
