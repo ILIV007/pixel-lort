@@ -27,6 +27,7 @@ export const ADMIN_STORY_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_QUEUE_WRITE_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_ALBUM_CAPTURE_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_MANAGE_FLAG_VALUES = ['true', 'false'] as const;
+export const ADMIN_PANEL_FLAG_VALUES = ['true', 'false'] as const;
 
 export const PHASE_9A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
   {
@@ -95,6 +96,17 @@ export const PHASE_9A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
       'Owner-only admin management surface gate (non-secret; issue #8). Gates the /admins list/add/remove/role Telegram commands, their help advertisement, and their single-use confirm/cancel callbacks only — fail-closed default false; the ONLY mutations are admin rows in D1 plus their audit events; independent of every other admin surface; never enables any send, publish, or scheduler path.',
     phase: 9,
   },
+  {
+    name: 'ADMIN_PANEL_ENABLED',
+    type: 'enum',
+    required: false,
+    secret: false,
+    allowed: [...ADMIN_PANEL_FLAG_VALUES],
+    default: 'false',
+    description:
+      'Telegram admin panel surface gate (non-secret; slice 3). Gates the /menu main/mode/cap/event Telegram commands, their help advertisement, and their single-use panel callbacks only — fail-closed default false; the ONLY mutations are publishing settings rows in D1 (mode/cap/event), daily budget counters, plus their audit events; independent of every other admin surface; never enables any send, publish, or scheduler path.',
+    phase: 9,
+  },
 ]);
 
 /** Validated Phase 9A/9B/9C flag state (values only; no secrets involved). */
@@ -113,6 +125,10 @@ export interface AdminReviewConfig {
   /** Issue #8: the owner-only /admins surface gate (independent; default
    *  OFF — list/add/remove/role plus the single-use confirm callbacks). */
   readonly adminManageEnabled: boolean;
+  /** Slice 3: the /menu admin panel surface gate (independent; default
+   *  OFF — main/mode/cap/event screens plus the single-use panel
+   *  callbacks; settings-only, never a send path). */
+  readonly panelEnabled: boolean;
 }
 
 /**
@@ -139,6 +155,7 @@ export function parseAdminReviewConfig(env: Readonly<Record<string, unknown>>): 
       albumCaptureEnabled:
         result.ok === true && result.config.ADMIN_ALBUM_CAPTURE_ENABLED === 'true',
       adminManageEnabled: result.ok === true && result.config.ADMIN_MANAGE_ENABLED === 'true',
+      panelEnabled: result.ok === true && result.config.ADMIN_PANEL_ENABLED === 'true',
     },
     result,
   };

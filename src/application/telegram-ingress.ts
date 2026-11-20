@@ -132,6 +132,7 @@ import type { AdminStoryViewService } from './publishing/story-view-service';
 import type { AdminPostButtons, AdminPostService } from './admin-post/admin-post-service';
 import type { AdminAlbumCaptureService } from './media/album-capture-service';
 import type { AdminManageService } from './admin-manage/admin-manage-service';
+import type { AdminPanelService } from './admin-panel/admin-panel-service';
 import { QUEUE_CANCEL_TOKEN_ACTION } from '../domain/publishing/queue-disposition';
 import { ADMIN_QUEUE_STRINGS } from '../admin/queue-strings';
 import type { PostContentDocument } from '../domain/admin-post/post-content';
@@ -250,6 +251,14 @@ export interface TelegramIngressDeps {
    * never a silent skip.
    */
   readonly adminManage?: AdminManageService;
+  /**
+   * Slice 3: the injected admin panel service that executes the typed
+   * `panel_main` / `panel_screen` actions the router emits while the
+   * `ADMIN_PANEL_ENABLED` gate is ON, and the `panel.*` token callbacks
+   * the dispatcher routes. Absent = retryable wiring failure, never a
+   * silent skip. Settings only — it never sends a post.
+   */
+  readonly adminPanel?: AdminPanelService;
   readonly clock: Clock;
   readonly logger: Logger;
 }
@@ -280,6 +289,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     albumCapture,
     adminPost,
     adminManage,
+    adminPanel,
     clock,
     logger,
   } = deps;
@@ -539,6 +549,33 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     await sendSafely(action.chatId, result.text, 'admin_manage_reply', result.buttons);
   }
 
+  /** Execute one admin-panel service action and deliver its outbound result. */
+  async function executeAdminPanel(
+    action:
+      | Extract<TelegramAction, { readonly type: 'panel_main' }>
+      | Extract<TelegramAction, { readonly type: 'panel_screen' }>,
+  ): Promise<void> {
+    if (adminPanel === undefined) {
+      logger.warn('telegram.action.admin_panel_unavailable', { action: action.type });
+      throw new AppError('service_unavailable');
+    }
+    const result =
+      action.type === 'panel_main'
+        ? await adminPanel.main({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+          })
+        : await adminPanel.screen({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+            screen: action.screen,
+          });
+    const buttons = result.buttons as AdminPostButtons | undefined;
+    await sendSafely(action.chatId, result.text, 'admin_panel_reply', buttons);
+  }
+
   /** Execute a routed action against the injected Bot API client. */
   async function executeAction(action: TelegramAction): Promise<void> {
     switch (action.type) {
@@ -740,6 +777,42 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
           });
           return;
         }
+        if (tokenRow.action.startsWith('panel.')) {
+          // Slice 3: the admin-panel service owns these tokens; its own
+          // consume/validate flow applies (the token is NOT consumed
+          // through any other path). Absent service = the honest
+          // retryable wiring failure. A `show` callback answers with a
+          // FRESH screen message sent to the chat the button was attached
+          // to (no chat id = the toast-only fallback); a `set` callback
+          // answers with its toast.
+          if (adminPanel === undefined) {
+            logger.warn('telegram.action.admin_panel_unavailable', {
+              action: action.type,
+            });
+            throw new AppError('service_unavailable');
+          }
+          const result = await adminPanel.handleCallback({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: ui,
+            token: action.token,
+          });
+          if (result.kind === 'reply') {
+            if (action.chatId !== undefined) {
+              const buttons = result.buttons as AdminPostButtons | undefined;
+              await sendSafely(action.chatId, result.text, 'panel_callback_reply', buttons);
+            }
+            await requireBotApi('action_token_callback').answerCallbackQuery({
+              callbackQueryId: action.callbackQueryId,
+            });
+            return;
+          }
+          await requireBotApi('action_token_callback').answerCallbackQuery({
+            callbackQueryId: action.callbackQueryId,
+            text: result.callbackText,
+          });
+          return;
+        }
         // A foreign/future action: the honest invalid answer with NOTHING
         // consumed — a token can never be burned by the wrong service.
         await answerInvalid();
@@ -780,6 +853,10 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
       case 'admin_manage_remove':
       case 'admin_manage_role':
         await executeAdminManage(action);
+        return;
+      case 'panel_main':
+      case 'panel_screen':
+        await executeAdminPanel(action);
         return;
     }
   }

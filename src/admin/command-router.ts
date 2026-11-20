@@ -71,6 +71,8 @@ import { ADMIN_ALBUM_CAPTURE_STRINGS, ALBUM_CAPTURE_COMMAND } from './album-capt
 import { parseAlbumCaptureArgument, type AlbumCaptureKind } from '../domain/media/album-capture';
 import { ADMIN_MANAGE_STRINGS, ADMINS_COMMAND } from './admin-manage-strings';
 import { parseAdminManageArgument } from './admin-manage-command';
+import { ADMIN_PANEL_STRINGS, MENU_COMMAND } from './panel-strings';
+import { parseMenuArgument } from './panel-command';
 import type {
   ParsedMediaAttachment,
   ParsedRichTextExtraction,
@@ -125,6 +127,8 @@ export type NoopReason =
   | 'album_capture_edited_message'
   | 'admins_not_private_chat'
   | 'admins_edited_message'
+  | 'menu_not_private_chat'
+  | 'menu_edited_message'
   | 'story_not_private_chat'
   | 'story_edited_message'
   | 'post_not_private_chat'
@@ -212,6 +216,13 @@ export type TelegramAction =
       readonly role: AdminRole;
       readonly uiLanguage: AdminUiLanguage;
       readonly token: string;
+      /**
+       * Slice 3: the chat the callback button was attached to (the
+       * callback message's chat id), when present. Panel `show` callbacks
+       * answer with a FRESH screen message sent here; the legacy
+       * answer-only paths ignore it.
+       */
+      readonly chatId?: number;
     }
   | {
       /**
@@ -444,6 +455,31 @@ export type TelegramAction =
       readonly uiLanguage: AdminUiLanguage;
       readonly targetUserId: number;
       readonly targetRole: AdminRole;
+    }
+  | {
+      /**
+       * Slice 3 — the admin panel main screen (`/menu`). The router has
+       * already gated: the fail-closed flag ON + authorized + private chat
+       * + fresh message. Viewing is open to every authorized admin; the
+       * service re-checks the owner/chief_editor rule for mutations.
+       */
+      readonly type: 'panel_main';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+    }
+  | {
+      /**
+       * Slice 3 — one admin panel screen (`/menu mode|cap|event`). Same
+       * gating as `panel_main`; the service owns ALL reads.
+       */
+      readonly type: 'panel_screen';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+      readonly screen: 'mode' | 'cap' | 'event';
     };
 
 export interface CommandRouteContext {
@@ -527,6 +563,17 @@ export interface CommandRouteContext {
    * events; it never widens any send, publish, or scheduler behavior.
    */
   readonly adminManageEnabled?: boolean;
+  /**
+   * Slice 3: whether the admin panel surface is enabled (the
+   * `ADMIN_PANEL_ENABLED` fail-closed flag, parsed by the caller).
+   * Default/absent = DISABLED: `/menu` keeps the exact unknown-command
+   * noop semantics and /help never advertises it. It gates ONLY the
+   * main/mode/cap/event screens and their single-use panel callbacks —
+   * the ONLY mutations are publishing settings rows in D1 plus their
+   * audit events and the daily budget counters; it never widens any
+   * send, publish, or scheduler behavior.
+   */
+  readonly panelEnabled?: boolean;
 }
 
 export interface CommandRouter {
@@ -608,6 +655,7 @@ function helpResponse(
   queueLine: string | null,
   storyLine: string | null,
   adminsLine: string | null,
+  panelLine: string | null,
 ): TelegramSafeHtml {
   const s = ADMIN_UI_STRINGS[ui];
   return composeTelegramHtml([
@@ -625,6 +673,9 @@ function helpResponse(
     // Issue #8: advertised ONLY when the manage gate is ON and the actor
     // IS the owner (the caller passes null otherwise).
     ...(adminsLine !== null ? [escapeTelegramHtml(adminsLine)] : []),
+    // Slice 3: advertised ONLY when the panel gate is ON (the caller
+    // passes null otherwise) — every authorized admin may view the panel.
+    ...(panelLine !== null ? [escapeTelegramHtml(panelLine)] : []),
   ]);
 }
 
@@ -680,6 +731,9 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
   // Issue #8: the admin-manage gate is fail-closed — absent/false both
   // DISABLE.
   const adminManageEnabled = context.adminManageEnabled === true;
+  // Slice 3: the admin panel gate is fail-closed — absent/false both
+  // DISABLE.
+  const panelEnabled = context.panelEnabled === true;
 
   function respond(
     command: InitialAdminCommand,
@@ -688,12 +742,20 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
     queueHelpLine: string | null = null,
     storyHelpLine: string | null = null,
     adminsHelpLine: string | null = null,
+    panelHelpLine: string | null = null,
   ): TelegramSafeHtml {
     switch (command) {
       case 'start':
         return startResponse(ui);
       case 'help':
-        return helpResponse(ui, draftsHelpLine, queueHelpLine, storyHelpLine, adminsHelpLine);
+        return helpResponse(
+          ui,
+          draftsHelpLine,
+          queueHelpLine,
+          storyHelpLine,
+          adminsHelpLine,
+          panelHelpLine,
+        );
       case 'status':
         return statusResponse(ui, applicationVersion);
       case 'version':
@@ -721,19 +783,20 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         return { type: 'noop', reason: 'malformed_callback_data' };
       }
       // ---- Phase 9C token dispatcher ------------------------------------
-      // While the write-capable queue surface OR the owner-only admin
-      // management surface is enabled, EVERY `a:` callback routes through
-      // the ACTION-AWARE dispatcher: the ingress pre-reads the token's
-      // server-side action and hands it to the OWNING service (admin_post.*
-      // → the admin-post service; queue.cancel_publication → the
-      // disposition service; admins.* → the admin-manage service;
-      // anything else → the honest invalid answer with NOTHING consumed).
+      // While the write-capable queue surface, the owner-only admin
+      // management surface, OR the slice-3 admin panel surface is enabled,
+      // EVERY `a:` callback routes through the ACTION-AWARE dispatcher: the
+      // ingress pre-reads the token's server-side action and hands it to
+      // the OWNING service (admin_post.* → the admin-post service;
+      // queue.cancel_publication → the disposition service; admins.* → the
+      // admin-manage service; panel.* → the admin-panel service; anything
+      // else → the honest invalid answer with NOTHING consumed).
       // An admin-post token can never be burned by the queue surface, and
       // a foreign/future token can never be burned by either. (Issue #8:
       // the dispatcher is the ONLY callback entry for admins.* tokens —
       // routing them through the admin-post service would consume them as
       // unknown actions.)
-      if (queueWriteEnabled || adminManageEnabled) {
+      if (queueWriteEnabled || adminManageEnabled || panelEnabled) {
         if (actor.kind === 'unauthorized') {
           return { type: 'noop', reason: 'callback_not_supported' };
         }
@@ -747,6 +810,7 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
           role: actor.role,
           uiLanguage: uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE,
           token: callback.token,
+          ...(update.callbackChatId !== undefined ? { chatId: update.callbackChatId } : {}),
         };
       }
       // ---- R1.20-R admin post callbacks --------------------------------
@@ -1433,6 +1497,72 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
       }
     }
 
+    // ---- Slice 3 admin panel (`/menu`) ----------------------------------
+    // Gated by its OWN fail-closed flag; while OFF the command falls
+    // through to the SAME unknown-command noop — zero feedback and ZERO
+    // settings reads. Viewing is open to every AUTHORIZED admin (the
+    // owner/chief_editor rule binds MUTATIONS only, enforced in the
+    // service at callback time). The router validates the argument
+    // grammar and emits the typed action; the reads AND the writes happen
+    // in the injected admin-panel service.
+    if (command === MENU_COMMAND) {
+      if (!panelEnabled) {
+        return { type: 'noop', reason: 'command_not_allowlisted' };
+      }
+      if (actor.kind === 'unauthorized') {
+        if (chatId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        return { type: 'denied', chatId, reason: 'unauthorized', text: denialText() };
+      }
+      const panelUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
+      if (update.chatType !== 'private') {
+        return { type: 'noop', reason: 'menu_not_private_chat' };
+      }
+      if (update.kind !== 'message') {
+        return { type: 'noop', reason: 'menu_edited_message' };
+      }
+      if (chatId === undefined || update.fromUserId === undefined) {
+        return { type: 'noop', reason: 'unroutable_message' };
+      }
+      const remainder = commandRemainder(update.text);
+      if (remainder.kind === 'malformed') {
+        return {
+          type: 'send_message',
+          chatId,
+          text: escapeTelegramHtml(ADMIN_PANEL_STRINGS[panelUi].invalidUsage),
+        };
+      }
+      const parsedMenuArgument = parseMenuArgument(
+        remainder.kind === 'remainder' ? remainder.text : undefined,
+      );
+      switch (parsedMenuArgument.kind) {
+        case 'main':
+          return {
+            type: 'panel_main',
+            chatId,
+            telegramUserId: update.fromUserId,
+            role: actor.role,
+            uiLanguage: panelUi,
+          };
+        case 'screen':
+          return {
+            type: 'panel_screen',
+            chatId,
+            telegramUserId: update.fromUserId,
+            role: actor.role,
+            uiLanguage: panelUi,
+            screen: parsedMenuArgument.screen,
+          };
+        case 'invalid':
+          return {
+            type: 'send_message',
+            chatId,
+            text: escapeTelegramHtml(ADMIN_PANEL_STRINGS[panelUi].invalidUsage),
+          };
+      }
+    }
+
     if (!isInitialAdminCommand(command)) {
       // Ignored for every sender — no feedback for command probing.
       return { type: 'noop', reason: 'command_not_allowlisted' };
@@ -1470,10 +1600,19 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         adminManageEnabled && roleHasPermission(actor.role, 'admin.manage')
           ? ADMIN_MANAGE_STRINGS[ui].helpAdminsLine
           : null;
+      const panelHelpLine = panelEnabled ? ADMIN_PANEL_STRINGS[ui].helpMenuLine : null;
       return {
         type: 'send_message',
         chatId,
-        text: respond(command, ui, draftsHelpLine, queueHelpLine, storyHelpLine, adminsHelpLine),
+        text: respond(
+          command,
+          ui,
+          draftsHelpLine,
+          queueHelpLine,
+          storyHelpLine,
+          adminsHelpLine,
+          panelHelpLine,
+        ),
       };
     }
 

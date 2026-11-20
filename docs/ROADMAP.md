@@ -1768,6 +1768,31 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       RED-first held: 15 unit + 16 REAL-D1 registered in test:db.
       docs/reviews/PHASE_9D_ALBUM_CAPTURE.md records the design and the
       honest two-layer boundary.
+- [x] Slice 3 — admin panel (app 1.41.0, schema still 6 — ZERO DDL): the
+      `/menu` settings surface (mode toggle + adjustable daily cap +
+      event mode) in the EXACT Phase 9 shape — the independent fail-closed
+      `ADMIN_PANEL_ENABLED` flag (default false, invalid-present =
+      disabled, shipped 'false' everywhere) gates ONLY the main/mode/cap/
+      event screens, their /help advertisement, and their single-use
+      panel callbacks; `ADMIN_MANAGE_ENABLED` stays 'false' (slice 2
+      untouched). Mode `auto` / `safe-auto` / `approval` / `paused`
+      (default direct `auto`, one-line description each); daily cap
+      12–18 (default 15, presets 12/15/18, "today X of Y published") with
+      the next-Tehran-day rule (a mid-day change never rewrites today);
+      the daily budget counter lives on D1 (`budgets` scope
+      `publication`, one bucket per Tehran day — resets at 00:00 Tehran
+      by construction) with the P0 bypass counted separately and marked;
+      event mode (manual on/off + the auto-trigger seam on a real P0)
+      lifts the cap with min gap 8–15 min and the MANDATORY end (manual
+      off, 6-hour timeout, or 2 idle hours with no fresh P0 — whichever
+      comes first, lazily settled on every panel read, audited); only
+      owner + chief_editor may change mode/cap/event (every other role
+      gets the clear denial, nothing written); every change is audited
+      (setting + audit in ONE atomic batch); `paused` rejects inbound
+      posts with the "bot is off" message (not queued) in the admin-post
+      start/capture paths. Settings only — no posts are sent and no
+      publishing/scheduler path is enabled. 36 REAL-D1 tests registered
+      in test:db.
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ◒ (implemented on this branch, draft PR #11; PARTIAL — zod GHSA closed at runtime, dev advisories fixed by overrides)

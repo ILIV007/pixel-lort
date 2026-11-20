@@ -7,6 +7,7 @@ import { createAdminQueueViewService } from '../../src/application/publishing/qu
 import { createAdminQueueDispositionService } from '../../src/application/publishing/queue-disposition-service';
 import { createAdminAlbumCaptureService } from '../../src/application/media/album-capture-service';
 import { createAdminManageService } from '../../src/application/admin-manage/admin-manage-service';
+import { createAdminPanelService } from '../../src/application/admin-panel/admin-panel-service';
 import { createAdminStoryViewService } from '../../src/application/publishing/story-view-service';
 import { createAuthorizationService } from '../../src/admin/authorization';
 import { createCommandRouter } from '../../src/admin/command-router';
@@ -142,6 +143,11 @@ export interface ReviewHarnessOptions {
   readonly adminManageEnabled?: boolean;
   /** Omit the admin management service (issue #8 wiring-failure tests). */
   readonly omitAdminManageService?: boolean;
+  /** Slice 3: whether the /menu admin panel surface is enabled
+   *  (default: disabled — the flag-off legacy behavior). */
+  readonly panelEnabled?: boolean;
+  /** Omit the admin panel service (slice-3 wiring-failure tests). */
+  readonly omitAdminPanelService?: boolean;
   readonly botApi?: TelegramBotApiClient;
   readonly executor?: CountingExecutor;
 }
@@ -181,6 +187,7 @@ export function buildReviewHarness(options: ReviewHarnessOptions = {}): ReviewHa
       albumCaptureEnabled: options.albumCaptureEnabled ?? false,
       storyEnabled: options.storyEnabled ?? false,
       adminManageEnabled: options.adminManageEnabled ?? false,
+      panelEnabled: options.panelEnabled ?? false,
     }),
     ...(options.omitReviewService
       ? {}
@@ -211,6 +218,15 @@ export function buildReviewHarness(options: ReviewHarnessOptions = {}): ReviewHa
     ...(options.adminManageEnabled === true && !options.omitAdminManageService
       ? {
           adminManage: createAdminManageService({
+            executor,
+            clock: fixedClock(NOW),
+            ownerTelegramId: OWNER_ID,
+          }),
+        }
+      : {}),
+    ...(options.panelEnabled === true && !options.omitAdminPanelService
+      ? {
+          adminPanel: createAdminPanelService({
             executor,
             clock: fixedClock(NOW),
             ownerTelegramId: OWNER_ID,
