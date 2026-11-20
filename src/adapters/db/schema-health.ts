@@ -63,6 +63,16 @@ export const EDITORIAL_POST_SCHEMA_VERSION = 6;
  */
 export const INBOUND_PIPELINE_SCHEMA_VERSION = 7;
 
+/**
+ * Slice 5 — the schema version of the LINEAR path's final candidate
+ * state: migration candidate 0008 (live watchlists) applied ON TOP of
+ * 0007. Version 8 therefore MEANS "ownership present AND admin post
+ * present AND the per-version editorial provenance present AND the inbound
+ * pipeline present AND the live-watchlist tables present". Capability
+ * marker only — never a health expectation.
+ */
+export const LIVE_WATCHLISTS_SCHEMA_VERSION = 8;
+
 export const SCHEMA_METADATA = {
   table: SCHEMA_METADATA_TABLE,
   versionKey: 'schema_version',
@@ -156,7 +166,7 @@ export type SchemaCapabilityUnresolvedReason =
   | 'schema_capability_metadata_missing'
   /** A value that is not a positive safe integer (corrupt/oversized). */
   | 'schema_capability_metadata_invalid'
-  /** A well-formed integer that is NOT an exactly-known version (≠3, ≠4, ≠5, ≠6). */
+  /** A well-formed integer that is NOT an exactly-known version (≠3, ≠4, ≠5, ≠6, ≠7, ≠8). */
   | 'schema_capability_version_unsupported'
   /**
    * The recorded migration_id does not identify a known shape for the
@@ -185,6 +195,13 @@ export const SCHEMA_EDITORIAL_POST_MIGRATION_ID = '0006_admin_post_editorial_sou
  * provenance).
  */
 export const SCHEMA_INBOUND_PIPELINE_MIGRATION_ID = '0007_inbound_pipeline';
+/**
+ * Slice 5 — identifies the version-8 linear shape (the live-watchlist
+ * tables: watchlist_entries, chart_snapshots, chart_snapshot_rows,
+ * watchlist_signals, watchlist_aliases, watchlist_exclusions on top of
+ * the inbound pipeline).
+ */
+export const SCHEMA_LIVE_WATCHLISTS_MIGRATION_ID = '0008_live_watchlists';
 
 /** The distinct, typed capability states (R19-01 — no boolean merge). */
 export type SchemaCapability =
@@ -247,6 +264,16 @@ export type SchemaCapability =
       readonly appliedSchemaVersion: 7;
     }
   | {
+      /**
+       * Slice 5: the LINEAR final candidate state — 0008 applied on top
+       * of 0007. ALL capabilities are present, plus the live-watchlist
+       * tables (0008). Every ingestion path treats this state exactly
+       * like the ownership mode.
+       */
+      readonly kind: 'known_v8_live_watchlists';
+      readonly appliedSchemaVersion: 8;
+    }
+  | {
       readonly kind: 'unresolved';
       readonly reason: SchemaCapabilityUnresolvedReason;
     };
@@ -276,7 +303,7 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
   if (parsed === 3) {
     return { kind: 'known_v3_legacy', appliedSchemaVersion: 3 };
   }
-  if (parsed === 4 || parsed === 5 || parsed === 6 || parsed === 7) {
+  if (parsed === 4 || parsed === 5 || parsed === 6 || parsed === 7 || parsed === 8) {
     // The migration_id distinguishes the shapes a version number alone can
     // never prove: at version 4 the ownership column exists ONLY under the
     // 0004 id; at version 5 the linear chain requires the 0005 id (and
@@ -319,6 +346,9 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
     }
     if (idRow.value === SCHEMA_INBOUND_PIPELINE_MIGRATION_ID) {
       return { kind: 'known_v7_inbound', appliedSchemaVersion: 7 };
+    }
+    if (parsed === 8 && idRow.value === SCHEMA_LIVE_WATCHLISTS_MIGRATION_ID) {
+      return { kind: 'known_v8_live_watchlists', appliedSchemaVersion: 8 };
     }
     return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
   }

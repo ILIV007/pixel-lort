@@ -19,7 +19,8 @@ import { MIGRATIONS, applyMigrations, splitSqlStatements } from '../helpers/migr
 const db: D1Database = env.DB;
 
 /** All 27 approved blueprint tables + the application `schema_metadata` table
- *  + the 5 admin-post tables (0005) + the 2 inbound tables (0007). */
+ *  + the 5 admin-post tables (0005) + the 2 inbound tables (0007) + the 6
+ *  live-watchlist tables (0008). */
 const EXPECTED_TABLES: readonly string[] = [
   'admins',
   'admin_action_tokens',
@@ -56,12 +57,19 @@ const EXPECTED_TABLES: readonly string[] = [
   'story_entities',
   'story_fingerprints',
   'telegram_updates',
+  'watchlist_aliases',
+  'watchlist_entries',
+  'watchlist_exclusions',
+  'watchlist_signals',
+  'chart_snapshots',
+  'chart_snapshot_rows',
 ];
 
 /** All 29 approved blueprint indexes + the Phase 2A lifecycle index (0002)
  *  + the Phase 3 DLQ-reconciliation index (0003) + the R09 ownership index
  *  (0004) + the R1.20-R admin-post pipeline indexes (0005) + the editorial
- *  provenance index (0006) + the slice-4 inbound indexes (0007). */
+ *  provenance index (0006) + the slice-4 inbound indexes (0007) + the
+ *  slice-5 live-watchlist indexes (0008). */
 const EXPECTED_INDEXES: readonly string[] = [
   'idx_admin_post_drafts_creator',
   'idx_admin_post_preview_sessions_source',
@@ -105,6 +113,12 @@ const EXPECTED_INDEXES: readonly string[] = [
   'idx_tg_updates_lifecycle',
   'idx_tg_updates_received',
   'idx_admin_post_versions_editorial',
+  'idx_wl_status',
+  'idx_wl_seen',
+  'idx_wl_score',
+  'idx_wl_expiry',
+  'idx_sig_entry',
+  'idx_sig_key',
 ];
 
 async function namedTables(): Promise<string[]> {
@@ -138,15 +152,15 @@ beforeEach(async () => {
 });
 
 describe('migration application', () => {
-  it('applies every migration as an atomic batch and reports metadata (schema v7, linear chain)', async () => {
+  it('applies every migration as an atomic batch and reports metadata (schema v8, linear chain)', async () => {
     expect(await namedTables()).toEqual([...EXPECTED_TABLES].sort());
 
     const metadata = await db
       .prepare(`SELECT key, value FROM schema_metadata ORDER BY key`)
       .all<{ key: string; value: string }>();
     const byKey = new Map(metadata.results.map((row) => [row.key, row.value]));
-    expect(byKey.get('schema_version')).toBe('7');
-    expect(byKey.get('migration_id')).toBe('0007_inbound_pipeline');
+    expect(byKey.get('schema_version')).toBe('8');
+    expect(byKey.get('migration_id')).toBe('0008_live_watchlists');
     expect(byKey.get('applied_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -172,15 +186,15 @@ describe('migration application', () => {
 });
 
 describe('schema contracts', () => {
-  it('creates exactly the 35 expected tables (27 approved + schema_metadata + 5 admin-post + 2 inbound)', async () => {
+  it('creates exactly the 41 expected tables (27 approved + schema_metadata + 5 admin-post + 2 inbound + 6 live-watchlist)', async () => {
     const tables = await namedTables();
-    expect(tables).toHaveLength(35);
+    expect(tables).toHaveLength(41);
     expect(tables).toEqual([...EXPECTED_TABLES].sort());
   });
 
-  it('creates exactly the 42 expected indexes (29 approved + lifecycle + DLQ + ownership + 5 admin-post + 1 editorial provenance + 4 inbound)', async () => {
+  it('creates exactly the 48 expected indexes (29 approved + lifecycle + DLQ + ownership + 5 admin-post + 1 editorial provenance + 4 inbound + 6 live-watchlist)', async () => {
     const indexes = await namedIndexes();
-    expect(indexes).toHaveLength(42);
+    expect(indexes).toHaveLength(48);
     expect(indexes).toEqual([...EXPECTED_INDEXES].sort());
   });
 

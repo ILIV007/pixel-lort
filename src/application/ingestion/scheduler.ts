@@ -30,6 +30,7 @@ import type { DbExecutor } from '../../adapters/db/db-executor';
 import type { JobsEngine } from '../jobs/engine';
 import type { Logger } from '../../observability/logger';
 import { parseEmbeddedRegistry } from '../../domain/source/source-registry';
+import { effectiveRegistry } from '../../domain/source/dead-sources';
 import { seedSourcesFromRegistry } from '../../adapters/db/source-registry-store';
 import {
   scanDueSources,
@@ -97,11 +98,15 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
   const { executor, engine, connectors, secrets, nowMs, logger } = deps;
 
   // Registry validation (fail safe — an invalid catalog disables the pass).
-  const registry = parseEmbeddedRegistry();
-  if (!registry.ok) {
+  const parsedRegistry = parseEmbeddedRegistry();
+  if (!parsedRegistry.ok) {
     logger?.warn('ingestion.schedule.registry_invalid');
     return { kind: 'registry_invalid' };
   }
+  // Slice 5: the EFFECTIVE registry is the embedded catalog minus the
+  // dead sources (r/CrackStatus, Nintendo US RSS) — they are never
+  // seeded, probed, or polled, even if a future catalog re-introduced them.
+  const registry = effectiveRegistry(parsedRegistry.registry);
 
   // R19-01 (R09.1): resolve the schema capability ONCE per pass (ONE
   // bounded, indexed metadata read) into EXACTLY ONE of the typed states.
@@ -115,6 +120,8 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
   // ingestion (CE1).
   // Slice 4: v7 (0007 on top of 0006) is the new LINEAR final state and
   // takes the ownership path exactly like v6.
+  // Slice 5: v8 (0008 on top of 0007) likewise — the live-watchlist
+  // tables change nothing about the ingestion capability.
   const capability = await resolveSchemaCapability(executor);
   if (capability.kind === 'unresolved') {
     logger?.warn('ingestion.schedule.capability_unresolved', {
@@ -126,7 +133,8 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
     capability.kind === 'known_v4_ownership' ||
     capability.kind === 'known_v5_admin_post' ||
     capability.kind === 'known_v6_editorial_post' ||
-    capability.kind === 'known_v7_inbound';
+    capability.kind === 'known_v7_inbound' ||
+    capability.kind === 'known_v8_live_watchlists';
 
   // Catalog completeness probe (R08): which registry sources are missing
   // a `sources` row or a `source_state` row — even when the table is NOT
@@ -134,7 +142,7 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
   // registry schema caps the catalog at 32 ⇒ ≤ 32 bound params per
   // query, within the D1 limit). A row count alone is not completeness.
   let seeded = false;
-  const ids = registry.registry.sources.map((source) => source.id);
+  const ids = registry.sources.map((source) => source.id);
   const inList = ids.map(() => '?').join(', ');
   const sourceRows = await executor.query<{ id: string }>({
     sql: `SELECT id FROM sources WHERE id IN (${inList})`,
@@ -150,7 +158,7 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
   if (incomplete) {
     // ONE atomic repair batch (R07 field-ownership merge inside; R08:
     // all-or-nothing — a failure rolls back the whole reconciliation).
-    await seedSourcesFromRegistry(executor, registry.registry, nowMs);
+    await seedSourcesFromRegistry(executor, registry, nowMs);
     seeded = true;
     logger?.debug('ingestion.schedule.catalog_reconciled', {
       count: ids.length,

@@ -167,7 +167,7 @@ function buildIngress(botApi: FullFakeClient, routerGates: { panelEnabled?: bool
       lookup: createAdminRoleLookup(executor),
     }),
     commandRouter: createCommandRouter({
-      applicationVersion: '1.42.0-test',
+      applicationVersion: '1.43.0-test',
       adminPostEnabled: true,
       panelEnabled: routerGates.panelEnabled ?? false,
     }),

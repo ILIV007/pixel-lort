@@ -11,10 +11,11 @@
  * ADR-0036).
  */
 
-/** The five implemented connector families (ADR-0039 §1). */
+/** The five implemented connector families (ADR-0039 §1), plus the slice-5 Epic free-games connector. */
 export const IMPLEMENTED_CONNECTORS = [
   'rss',
   'steam-news',
+  'epic-free-games',
   'youtube-playlists',
   'reddit-oauth',
   'github-releases',

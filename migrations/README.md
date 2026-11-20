@@ -67,6 +67,18 @@ apply` with explicit owner approval (NONE requested or executed); in
   receives it exclusively through `wrangler d1 migrations apply` with
   explicit owner approval (NONE requested or executed); in tests it reaches
   disposable workerd D1 databases as step 7 of the LINEAR default plan.
+- `0008_live_watchlists.sql` — **Slice 5 PRODUCT CANDIDATE (LOCAL ONLY —
+  proposed, NOT applied to any real database)**: the live watchlists
+  (`watchlist_entries` — the live core + manual exceptions, staged
+  active → cooling → dormant → expired, manual/pinned entries never
+  auto-prune — `chart_snapshots` + `chart_snapshot_rows` — the weekly
+  Steam Top-100 snapshot, one snapshot per date+source — `watchlist_signals`
+  — one signal per mover — `watchlist_aliases` and `watchlist_exclusions`)
+  - `schema_metadata` 7 → 8. Stands ON TOP of `0007_inbound_pipeline` in
+    the linear chain. A real database receives it exclusively through
+    `wrangler d1 migrations apply` with explicit owner approval (NONE
+    requested or executed); in tests it reaches disposable workerd D1
+    databases as step 8 of the LINEAR default plan.
 
 ## Rules (ADR-0019, AGENTS.md §6)
 
@@ -76,7 +88,8 @@ apply` with explicit owner approval (NONE requested or executed); in
    0001–0003 remain the ONLY APPLIED files; `0004_source_poll_ownership.sql`
    (Round 1.9 R09), `0005_admin_post_pipeline.sql` (R1.20-R admin post
    pipeline), `0006_admin_post_editorial_source.sql` (R1.22 editorial→post
-   provenance) and `0007_inbound_pipeline.sql` (slice 4 inbound pipeline)
+   provenance), `0007_inbound_pipeline.sql` (slice 4 inbound pipeline) and
+   `0008_live_watchlists.sql` (slice 5 live watchlists)
    are LOCAL candidates with zero real-database applications.
 2. **Application metadata vs. Wrangler bookkeeping.** `schema_metadata`
    describes WHAT the running application expects (read by `/health/ready`

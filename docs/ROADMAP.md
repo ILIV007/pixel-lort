@@ -1829,6 +1829,31 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       flags flipped; live end-to-end publishing stays slice 8's job.
       45 unit + 26 REAL-D1 tests registered in test:db (plus 1
       owner-stats case in the admin-panel suite).
+- [x] Slice 5 — game-page links + Epic free-games + Tier V anchors + live
+      watchlists (app 1.43.0, schema 8 — DDL 0008): game-page links are a
+      first-class element — a store-domain allowlist (Steam / Epic Games /
+      PS Store / Xbox / GOG / itch.io) enforced in the renderer (rich =
+      game-page button, classic = inline link; anything outside the
+      allowlist is held for review and never auto-published; links are
+      informational, never purchase links; free-game announcements yes,
+      discount posts no); NEW Epic freeGamesPromotions connector (public
+      JSON, no key, free = discountPercentage == 0, upcoming counted never
+      emitted, defensive parse); Tier V weekly anchors — trailers of the
+      week Sat 18:00, free games of the week Thu 20:00, most-played of the
+      week Sun 11:00 Tehran; live watchlists derived from live data, not
+      static lists (weekly Steam Top-100 snapshot in D1, only CHANGES post
+      — new Top-10 entry / jump >= 20 ranks / spike >= 50%; auto-add and
+      staged auto-prune by threshold; manual entries never prune; free
+      offers expire 1 day after expires_at; owner only adds/removes
+      specific games/publishers). Two dead sources removed from the code
+      registry (r/CrackStatus — dead since 2016; Nintendo US RSS — 0
+      posts/30d); the frozen blueprint is untouched. The Epic connector
+      and the Steam charts fetch are built and tested but not wired to any
+      cron/source row yet — that is slice 8's rollout. No live flags
+      flipped. Migration 0008 adds `watchlist_entries` +
+      `chart_snapshots` + `chart_snapshot_rows` + `watchlist_signals` +
+      `watchlist_aliases` + `watchlist_exclusions` (append-only, CHECKs +
+      UNIQUEs enforced at the database level).
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ◒ (implemented on this branch, draft PR #11; PARTIAL — zod GHSA closed at runtime, dev advisories fixed by overrides)
