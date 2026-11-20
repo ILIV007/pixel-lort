@@ -194,7 +194,7 @@ it('R08: interrupted catalog seeding must recover on a later cron pass', async (
   const count = await db.first<{ n: number }>({
     sql: 'SELECT COUNT(*) AS n FROM sources',
   });
-  expect(count!.n).toBe(14);
+  expect(count!.n).toBe(17);
 });
 it('R09: a new source reservation must hold until after now, not in 1970', async () => {
   await seed();

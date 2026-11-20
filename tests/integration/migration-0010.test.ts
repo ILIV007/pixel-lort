@@ -45,23 +45,23 @@ beforeEach(async () => {
   // Build the version-9 baseline ONCE per test; storage persists across
   // tests WITHIN this file, so on later tests the V9 plan is a no-op.
   await applyMigrations(db, V9_ONLY);
-  // Upgrade to the real append-only plan — on the first run ONLY 0010 is
-  // pending; on later tests this is an idempotent no-op. Either way the
-  // database ends at version 10.
+  // Upgrade to the real append-only plan — on the first run ONLY 0010 +
+  // 0011 are pending; on later tests this is an idempotent no-op. Either way the
+  // database ends at version 11.
   const upgrade = await applyMigrations(db);
-  expect(upgrade.finalVersion).toBe(10);
+  expect(upgrade.finalVersion).toBe(11);
 });
 
 describe('slice 8 — migration 0010: Soul versioning (schema 9 → 10)', () => {
-  it('applies exactly 0010 as the only pending step on a fresh schema-v9 database', async () => {
+  it('applies 0010 + 0011 as the only pending steps on a fresh schema-v9 database', async () => {
     const rerun = await applyMigrations(db);
     expect(rerun.applied).toEqual([]);
-    expect(rerun.finalVersion).toBe(10);
-    expect(await appliedSchemaVersion()).toBe(10);
+    expect(rerun.finalVersion).toBe(11);
+    expect(await appliedSchemaVersion()).toBe(11);
     const idRow = await executor.first<{ value: string }>({
       sql: `SELECT value FROM schema_metadata WHERE key = 'migration_id'`,
     });
-    expect(idRow?.value).toBe('0010_soul_versioning');
+    expect(idRow?.value).toBe('0011_autonomous_soul_stamp');
   });
 
   it('enforces the souls CHECK constraints at the database level', async () => {

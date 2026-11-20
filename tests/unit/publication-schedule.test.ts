@@ -198,6 +198,60 @@ describe('P1 — the 5–20 minute latency with the fixed spacing floor, NOT qui
       reason: 'jitter_out_of_bounds',
     });
   });
+
+  // Slice 9 — the latency anchor: a P1 row re-scanned after its latency
+  // elapsed MUST become due. Anchoring the latency to the decision instant
+  // re-applied it on every scan (now + jitter, forever) while the stored
+  // scheduled_at went unread; the scheduler now passes the enqueue
+  // instant as the fixed anchor, so the due time is STABLE across scans.
+  it('with a fixed latency anchor the due time is stable across scans and becomes due', () => {
+    const anchor = tehranAt(2026, 11, 11, 10, 0); // the enqueue instant
+    const first = schedule(
+      planPublicationTime(
+        baseInput({
+          nowMs: anchor,
+          priorityScore: 80,
+          jitterMs: 10 * MIN,
+          latencyAnchorMs: anchor,
+        }),
+      ),
+    );
+    expect(first.dueAtMs).toBe(anchor + 10 * MIN);
+    // The second scan, 10 minutes later: the SAME due time, now elapsed.
+    const second = schedule(
+      planPublicationTime(
+        baseInput({
+          nowMs: anchor + 10 * MIN,
+          priorityScore: 80,
+          jitterMs: 10 * MIN,
+          latencyAnchorMs: anchor,
+        }),
+      ),
+    );
+    expect(second.dueAtMs).toBe(anchor + 10 * MIN);
+  });
+
+  it('without an anchor the legacy behavior is preserved (due = now + jitter)', () => {
+    const now = tehranAt(2026, 11, 11, 10, 0);
+    const decision = schedule(
+      planPublicationTime(baseInput({ nowMs: now, priorityScore: 80, jitterMs: 10 * MIN })),
+    );
+    expect(decision.dueAtMs).toBe(now + 10 * MIN);
+  });
+
+  it('a latency anchor in the future is an invalid input', () => {
+    const now = tehranAt(2026, 11, 11, 10, 0);
+    expect(
+      planPublicationTime(
+        baseInput({
+          nowMs: now,
+          priorityScore: 80,
+          jitterMs: 10 * MIN,
+          latencyAnchorMs: now + MIN,
+        }),
+      ),
+    ).toEqual({ ok: false, reason: 'invalid_input' });
+  });
 });
 
 describe('P2 — the dynamic window gate', () => {
