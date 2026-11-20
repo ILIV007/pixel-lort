@@ -326,7 +326,8 @@ export type AlbumEnqueueRejectedReason =
   | 'mode_status_mismatch'
   | 'invalid_draft_id'
   | 'invalid_destination'
-  | 'invalid_score';
+  | 'invalid_score'
+  | 'invalid_soul_version';
 
 export type AlbumEnqueueOutcome =
   | { readonly kind: 'created'; readonly publicationId: string; readonly idempotencyKey: string }

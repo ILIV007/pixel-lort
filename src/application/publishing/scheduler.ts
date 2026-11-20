@@ -668,6 +668,12 @@ export function createPublicationScheduler(deps: {
       candidateLayout: draft.layout,
       priorityScore: row.priority,
       jitterMs: jitter.jitterMs,
+      // Slice 9: the P1 latency runs from the publication's enqueue
+      // instant (row.created_at), a FIXED past event — never from the
+      // scan instant, which would re-apply the latency on every scan and
+      // make a P1 row undeferrable-forever (each scan deferred it to
+      // now + jitter again while the stored scheduled_at went unread).
+      latencyAnchorMs: row.created_at,
       previousSend,
       recentLayouts,
       recentCategories,

@@ -31,6 +31,7 @@ import type { JobsEngine } from '../jobs/engine';
 import type { Logger } from '../../observability/logger';
 import { parseEmbeddedRegistry } from '../../domain/source/source-registry';
 import { effectiveRegistry } from '../../domain/source/dead-sources';
+import { withAdditionalSources } from '../../domain/source/additional-sources';
 import { seedSourcesFromRegistry } from '../../adapters/db/source-registry-store';
 import {
   scanDueSources,
@@ -106,7 +107,17 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
   // Slice 5: the EFFECTIVE registry is the embedded catalog minus the
   // dead sources (r/CrackStatus, Nintendo US RSS) — they are never
   // seeded, probed, or polled, even if a future catalog re-introduced them.
-  const registry = effectiveRegistry(parsedRegistry.registry);
+  // Slice 9: the effective registry is then PLUS the code-level
+  // additions (VGC / Gematsu / GameSpot — Tier A editorial RSS the frozen
+  // blueprint catalog never listed; the blueprint file itself is NEVER
+  // edited, so the additions live in `domain/source/additional-sources`
+  // exactly like the dead-source removal lives in `dead-sources`).
+  const effective = withAdditionalSources(effectiveRegistry(parsedRegistry.registry));
+  if (!effective.ok) {
+    logger?.warn('ingestion.schedule.registry_invalid');
+    return { kind: 'registry_invalid' };
+  }
+  const registry = effective.registry;
 
   // R19-01 (R09.1): resolve the schema capability ONCE per pass (ONE
   // bounded, indexed metadata read) into EXACTLY ONE of the typed states.
@@ -122,6 +133,8 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
   // takes the ownership path exactly like v6.
   // Slice 5: v8 (0008 on top of 0007) likewise — the live-watchlist
   // tables change nothing about the ingestion capability.
+  // Slice 9: v11 (0011 on top of 0010) likewise — the autonomous Soul
+  // stamp changes nothing about the ingestion capability.
   const capability = await resolveSchemaCapability(executor);
   if (capability.kind === 'unresolved') {
     logger?.warn('ingestion.schedule.capability_unresolved', {
@@ -134,7 +147,10 @@ export async function scheduleDueSources(deps: ScheduleDueSourcesDeps): Promise<
     capability.kind === 'known_v5_admin_post' ||
     capability.kind === 'known_v6_editorial_post' ||
     capability.kind === 'known_v7_inbound' ||
-    capability.kind === 'known_v8_live_watchlists';
+    capability.kind === 'known_v8_live_watchlists' ||
+    capability.kind === 'known_v9_post_management' ||
+    capability.kind === 'known_v10_soul' ||
+    capability.kind === 'known_v11_autonomous_soul';
 
   // Catalog completeness probe (R08): which registry sources are missing
   // a `sources` row or a `source_state` row — even when the table is NOT

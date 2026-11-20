@@ -99,6 +99,18 @@ export interface PublicationScheduleInputV1 {
   readonly priorityScore: number;
   /** The caller-supplied deterministic jitter (validated per class). */
   readonly jitterMs: number;
+  /**
+   * Slice 9 — the FIXED instant the P1 latency runs from (the publication's
+   * enqueue time when the caller is the outbox scheduler). Absent (or null)
+   * the decision instant is the anchor — the legacy pure-domain behavior.
+   * The anchor MUST be a fixed past event: anchoring the latency to the
+   * scan instant re-applies it on EVERY scan, so a P1 row could never
+   * become due (each scan deferred it to now + jitter again, forever,
+   * while the stored scheduled_at it had just written was never read).
+   * With a fixed anchor the due time is STABLE across scans and the row
+   * sends once now passes anchor + jitter.
+   */
+  readonly latencyAnchorMs?: number | null;
   readonly previousSend: {
     readonly atMs: number;
     readonly related: boolean;
@@ -236,6 +248,13 @@ export function planPublicationTime(
   }
   if (input.schemaVersion !== 1) return { ok: false, reason: 'schema_version_unsupported' };
   if (!isIntegerMs(input.nowMs)) return { ok: false, reason: 'invalid_input' };
+  if (
+    input.latencyAnchorMs !== undefined &&
+    input.latencyAnchorMs !== null &&
+    (!isIntegerMs(input.latencyAnchorMs) || input.latencyAnchorMs > input.nowMs)
+  ) {
+    return { ok: false, reason: 'invalid_input' };
+  }
   if (typeof input.eventDriven !== 'boolean') return { ok: false, reason: 'invalid_input' };
   if (typeof input.category !== 'string' || !isMixCategoryValue(input.category)) {
     return { ok: false, reason: 'unknown_category' };
@@ -389,7 +408,12 @@ export function planPublicationTime(
     if (input.jitterMs < P1_LATENCY_MIN_MS || input.jitterMs > P1_LATENCY_MAX_MS) {
       return { ok: false, reason: 'jitter_out_of_bounds' };
     }
-    dueAtMs = input.nowMs + input.jitterMs;
+    // The latency runs from the FIXED anchor (the enqueue instant), never
+    // from the decision instant: with the anchor the due time is stable
+    // across scans and the row sends once it passes; anchored to now it
+    // would re-apply on every scan and never become due.
+    const latencyAnchorMs = input.latencyAnchorMs ?? input.nowMs;
+    dueAtMs = latencyAnchorMs + input.jitterMs;
     appliedRules.push({ rule: 'latency_bound', class: 'P1' });
     if (input.previousSend !== null) {
       const spacingFloor = input.previousSend.atMs + P1_GAP_MIN_MS;

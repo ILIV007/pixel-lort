@@ -99,6 +99,84 @@ export async function findEditorialSource(
   });
 }
 
+/**
+ * Slice 9 — the fresh-item scan for the ingestion→editorial drain (Link 2).
+ * The bounded, oldest-first read of items the poll handler committed as
+ * `new` and no drain has claimed yet. Oldest-first is the fair queue
+ * discipline (a fresh item is never starved behind a newer flood) and
+ * matches the pipeline's first-seen order. The drain marks each item it
+ * enqueues as `queued` (below), so a later tick never re-enqueues it;
+ * the prepare-draft handler's own commit flips it to `processed`.
+ */
+export interface FreshSourceItemRow {
+  readonly id: string;
+}
+
+export async function listFreshSourceItems(
+  executor: DbExecutor,
+  input: { readonly limit: number },
+): Promise<readonly FreshSourceItemRow[]> {
+  const limit = Math.max(1, Math.min(25, Math.floor(input.limit)));
+  const rows = await executor.query<FreshSourceItemRow>({
+    sql: `SELECT id FROM source_items
+           WHERE processing_status = 'new'
+           ORDER BY published_at ASC NULLS LAST, fetched_at ASC, id ASC
+           LIMIT ?`,
+    params: [limit],
+  });
+  return rows.rows;
+}
+
+/**
+ * Slice 9 — claim a fresh item for the editorial drain. The fenced
+ * `processing_status = 'new'` predicate is the authority: only a still-new
+ * item flips to `queued` (a concurrent drain, a retry, or a handler that
+ * already processed it observes zero changes and enqueues nothing twice).
+ * The enqueue itself stays idempotent independently (the deterministic
+ * (sourceItemId, snapshotHash) job key), so a crash between the enqueue
+ * and this flip is absorbed by the next tick's `existing` outcome.
+ */
+export async function markSourceItemQueued(
+  executor: DbExecutor,
+  input: { readonly sourceItemId: string },
+): Promise<boolean> {
+  const meta = await executor.run({
+    sql: `UPDATE source_items SET processing_status = 'queued'
+           WHERE id = ? AND processing_status = 'new'`,
+    params: [input.sourceItemId],
+  });
+  return meta.changes === 1;
+}
+
+/**
+ * Slice 9 — the ready-draft scan for the draft→publication bridge
+ * (Link 4). The bounded, oldest-first read of drafts in `ready` status
+ * awaiting an approval decision. Only `ready` drafts are listed: an
+ * `approved` (human) draft, an `auto_approved` draft, or any terminal
+ * state is never re-decided here — the bridge decides ONLY what no human
+ * and no earlier bridge run has decided.
+ */
+export interface ReadyDraftRow {
+  readonly id: string;
+  readonly document_json: string;
+  readonly created_at: number;
+}
+
+export async function listReadyDrafts(
+  executor: DbExecutor,
+  input: { readonly limit: number },
+): Promise<readonly ReadyDraftRow[]> {
+  const limit = Math.max(1, Math.min(25, Math.floor(input.limit)));
+  const rows = await executor.query<ReadyDraftRow>({
+    sql: `SELECT id, document_json, created_at FROM drafts
+           WHERE status = 'ready'
+           ORDER BY created_at ASC, id ASC
+           LIMIT ?`,
+    params: [limit],
+  });
+  return rows.rows;
+}
+
 export interface EditorialStoryRow {
   readonly id: string;
   readonly story_key: string;
