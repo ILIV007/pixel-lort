@@ -11,6 +11,7 @@ import {
   readPublishingSettings,
   recordOwnerPublication,
 } from '../../adapters/db/publishing-settings-store';
+import { getCurrentSoulVersion } from '../../adapters/db/soul-store';
 import { consumeActionToken, issueActionToken } from '../../adapters/telegram/action-tokens';
 import type {
   ParsedMediaAttachment,
@@ -637,6 +638,10 @@ export function createInboundPipelineService(deps: InboundPipelineDeps): Inbound
     }
     // Record FIRST, then copy to the PV: the published_posts row is what
     // makes the post editable later, and it must exist before any reply.
+    // Slice 8 — stamp the active Soul version (DESIGN §9.3); NULL when no
+    // Soul is recorded yet (the lookup is fail-soft and never fails a
+    // publish).
+    const soulVersion = await getCurrentSoulVersion(executor);
     await recordPublishedPost(executor, {
       id: randomToken(),
       sourceChatId: target.sourceChatId,
@@ -647,6 +652,7 @@ export function createInboundPipelineService(deps: InboundPipelineDeps): Inbound
       category: processed.category,
       presentation: processed.presentation,
       createdByUserId: target.createdByUserId,
+      soulVersion,
       nowMs: clock.now(),
     });
     await recordOwnerPublication(executor, { nowMs: clock.now() });

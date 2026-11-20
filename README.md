@@ -11,7 +11,7 @@ scheduling policies.
 - **Timezone:** `Asia/Tehran`
 - **Authoritative specification:** [`docs/blueprint/v1/`](docs/blueprint/README.md)
 
-## Current implementation status — v1.45.0 / schema 9 (branch `slice/07-r2-kv-media-albums`)
+## Current implementation status — v1.46.0 / schema 10 (branch `slice/08-soul-shadow-first-posts`)
 
 Phases 0, 1A, 1B-preview, 2A, 2B, and 3 are done. PR #11 (v1.41.0 /
 schema 6) is merged to `main` (commit 5517390, repo rename to
@@ -31,7 +31,16 @@ media/albums, v1.45.0 / schema 9, ZERO DDL) is PR #20 (branch
 the preview env; R2 NOT provisioned (API 403 code 10042 — the single
 owner dashboard action); native chunked albums, rich slideshows,
 caption-overflow reply chains, and the edit media guard, all
-fail-closed and tested. The Phase
+fail-closed and tested. Slice 8 (Soul v1 + shadow run + first test
+posts, v1.46.0 / schema 10) is PR #21 (branch
+`slice/08-soul-shadow-first-posts`): Soul v1 versioned in
+`docs/soul/SOUL_v1.md` and recorded in D1 (`souls` table, migration
+0010), stamped as `soul_version` on every published post; same-day
+shadow run over 10 live Tier A items (7 drafted, 1 leak draft
+shadow-only, 3 rejected by the discount/unofficial-port filters,
+evidence in `docs/reviews/SLICE_08_SHADOW_RUN.md`); first 3 test posts
+through the deployed inbound pipeline in a controlled window, flags
+off and mode back to paused immediately after. The Phase
 2A record below is the historical account of that phase; the current
 phase state lives in `docs/ROADMAP.md`.
 

@@ -7,6 +7,7 @@ import migration0006 from '../../migrations/0006_admin_post_editorial_source.sql
 import migration0007 from '../../migrations/0007_inbound_pipeline.sql?raw';
 import migration0008 from '../../migrations/0008_live_watchlists.sql?raw';
 import migration0009 from '../../migrations/0009_post_management_near_dup.sql?raw';
+import migration0010 from '../../migrations/0010_soul_versioning.sql?raw';
 import migration0002Synthetic from '../fixtures/migration-0002-synthetic.sql?raw';
 
 /**
@@ -80,9 +81,12 @@ export interface MigrationDescriptor {
  *      near-dup detection: channel_pins + story_merges +
  *      quality_rejections + channel_post_deletes, ON TOP of the live
  *      watchlists)
+ *   -> 0010_soul_versioning (v10, the slice-8 Soul versioning: `souls` +
+ *      `published_posts.soul_version`, ON TOP of the post-management +
+ *      near-dup tables)
  * The order here is exactly the order real Wrangler applies the files
  * (lexical filename order, one atomic batch per file), so a database that
- * walked the whole chain reports schema 9 with ALL capabilities present.
+ * walked the whole chain reports schema 10 with ALL capabilities present.
  * All candidates remain LOCAL-ONLY until the owner separately authorizes
  * remote application.
  *
@@ -100,6 +104,7 @@ export const MIGRATIONS: readonly MigrationDescriptor[] = [
   { id: '0007_inbound_pipeline', version: 7, sql: migration0007 },
   { id: '0008_live_watchlists', version: 8, sql: migration0008 },
   { id: '0009_post_management_near_dup', version: 9, sql: migration0009 },
+  { id: '0010_soul_versioning', version: 10, sql: migration0010 },
 ];
 
 /**

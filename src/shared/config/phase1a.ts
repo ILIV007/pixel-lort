@@ -31,7 +31,7 @@ import type { Environment } from './phase0';
  * healthy for its era but reports a mismatch against this bundle
  * expectation, exactly the pre-activation posture of every review round.
  */
-export const EXPECTED_SCHEMA_VERSION = 9;
+export const EXPECTED_SCHEMA_VERSION = 10;
 
 /** Local-development placeholder commit identifier (invalid outside development). */
 export const DEFAULT_APP_COMMIT = 'local-dev';

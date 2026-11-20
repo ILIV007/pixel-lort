@@ -96,10 +96,10 @@ describe('migration 0002 — populated schema-v1 database upgrades to schema v2'
     const result = await applyMigrations(db);
 
     expect(result.observedVersion).toBe(1);
-    // R1.20-R1 + R1.22: the LINEAR default plan now continues through the
-    // LOCAL-ONLY 0004 + 0005 + 0006 candidates — the populated v1 database
-    // upgrades through 0002 + 0003 + 0004 + 0005 + 0006 in one
-    // pending-only pass.
+    // R1.20-R1 + R1.22 + slices 4-8: the LINEAR default plan now continues
+    // through the LOCAL-ONLY 0004 + 0005 + 0006 + 0007 + 0008 + 0009 + 0010
+    // candidates — the populated v1 database upgrades through 0002 + 0003 +
+    // 0004 + 0005 + 0006 + 0007 + 0008 + 0009 + 0010 in one pending-only pass.
     expect(result.applied.map((migration) => migration.id)).toEqual([
       '0002_telegram_update_lifecycle',
       '0003_job_dlq_delivery',
@@ -109,16 +109,17 @@ describe('migration 0002 — populated schema-v1 database upgrades to schema v2'
       '0007_inbound_pipeline',
       '0008_live_watchlists',
       '0009_post_management_near_dup',
+      '0010_soul_versioning',
     ]);
-    expect(result.finalVersion).toBe(9);
-    expect(await appliedSchemaVersion()).toBe(9);
+    expect(result.finalVersion).toBe(10);
+    expect(await appliedSchemaVersion()).toBe(10);
 
     const metadata = await db
       .prepare(`SELECT key, value FROM schema_metadata ORDER BY key`)
       .all<{ key: string; value: string }>();
     const byKey = new Map(metadata.results.map((row) => [row.key, row.value]));
-    expect(byKey.get('schema_version')).toBe('9');
-    expect(byKey.get('migration_id')).toBe('0009_post_management_near_dup');
+    expect(byKey.get('schema_version')).toBe('10');
+    expect(byKey.get('migration_id')).toBe('0010_soul_versioning');
     expect(byKey.get('applied_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     // The UPDATE statements did not duplicate metadata rows.
     expect(metadata.results).toHaveLength(3);
@@ -194,10 +195,10 @@ describe('migration 0002 — populated schema-v1 database upgrades to schema v2'
     await applyMigrations(db);
     const again = await applyMigrations(db);
 
-    expect(again.observedVersion).toBe(9);
+    expect(again.observedVersion).toBe(10);
     expect(again.applied).toEqual([]);
-    expect(again.finalVersion).toBe(9);
-    expect(await appliedSchemaVersion()).toBe(9);
+    expect(again.finalVersion).toBe(10);
+    expect(await appliedSchemaVersion()).toBe(10);
 
     // No duplicate rows anywhere: legacy rows are exactly the three seeded.
     const updates = await db

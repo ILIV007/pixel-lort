@@ -1903,6 +1903,30 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       pinned by tests, as is the wrangler.jsonc wiring (CACHE declared,
       no active R2 binding). No live flags flipped; autonomous
       publishing stays off. No migration (schema stays 9).
+- [x] Slice 8 — Soul v1 + shadow run + first test posts (app 1.46.0,
+      schema 10): Soul v1 written as `docs/soul/SOUL_v1.md` from the
+      channel-analysis persona draft v0.1 (informed Persian gamer,
+      fast/precise, clean street slang, a bit dirty/edgy; NO sexual
+      content, NO profanity/hate, NO piracy links; opinions ONLY in
+      replies; trust labels right after the title; source link ONLY for
+      very official/important news; footer 👾 @pixellores; no hashtags)
+      and recorded versioned in D1 (`souls` table, migration 0010:
+      append-only, CHECKs enforced at the database level;
+      `published_posts.soul_version`, NULL for legacy rows); the inbound
+      publish path stamps the active Soul version on every published row
+      (pointer `soul.current_version`, fail-soft NULL; an edit keeps the
+      post's original version). Same-day shadow run over 10 live Tier A
+      items pulled 2026-11-20 (evidence in
+      `docs/reviews/SLICE_08_SHADOW_RUN.md`): 7 drafted, 1 leak draft
+      (shadow-only, never posted), 3 rejected by the discount filter /
+      unofficial-port rule. First 3 test posts (GTA VI official day-one
+      sales; Hounded PS5 2027; Zenless Zone Zero v3.4, December 2)
+      through the deployed inbound pipeline in a controlled window
+      (ADMIN_POST_ENABLED + ADMIN_POST_LIVE_PUBLISH_ENABLED on only
+      while the owner pastes, AI stays off, mode back to `paused` and
+      flags off immediately after); no cron/schedule wired; no replies
+      to own posts (deferred — no discussion group). 7 new tests
+      (migration-0010 + soul-stamp, registered in `test:db`).
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ◒ (implemented on this branch, draft PR #11; PARTIAL — zod GHSA closed at runtime, dev advisories fixed by overrides)

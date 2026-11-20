@@ -166,7 +166,7 @@ export type SchemaCapabilityUnresolvedReason =
   | 'schema_capability_metadata_missing'
   /** A value that is not a positive safe integer (corrupt/oversized). */
   | 'schema_capability_metadata_invalid'
-  /** A well-formed integer that is NOT an exactly-known version (≠3, ≠4, ≠5, ≠6, ≠7, ≠8). */
+  /** A well-formed integer that is NOT an exactly-known version (≠3, ≠4, ≠5, ≠6, ≠7, ≠8, ≠9, ≠10). */
   | 'schema_capability_version_unsupported'
   /**
    * The recorded migration_id does not identify a known shape for the
@@ -209,6 +209,13 @@ export const SCHEMA_LIVE_WATCHLISTS_MIGRATION_ID = '0008_live_watchlists';
  */
 export const POST_MANAGEMENT_SCHEMA_VERSION = 9;
 export const SCHEMA_POST_MANAGEMENT_MIGRATION_ID = '0009_post_management_near_dup';
+/**
+ * Slice 8 — identifies the version-10 linear shape (the Soul versioning
+ * tables: `souls` + `published_posts.soul_version` on top of the
+ * post-management + near-dup tables).
+ */
+export const SOUL_SCHEMA_VERSION = 10;
+export const SCHEMA_SOUL_MIGRATION_ID = '0010_soul_versioning';
 
 /** The distinct, typed capability states (R19-01 — no boolean merge). */
 export type SchemaCapability =
@@ -291,6 +298,16 @@ export type SchemaCapability =
       readonly appliedSchemaVersion: 9;
     }
   | {
+      /**
+       * Slice 8: the LINEAR final candidate state — 0010 applied on top
+       * of 0009. ALL capabilities are present, plus the Soul versioning
+       * tables (0010). Every ingestion path treats this state exactly
+       * like the ownership mode.
+       */
+      readonly kind: 'known_v10_soul';
+      readonly appliedSchemaVersion: 10;
+    }
+  | {
       readonly kind: 'unresolved';
       readonly reason: SchemaCapabilityUnresolvedReason;
     };
@@ -326,7 +343,8 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
     parsed === 6 ||
     parsed === 7 ||
     parsed === 8 ||
-    parsed === 9
+    parsed === 9 ||
+    parsed === 10
   ) {
     // The migration_id distinguishes the shapes a version number alone can
     // never prove: at version 4 the ownership column exists ONLY under the
@@ -336,7 +354,9 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
     // chain requires the 0007 id (and implies 0004+0005+0006's changes);
     // at version 8 the linear chain requires the 0008 id (and implies
     // 0004..0007's changes); at version 9 the linear chain requires the
-    // 0009 id (and implies 0004..0008's changes).
+    // 0009 id (and implies 0004..0008's changes); at version 10 the
+    // linear chain requires the 0010 id (and implies 0004..0009's
+    // changes).
     // Anything else is UNRESOLVED — no invented valid shapes.
     let idRow: { value: string } | null;
     try {
@@ -379,6 +399,9 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
     }
     if (parsed === 9 && idRow.value === SCHEMA_POST_MANAGEMENT_MIGRATION_ID) {
       return { kind: 'known_v9_post_management', appliedSchemaVersion: 9 };
+    }
+    if (parsed === 10 && idRow.value === SCHEMA_SOUL_MIGRATION_ID) {
+      return { kind: 'known_v10_soul', appliedSchemaVersion: 10 };
     }
     return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
   }
