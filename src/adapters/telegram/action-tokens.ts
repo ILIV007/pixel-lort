@@ -46,6 +46,10 @@ const MAX_TARGET_LENGTH = 128;
 /** Approved permission values, derived verbatim from the admin-map mirror. */
 const APPROVED_PERMISSIONS: ReadonlySet<string> = new Set([
   OWNER_WILDCARD_PERMISSION,
+  // Issue #8: the owner-only `admin.manage` permission the admin map
+  // expresses through the `/admins` command (pixel_admin_map_v1.json) —
+  // held by NO non-owner role; the owner holds it via the wildcard.
+  'admin.manage',
   ...Object.values(ROLE_PERMISSIONS).flat(),
 ]);
 

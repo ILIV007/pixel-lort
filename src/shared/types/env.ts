@@ -238,6 +238,15 @@ export interface WorkerEnv {
    */
   readonly ADMIN_QUEUE_WRITE_ENABLED?: string;
   /**
+   * NON-SECRET owner-only admin management surface gate ('true' |
+   * 'false'; default 'false'; issue #8). INDEPENDENT fail-closed flag
+   * for the /admins list/add/remove/role commands and their single-use
+   * confirm/cancel callbacks. The ONLY mutations are admin rows in D1
+   * plus their audit events. Never implies any send, publish, or
+   * scheduler path.
+   */
+  readonly ADMIN_MANAGE_ENABLED?: string;
+  /**
    * NON-SECRET album media-group capture surface gate ('true' | 'false';
    * default 'false'; Phase 9D). INDEPENDENT fail-closed flag for the
    * /album_capture session surface. Evidence gathering with rights-unknown

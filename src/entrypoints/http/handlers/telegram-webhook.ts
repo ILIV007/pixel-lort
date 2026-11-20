@@ -62,6 +62,7 @@ import { createEditorialReviewService } from '../../../application/editorial/dra
 import { createAdminQueueViewService } from '../../../application/publishing/queue-view-service';
 import { createAdminStoryViewService } from '../../../application/publishing/story-view-service';
 import { createAdminPostService } from '../../../application/admin-post/admin-post-service';
+import { createAdminManageService } from '../../../application/admin-manage/admin-manage-service';
 import { createAuthorizationService } from '../../../admin/authorization';
 import { createCommandRouter } from '../../../admin/command-router';
 import { createDbExecutor } from '../../../adapters/db/db-executor';
@@ -245,6 +246,9 @@ export async function handleTelegramWebhook(
   // Phase 9B: the read-only story gate is parsed by the SAME fail-closed
   // phase9 config (independent flag; default false).
   const storyEnabled = review.config.storyEnabled;
+  // Issue #8: the owner-only admin management gate is parsed by the SAME
+  // fail-closed phase9 config (independent flag; default false).
+  const adminManageEnabled = review.config.adminManageEnabled;
   // Phase 9C: the write-capable queue disposition gate is parsed by the
   // SAME fail-closed phase9 config (INDEPENDENT flag; default false — the
   // disposition is a STOP, never a resend).
@@ -308,6 +312,10 @@ export async function handleTelegramWebhook(
       // Phase 9B: the read-only /story gate (fail-closed, default false) —
       // gates ONLY that observation command.
       storyEnabled,
+      // Issue #8: the owner-only /admins gate (fail-closed, default
+      // false) — gates ONLY the admin management commands and their
+      // single-use confirm/cancel callbacks.
+      adminManageEnabled,
     }),
     // R1.18: the read-only review service is wired ONLY while the gate is
     // ON — the SAME production factory the offline demo shares.
@@ -355,6 +363,16 @@ export async function handleTelegramWebhook(
             destination: phase2.config.targetChannel,
           },
           transport: botApi,
+        })
+      : undefined,
+    // Issue #8: the admin management service is wired ONLY while its gate
+    // is ON. The bootstrap owner id comes from the parsed Phase 2 config
+    // (the protected identity); the service never reads it from chat.
+    adminManage: adminManageEnabled
+      ? createAdminManageService({
+          executor,
+          clock: systemClock,
+          ownerTelegramId: phase2.config.ownerTelegramId,
         })
       : undefined,
     // Offline mode without BOT_TOKEN: noop actions complete; outbound

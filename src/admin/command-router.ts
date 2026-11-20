@@ -69,6 +69,8 @@ import { ADMIN_STORY_STRINGS, STORY_COMMAND } from './story-strings';
 import { parseStoryArgument } from './story-command';
 import { ADMIN_ALBUM_CAPTURE_STRINGS, ALBUM_CAPTURE_COMMAND } from './album-capture-strings';
 import { parseAlbumCaptureArgument, type AlbumCaptureKind } from '../domain/media/album-capture';
+import { ADMIN_MANAGE_STRINGS, ADMINS_COMMAND } from './admin-manage-strings';
+import { parseAdminManageArgument } from './admin-manage-command';
 import type {
   ParsedMediaAttachment,
   ParsedRichTextExtraction,
@@ -121,6 +123,8 @@ export type NoopReason =
   | 'queue_edited_message'
   | 'album_capture_not_private_chat'
   | 'album_capture_edited_message'
+  | 'admins_not_private_chat'
+  | 'admins_edited_message'
   | 'story_not_private_chat'
   | 'story_edited_message'
   | 'post_not_private_chat'
@@ -389,6 +393,57 @@ export type TelegramAction =
       readonly role: AdminRole;
       readonly uiLanguage: AdminUiLanguage;
       readonly token: string;
+    }
+  | {
+      /**
+       * Issue #8 — owner-only admin management: list every admin (the
+       * bootstrap owner row is ensured first, so the owner is always
+       * listed). The router has already gated: the fail-closed flag ON +
+       * authorized + the `admin.manage` permission (owner only) + private
+       * chat + fresh message. The service re-checks the permission
+       * (defense in depth) and owns ALL reads.
+       */
+      readonly type: 'admin_manage_list';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+    }
+  | {
+      /**
+       * Issue #8: request adding (or reactivating) an admin. The router
+       * validated the argument grammar (numeric id + assignable non-owner
+       * role) BEFORE any service could exist; the service re-checks the
+       * owner role, the bootstrap-owner protection, and the current state
+       * — and mints the single-use confirm/cancel tokens. NOTHING is
+       * written by this action.
+       */
+      readonly type: 'admin_manage_add';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+      readonly targetUserId: number;
+      readonly targetRole: AdminRole;
+    }
+  | {
+      /** Issue #8: request deactivating an admin (confirm flow, as above). */
+      readonly type: 'admin_manage_remove';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+      readonly targetUserId: number;
+    }
+  | {
+      /** Issue #8: request changing an admin's role (confirm flow, as above). */
+      readonly type: 'admin_manage_role';
+      readonly chatId: number;
+      readonly telegramUserId: number;
+      readonly role: AdminRole;
+      readonly uiLanguage: AdminUiLanguage;
+      readonly targetUserId: number;
+      readonly targetRole: AdminRole;
     };
 
 export interface CommandRouteContext {
@@ -462,6 +517,16 @@ export interface CommandRouteContext {
    * observation-only and carries the honest gate note).
    */
   readonly storyEnabled?: boolean;
+  /**
+   * Issue #8: whether the owner-only admin-management surface is enabled
+   * (the `ADMIN_MANAGE_ENABLED` fail-closed flag, parsed by the caller).
+   * Default/absent = DISABLED: `/admins` keeps the exact unknown-command
+   * noop semantics and /help never advertises it. It gates ONLY the
+   * list/add/remove/role commands and their single-use confirm/cancel
+   * callbacks — the ONLY mutations are admin rows in D1 plus their audit
+   * events; it never widens any send, publish, or scheduler behavior.
+   */
+  readonly adminManageEnabled?: boolean;
 }
 
 export interface CommandRouter {
@@ -542,6 +607,7 @@ function helpResponse(
   draftsLine: string | null,
   queueLine: string | null,
   storyLine: string | null,
+  adminsLine: string | null,
 ): TelegramSafeHtml {
   const s = ADMIN_UI_STRINGS[ui];
   return composeTelegramHtml([
@@ -556,6 +622,9 @@ function helpResponse(
     ...(draftsLine !== null ? [escapeTelegramHtml(draftsLine)] : []),
     ...(queueLine !== null ? [escapeTelegramHtml(queueLine)] : []),
     ...(storyLine !== null ? [escapeTelegramHtml(storyLine)] : []),
+    // Issue #8: advertised ONLY when the manage gate is ON and the actor
+    // IS the owner (the caller passes null otherwise).
+    ...(adminsLine !== null ? [escapeTelegramHtml(adminsLine)] : []),
   ]);
 }
 
@@ -608,6 +677,9 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
   const albumCaptureEnabled = context.albumCaptureEnabled === true;
   // Phase 9B: the story gate is fail-closed — absent/false both DISABLE.
   const storyEnabled = context.storyEnabled === true;
+  // Issue #8: the admin-manage gate is fail-closed — absent/false both
+  // DISABLE.
+  const adminManageEnabled = context.adminManageEnabled === true;
 
   function respond(
     command: InitialAdminCommand,
@@ -615,12 +687,13 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
     draftsHelpLine: string | null = null,
     queueHelpLine: string | null = null,
     storyHelpLine: string | null = null,
+    adminsHelpLine: string | null = null,
   ): TelegramSafeHtml {
     switch (command) {
       case 'start':
         return startResponse(ui);
       case 'help':
-        return helpResponse(ui, draftsHelpLine, queueHelpLine, storyHelpLine);
+        return helpResponse(ui, draftsHelpLine, queueHelpLine, storyHelpLine, adminsHelpLine);
       case 'status':
         return statusResponse(ui, applicationVersion);
       case 'version':
@@ -648,15 +721,19 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         return { type: 'noop', reason: 'malformed_callback_data' };
       }
       // ---- Phase 9C token dispatcher ------------------------------------
-      // While the write-capable queue surface is enabled, EVERY `a:`
-      // callback routes through the ACTION-AWARE dispatcher: the ingress
-      // pre-reads the token's server-side action and hands it to the
-      // OWNING service (admin_post.* → the admin-post service;
-      // queue.cancel_publication → the disposition service; anything else
-      // → the honest invalid answer with NOTHING consumed). An
-      // admin-post token can never be burned by the queue surface, and a
-      // foreign/future token can never be burned by either.
-      if (queueWriteEnabled) {
+      // While the write-capable queue surface OR the owner-only admin
+      // management surface is enabled, EVERY `a:` callback routes through
+      // the ACTION-AWARE dispatcher: the ingress pre-reads the token's
+      // server-side action and hands it to the OWNING service (admin_post.*
+      // → the admin-post service; queue.cancel_publication → the
+      // disposition service; admins.* → the admin-manage service;
+      // anything else → the honest invalid answer with NOTHING consumed).
+      // An admin-post token can never be burned by the queue surface, and
+      // a foreign/future token can never be burned by either. (Issue #8:
+      // the dispatcher is the ONLY callback entry for admins.* tokens —
+      // routing them through the admin-post service would consume them as
+      // unknown actions.)
+      if (queueWriteEnabled || adminManageEnabled) {
         if (actor.kind === 'unauthorized') {
           return { type: 'noop', reason: 'callback_not_supported' };
         }
@@ -1260,6 +1337,102 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
       };
     }
 
+    // ---- Issue #8 owner-only admin management (`/admins`) ---------------
+    // Gated by its OWN fail-closed flag; while OFF the command falls
+    // through to the SAME unknown-command noop — zero feedback and ZERO
+    // admin reads. The router validates the argument grammar and emits
+    // the typed action; the reads AND the writes happen in the injected
+    // admin-manage service (the command itself NEVER writes — add/remove/
+    // role only mint single-use confirm tokens).
+    if (command === ADMINS_COMMAND) {
+      if (!adminManageEnabled) {
+        return { type: 'noop', reason: 'command_not_allowlisted' };
+      }
+      if (actor.kind === 'unauthorized') {
+        if (chatId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        return { type: 'denied', chatId, reason: 'unauthorized', text: denialText() };
+      }
+      const manageUi = uiLanguage ?? DEFAULT_ADMIN_UI_LANGUAGE;
+      if (!roleHasPermission(actor.role, 'admin.manage')) {
+        if (chatId === undefined) {
+          return { type: 'noop', reason: 'unroutable_message' };
+        }
+        return {
+          type: 'denied',
+          chatId,
+          reason: 'insufficient_permission',
+          text: escapeTelegramHtml(ADMIN_MANAGE_STRINGS[manageUi].permissionDenied),
+        };
+      }
+      if (update.chatType !== 'private') {
+        return { type: 'noop', reason: 'admins_not_private_chat' };
+      }
+      if (update.kind !== 'message') {
+        return { type: 'noop', reason: 'admins_edited_message' };
+      }
+      if (chatId === undefined || update.fromUserId === undefined) {
+        return { type: 'noop', reason: 'unroutable_message' };
+      }
+      const remainder = commandRemainder(update.text);
+      if (remainder.kind === 'malformed') {
+        return {
+          type: 'send_message',
+          chatId,
+          text: escapeTelegramHtml(ADMIN_MANAGE_STRINGS[manageUi].invalidUsage),
+        };
+      }
+      const parsedManageArgument = parseAdminManageArgument(
+        remainder.kind === 'remainder' ? remainder.text : undefined,
+      );
+      switch (parsedManageArgument.kind) {
+        case 'list':
+          return {
+            type: 'admin_manage_list',
+            chatId,
+            telegramUserId: update.fromUserId,
+            role: actor.role,
+            uiLanguage: manageUi,
+          };
+        case 'add':
+          return {
+            type: 'admin_manage_add',
+            chatId,
+            telegramUserId: update.fromUserId,
+            role: actor.role,
+            uiLanguage: manageUi,
+            targetUserId: parsedManageArgument.targetUserId,
+            targetRole: parsedManageArgument.role,
+          };
+        case 'remove':
+          return {
+            type: 'admin_manage_remove',
+            chatId,
+            telegramUserId: update.fromUserId,
+            role: actor.role,
+            uiLanguage: manageUi,
+            targetUserId: parsedManageArgument.targetUserId,
+          };
+        case 'role':
+          return {
+            type: 'admin_manage_role',
+            chatId,
+            telegramUserId: update.fromUserId,
+            role: actor.role,
+            uiLanguage: manageUi,
+            targetUserId: parsedManageArgument.targetUserId,
+            targetRole: parsedManageArgument.role,
+          };
+        case 'invalid':
+          return {
+            type: 'send_message',
+            chatId,
+            text: escapeTelegramHtml(ADMIN_MANAGE_STRINGS[manageUi].invalidUsage),
+          };
+      }
+    }
+
     if (!isInitialAdminCommand(command)) {
       // Ignored for every sender — no feedback for command probing.
       return { type: 'noop', reason: 'command_not_allowlisted' };
@@ -1293,10 +1466,14 @@ export function createCommandRouter(context: CommandRouteContext): CommandRouter
         storyEnabled && roleHasPermission(actor.role, 'story.view')
           ? ADMIN_STORY_STRINGS[ui].helpStoryLine
           : null;
+      const adminsHelpLine =
+        adminManageEnabled && roleHasPermission(actor.role, 'admin.manage')
+          ? ADMIN_MANAGE_STRINGS[ui].helpAdminsLine
+          : null;
       return {
         type: 'send_message',
         chatId,
-        text: respond(command, ui, draftsHelpLine, queueHelpLine, storyHelpLine),
+        text: respond(command, ui, draftsHelpLine, queueHelpLine, storyHelpLine, adminsHelpLine),
       };
     }
 

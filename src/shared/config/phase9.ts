@@ -26,6 +26,7 @@ export const ADMIN_QUEUE_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_STORY_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_QUEUE_WRITE_FLAG_VALUES = ['true', 'false'] as const;
 export const ADMIN_ALBUM_CAPTURE_FLAG_VALUES = ['true', 'false'] as const;
+export const ADMIN_MANAGE_FLAG_VALUES = ['true', 'false'] as const;
 
 export const PHASE_9A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
   {
@@ -83,6 +84,17 @@ export const PHASE_9A_CONFIG_SPEC: ConfigSpec = defineConfigSpec([
       'Write-capable queue disposition surface gate (non-secret; Phase 9C). Gates the /queue <publicationId> detail view, its cancel button and its single-use disposition callback only — fail-closed default false; the ONE disposition is the pol1 cancel from pending/retry_wait/failed (a STOP, never a resend); independent of ADMIN_QUEUE_ENABLED; never enables the scheduler send path, any send, or any other write.',
     phase: 9,
   },
+  {
+    name: 'ADMIN_MANAGE_ENABLED',
+    type: 'enum',
+    required: false,
+    secret: false,
+    allowed: [...ADMIN_MANAGE_FLAG_VALUES],
+    default: 'false',
+    description:
+      'Owner-only admin management surface gate (non-secret; issue #8). Gates the /admins list/add/remove/role Telegram commands, their help advertisement, and their single-use confirm/cancel callbacks only — fail-closed default false; the ONLY mutations are admin rows in D1 plus their audit events; independent of every other admin surface; never enables any send, publish, or scheduler path.',
+    phase: 9,
+  },
 ]);
 
 /** Validated Phase 9A/9B/9C flag state (values only; no secrets involved). */
@@ -98,6 +110,9 @@ export interface AdminReviewConfig {
   /** Phase 9D: the album capture surface gate (independent; default OFF —
    *  evidence gathering with rights-unknown candidates; never a send path). */
   readonly albumCaptureEnabled: boolean;
+  /** Issue #8: the owner-only /admins surface gate (independent; default
+   *  OFF — list/add/remove/role plus the single-use confirm callbacks). */
+  readonly adminManageEnabled: boolean;
 }
 
 /**
@@ -123,6 +138,7 @@ export function parseAdminReviewConfig(env: Readonly<Record<string, unknown>>): 
       queueWriteEnabled: result.ok === true && result.config.ADMIN_QUEUE_WRITE_ENABLED === 'true',
       albumCaptureEnabled:
         result.ok === true && result.config.ADMIN_ALBUM_CAPTURE_ENABLED === 'true',
+      adminManageEnabled: result.ok === true && result.config.ADMIN_MANAGE_ENABLED === 'true',
     },
     result,
   };

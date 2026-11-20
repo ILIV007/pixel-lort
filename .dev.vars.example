@@ -48,6 +48,9 @@
 # Phase 9C write-capable queue disposition surface gate (non-secret;
 # independent, fail-closed; ships OFF — a STOP, never a resend).
 # ADMIN_QUEUE_WRITE_ENABLED=false
+# Issue #8 owner-only admin management surface gate (non-secret;
+# independent, fail-closed; ships OFF — only admin rows + audit events).
+# ADMIN_MANAGE_ENABLED=false
 # Phase 9D album media-group capture surface gate (non-secret; independent,
 # fail-closed; ships OFF — evidence gathering, never a send path).
 # ADMIN_ALBUM_CAPTURE_ENABLED=false
