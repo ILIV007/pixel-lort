@@ -8,6 +8,7 @@
 import type { SourceConnector } from './contract';
 import { createRssConnector } from './rss';
 import { createSteamNewsConnector } from './steam-news';
+import { createEpicFreeGamesConnector } from './epic-free-games';
 import { createYoutubePlaylistsConnector } from './youtube-playlists';
 import { createRedditOauthConnector } from './reddit-oauth';
 import { createGithubReleasesConnector } from './github-releases';
@@ -23,6 +24,7 @@ export function createConnectorRegistry(): ConnectorRegistry {
   const connectors: readonly SourceConnector[] = [
     createRssConnector(),
     createSteamNewsConnector(),
+    createEpicFreeGamesConnector(),
     createYoutubePlaylistsConnector(),
     createRedditOauthConnector(),
     createGithubReleasesConnector(),

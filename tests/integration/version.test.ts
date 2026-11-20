@@ -36,9 +36,9 @@ describe('GET /version via SELF', () => {
       'environment',
       'schemaVersion',
     ]);
-    expect(body['applicationVersion']).toBe('1.42.0');
+    expect(body['applicationVersion']).toBe('1.43.0');
     expect(body['commit']).toBe('local-dev');
-    expect(body['schemaVersion']).toBe(7);
+    expect(body['schemaVersion']).toBe(8);
     expect(body['environment']).toBe('development');
   });
 
@@ -131,14 +131,14 @@ describe('GET /health/ready — Phase 1A schema health (DB binding present)', ()
     expect(body['status']).toBe('not_ready');
     expect(Object.keys(body).sort()).toEqual(['ok', 'service', 'status']);
 
-    // Restore the application metadata (schema v7 — the slice-4 LINEAR
+    // Restore the application metadata (schema v8 — the slice-5 LINEAR
     // chain) so later tests in this file do not treat the migrations as
     // pending again (shared storage); re-applying a migration would fail on
     // its CREATE/ALTER statements.
     await env.DB.prepare(
       `INSERT INTO schema_metadata (key, value, updated_at_ms) VALUES
-         ('schema_version', '7', 1),
-         ('migration_id', '0007_inbound_pipeline', 1),
+         ('schema_version', '8', 1),
+         ('migration_id', '0008_live_watchlists', 1),
          ('applied_at', '1970-01-01T00:00:00.000Z', 1)`,
     ).run();
   });
