@@ -25,13 +25,13 @@ import type { Environment } from './phase0';
 
 /**
  * Expected schema version of the LINEAR migration candidate chain
- * (0001+0002+0003 applied + the LOCAL-ONLY candidates 0004 → 4 and
- * 0005 → 5). The APPLIED real runtime stays 3 until the owner separately
- * authorizes the remote migration — a database still at 3 is healthy for
- * its era but reports a mismatch against this bundle expectation, exactly
- * the pre-activation posture of every review round.
+ * (0001+0002+0003 applied + the LOCAL-ONLY candidates 0004 → 4, 0005 → 5,
+ * 0006 → 6 and 0007 → 7). The APPLIED real runtime stays 3 until the owner
+ * separately authorizes the remote migration — a database still at 3 is
+ * healthy for its era but reports a mismatch against this bundle
+ * expectation, exactly the pre-activation posture of every review round.
  */
-export const EXPECTED_SCHEMA_VERSION = 6;
+export const EXPECTED_SCHEMA_VERSION = 7;
 
 /** Local-development placeholder commit identifier (invalid outside development). */
 export const DEFAULT_APP_COMMIT = 'local-dev';

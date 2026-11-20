@@ -304,9 +304,12 @@ export function createAdminPanelService(deps: {
   }): Promise<AdminPanelReplyResult> {
     const s = ADMIN_PANEL_STRINGS[input.uiLanguage];
     const state = input.state;
+    // The "of cap" line counts CAP-CONSUMING publications only: owner-sent
+    // inbound posts are visible in `published` but exempt from the cap
+    // (slice 4), so they must never inflate the cap-usage display.
     const todayLine = state.eventActive
       ? `${s.mainTodayLabel} ${state.counts.published} published (cap lifted)`
-      : `${s.mainTodayLabel} ${state.counts.published} of ${state.capInForce} published`;
+      : `${s.mainTodayLabel} ${state.counts.counted} of ${state.capInForce} published`;
     const parts: TelegramSafeHtml[] = [
       telegramBold(s.mainTitle),
       escapeTelegramHtml(`${s.mainModeLabel} ${state.mode}`),
@@ -401,7 +404,7 @@ export function createAdminPanelService(deps: {
     const parts: TelegramSafeHtml[] = [
       telegramBold(s.capTitle),
       escapeTelegramHtml(`${s.capCurrentLabel} ${state.capInForce}`),
-      escapeTelegramHtml(`${s.capTodayLabel} ${state.counts.published} of ${state.capInForce}`),
+      escapeTelegramHtml(`${s.capTodayLabel} ${state.counts.counted} of ${state.capInForce}`),
     ];
     if (state.pendingCap !== null && state.pendingEffectiveFrom !== null) {
       parts.push(

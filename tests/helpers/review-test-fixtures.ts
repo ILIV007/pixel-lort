@@ -88,9 +88,9 @@ export function createCountingExecutor(inner: DbExecutor): CountingExecutor {
 /** Counting fake Bot API client — records every sendMessage call. */
 export function createFakeBotApi(): {
   client: TelegramBotApiClient;
-  sends: { chatId: number; text: string }[];
+  sends: { chatId: number | string; text: string }[];
 } {
-  const sends: { chatId: number; text: string }[] = [];
+  const sends: { chatId: number | string; text: string }[] = [];
   const client: TelegramBotApiClient = {
     async getMe() {
       return { id: 42, username: 'pixel_admin_bot' };
@@ -155,7 +155,7 @@ export interface ReviewHarnessOptions {
 export interface ReviewHarness {
   readonly ingress: ReturnType<typeof createTelegramIngress>;
   readonly executor: CountingExecutor;
-  readonly sends: { chatId: number; text: string }[];
+  readonly sends: { chatId: number | string; text: string }[];
 }
 
 /**

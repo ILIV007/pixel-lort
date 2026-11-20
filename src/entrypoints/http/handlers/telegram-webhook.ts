@@ -49,6 +49,8 @@ import { parseTelegramPhase2Config } from '../../../shared/config/phase2';
 import { parseAdminReviewConfig } from '../../../shared/config/phase9';
 import { createAdminQueueDispositionService } from '../../../application/publishing/queue-disposition-service';
 import { parseAdminPostConfig } from '../../../shared/config/phase10';
+import { parseAiConfig } from '../../../shared/config/phase6';
+import { createWorkersAiAdapter } from '../../../adapters/ai/workers-ai-adapter';
 import { timingSafeEqualStrings } from '../../../shared/security/timing-safe';
 import {
   BoundedReadError,
@@ -62,6 +64,11 @@ import { createEditorialReviewService } from '../../../application/editorial/dra
 import { createAdminQueueViewService } from '../../../application/publishing/queue-view-service';
 import { createAdminStoryViewService } from '../../../application/publishing/story-view-service';
 import { createAdminPostService } from '../../../application/admin-post/admin-post-service';
+import { createAiInboundRewriter } from '../../../application/inbound/ai-rewriter';
+import {
+  createInboundPipelineService,
+  type InboundTransport,
+} from '../../../application/inbound/inbound-pipeline-service';
 import { createAdminManageService } from '../../../application/admin-manage/admin-manage-service';
 import { createAdminPanelService } from '../../../application/admin-panel/admin-panel-service';
 import { createAuthorizationService } from '../../../admin/authorization';
@@ -289,6 +296,62 @@ export async function handleTelegramWebhook(
       ? createBotApiClient({ botToken: phase2.config.botToken, logger: ctx.logger })
       : undefined;
 
+  // Slice 4: the inbound AI-admin pipeline is wired ONLY while the admin
+  // post gate is ON (it shares the capture surface). The rewriter uses the
+  // SAME Workers AI port + budget-authority shape as the editorial draft
+  // service; the Gemini fallback stays UNWIRED in production (its
+  // versioned eligibility is unverified, so the ladder skips it even if
+  // its operator flag were on). The AI flags ship OFF on preview, so the
+  // rewriter defers and the pipeline runs on the cleaned text.
+  const aiFlags = parseAiConfig(env as Readonly<Record<string, unknown>>);
+  const workersAiBindingPresent = env.AI !== undefined;
+  const inboundRewriter = createAiInboundRewriter({
+    executor,
+    ports: workersAiBindingPresent ? { 'workers-ai': createWorkersAiAdapter(env.AI) } : {},
+    clock: systemClock,
+    logger: ctx.logger,
+    config: {
+      aiEnabled: aiFlags.config.AI_ENABLED,
+      geminiEnabled: aiFlags.config.AI_GEMINI_ENABLED,
+      workersAiBindingPresent,
+      geminiApiKeyPresent: env.GEMINI_API_KEY !== undefined,
+    },
+  });
+  // The transport adapter maps the SAME real Bot API client instance onto
+  // the minimal inbound transport (no second client, no bypass path).
+  // Classic sends/edits go through the HTML surface; rich sends/edits and
+  // deletes go through their typed methods.
+  const inboundTransport: InboundTransport | undefined =
+    botApi === undefined
+      ? undefined
+      : {
+          sendMessageRich: (input) => botApi.sendMessageRich(input),
+          sendPhotoRich: (input) => botApi.sendPhotoRich(input),
+          sendVideoRich: (input) => botApi.sendVideoRich(input),
+          sendMessageClassic: (input) =>
+            botApi.sendMessage({ chatId: input.chatId, text: input.html }),
+          editMessageTextRich: (input) => botApi.editMessageTextRich(input),
+          editMessageCaptionRich: (input) => botApi.editMessageCaptionRich(input),
+          editMessageTextClassic: (input) =>
+            botApi.editMessageText({
+              chatId: input.chatId,
+              messageId: input.messageId,
+              text: input.html,
+            }),
+          deleteMessage: (input) => botApi.deleteMessage(input),
+        };
+  const inboundPipeline = createInboundPipelineService({
+    executor,
+    clock: systemClock,
+    logger: ctx.logger,
+    config: {
+      livePublishEnabled: adminPostFlags.config.livePublishEnabled,
+      destination: phase2.config.targetChannel,
+    },
+    transport: inboundTransport,
+    rewriter: inboundRewriter,
+  });
+
   const ingress = createTelegramIngress({
     executor,
     authorization: createAuthorizationService({
@@ -371,8 +434,14 @@ export async function handleTelegramWebhook(
             destination: phase2.config.targetChannel,
           },
           transport: botApi,
+          // Slice 4: the inbound delegate — owner posts with no open
+          // capture session flow through the inbound pipeline.
+          inbound: inboundPipeline,
         })
       : undefined,
+    // Slice 4: the inbound pipeline owns the `inbound.*` token callbacks
+    // (approval previews). Wired only while the admin post gate is ON.
+    inbound: adminPostEnabled ? inboundPipeline : undefined,
     // Issue #8: the admin management service is wired ONLY while its gate
     // is ON. The bootstrap owner id comes from the parsed Phase 2 config
     // (the protected identity); the service never reads it from chat.

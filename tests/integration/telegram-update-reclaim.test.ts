@@ -113,10 +113,10 @@ function flakyClient(
   failuresBeforeSuccess = 0,
 ): {
   client: TelegramBotApiClient;
-  sends: { chatId: number; text: string }[];
+  sends: { chatId: number | string; text: string }[];
   calls: () => number;
 } {
-  const sends: { chatId: number; text: string }[] = [];
+  const sends: { chatId: number | string; text: string }[] = [];
   let calls = 0;
   const client: TelegramBotApiClient = {
     async getMe() {

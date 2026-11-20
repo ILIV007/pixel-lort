@@ -53,6 +53,16 @@ export const ADMIN_POST_SCHEMA_VERSION = 5;
  */
 export const EDITORIAL_POST_SCHEMA_VERSION = 6;
 
+/**
+ * Slice 4 — the schema version of the LINEAR path's final candidate
+ * state: migration candidate 0007 (inbound AI-admin pipeline) applied ON
+ * TOP of 0006. Version 7 therefore MEANS "ownership present AND admin post
+ * present AND the per-version editorial provenance present AND the inbound
+ * published_posts / inbound_approvals tables present". Capability marker
+ * only — never a health expectation.
+ */
+export const INBOUND_PIPELINE_SCHEMA_VERSION = 7;
+
 export const SCHEMA_METADATA = {
   table: SCHEMA_METADATA_TABLE,
   versionKey: 'schema_version',
@@ -169,6 +179,12 @@ export const SCHEMA_ADMIN_POST_MIGRATION_ID = '0005_admin_post_pipeline';
  * pipeline).
  */
 export const SCHEMA_EDITORIAL_POST_MIGRATION_ID = '0006_admin_post_editorial_source';
+/**
+ * Slice 4 — identifies the version-7 linear shape (the inbound AI-admin
+ * pipeline: published_posts + inbound_approvals on top of the editorial
+ * provenance).
+ */
+export const SCHEMA_INBOUND_PIPELINE_MIGRATION_ID = '0007_inbound_pipeline';
 
 /** The distinct, typed capability states (R19-01 — no boolean merge). */
 export type SchemaCapability =
@@ -217,6 +233,20 @@ export type SchemaCapability =
       readonly appliedSchemaVersion: 6;
     }
   | {
+      /**
+       * Slice 4: the LINEAR final candidate state — 0007 applied on top
+       * of 0006. ALL capabilities are present: ownership (0004), the
+       * admin post pipeline (0005), the per-version editorial provenance
+       * with the nullable source_update_id (0006) AND the inbound
+       * published_posts / inbound_approvals tables (0007). Every ingestion
+       * path treats this state exactly like the ownership mode; the admin
+       * post pipeline, the editorial bridge AND the inbound pipeline are
+       * available.
+       */
+      readonly kind: 'known_v7_inbound';
+      readonly appliedSchemaVersion: 7;
+    }
+  | {
       readonly kind: 'unresolved';
       readonly reason: SchemaCapabilityUnresolvedReason;
     };
@@ -246,13 +276,14 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
   if (parsed === 3) {
     return { kind: 'known_v3_legacy', appliedSchemaVersion: 3 };
   }
-  if (parsed === 4 || parsed === 5 || parsed === 6) {
+  if (parsed === 4 || parsed === 5 || parsed === 6 || parsed === 7) {
     // The migration_id distinguishes the shapes a version number alone can
     // never prove: at version 4 the ownership column exists ONLY under the
     // 0004 id; at version 5 the linear chain requires the 0005 id (and
     // implies 0004's changes); at version 6 the linear chain requires the
-    // 0006 id (and implies 0004+0005's changes). Anything else is
-    // UNRESOLVED — no invented valid shapes.
+    // 0006 id (and implies 0004+0005's changes); at version 7 the linear
+    // chain requires the 0007 id (and implies 0004+0005+0006's changes).
+    // Anything else is UNRESOLVED — no invented valid shapes.
     let idRow: { value: string } | null;
     try {
       idRow = await executor.first<{ value: string }>({
@@ -280,8 +311,14 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
       }
       return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
     }
-    if (idRow.value === SCHEMA_EDITORIAL_POST_MIGRATION_ID) {
-      return { kind: 'known_v6_editorial_post', appliedSchemaVersion: 6 };
+    if (parsed === 6) {
+      if (idRow.value === SCHEMA_EDITORIAL_POST_MIGRATION_ID) {
+        return { kind: 'known_v6_editorial_post', appliedSchemaVersion: 6 };
+      }
+      return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
+    }
+    if (idRow.value === SCHEMA_INBOUND_PIPELINE_MIGRATION_ID) {
+      return { kind: 'known_v7_inbound', appliedSchemaVersion: 7 };
     }
     return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
   }

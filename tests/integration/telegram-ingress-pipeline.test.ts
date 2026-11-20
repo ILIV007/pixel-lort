@@ -36,9 +36,9 @@ beforeEach(async () => {
 /** Counting fake client — records every sendMessage call. */
 function countingClient(options: { failWith?: TelegramApiError } = {}): {
   client: TelegramBotApiClient;
-  sends: { chatId: number; text: string }[];
+  sends: { chatId: number | string; text: string }[];
 } {
-  const sends: { chatId: number; text: string }[] = [];
+  const sends: { chatId: number | string; text: string }[] = [];
   const client: TelegramBotApiClient = {
     async getMe() {
       return { id: 42, username: 'pixel_admin_bot' };

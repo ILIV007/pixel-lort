@@ -105,7 +105,11 @@ export interface TelegramSentMessage {
   readonly messageId: number;
 }
 export interface TelegramSendMessageInput {
-  readonly chatId: number;
+  /**
+   * Numeric chat id, or an operator-configured @username target (Telegram
+   * resolves usernames server-side; never user input).
+   */
+  readonly chatId: number | string;
   readonly text: TelegramSafeHtml;
   readonly disableLinkPreview?: boolean;
   /**
@@ -121,7 +125,11 @@ export interface TelegramSendMessageInput {
 }
 
 export interface TelegramEditMessageInput {
-  readonly chatId: number;
+  /**
+   * Numeric chat id, or an operator-configured @username target (Telegram
+   * resolves usernames server-side; never user input).
+   */
+  readonly chatId: number | string;
   readonly messageId: number;
   readonly text: TelegramSafeHtml;
 }
@@ -245,7 +253,11 @@ export interface TelegramSentMediaGroupMessage {
 }
 
 export interface TelegramEditRichInput {
-  readonly chatId: number;
+  /**
+   * Numeric chat id, or an operator-configured @username target (Telegram
+   * resolves usernames server-side; never user input).
+   */
+  readonly chatId: number | string;
   readonly messageId: number;
   /** kind must be 'text'. */
   readonly content: RichTextEnvelope;
@@ -253,7 +265,11 @@ export interface TelegramEditRichInput {
 }
 
 export interface TelegramEditCaptionRichInput {
-  readonly chatId: number;
+  /**
+   * Numeric chat id, or an operator-configured @username target (Telegram
+   * resolves usernames server-side; never user input).
+   */
+  readonly chatId: number | string;
   readonly messageId: number;
   /** kind must be 'caption'. */
   readonly content: RichTextEnvelope;
@@ -277,6 +293,18 @@ export interface TelegramRichTextClient {
   ): Promise<readonly TelegramSentMediaGroupMessage[]>;
   editMessageTextRich(input: TelegramEditRichInput): Promise<boolean>;
   editMessageCaptionRich(input: TelegramEditCaptionRichInput): Promise<boolean>;
+}
+
+/**
+ * Slice 4 — the delete capability for inbound in-place edits (delete +
+ * re-send when the edited shape no longer fits). Kept SEPARATE from
+ * `TelegramBotApiClient` so every existing consumer/fake stays untouched.
+ */
+export interface TelegramMessageDeleteClient {
+  deleteMessage(input: {
+    readonly chatId: number | string;
+    readonly messageId: number;
+  }): Promise<boolean>;
 }
 
 export interface TelegramBotApiClient {
@@ -367,7 +395,7 @@ async function readResponseBounded(response: Response): Promise<string> {
 
 export function createBotApiClient(
   options: BotApiClientOptions,
-): TelegramBotApiClient & TelegramRichTextClient {
+): TelegramBotApiClient & TelegramRichTextClient & TelegramMessageDeleteClient {
   const { botToken, logger } = options;
   const fetchImpl = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   const timeoutMs = options.timeoutMs ?? DEFAULT_TELEGRAM_API_TIMEOUT_MS;
@@ -666,6 +694,18 @@ export function createBotApiClient(
         {
           callback_query_id: input.callbackQueryId,
           ...(input.text !== undefined ? { text: input.text } : {}),
+        },
+        (result) => (result === true ? true : null),
+      );
+    },
+
+    // ---- Slice 4: delete (inbound edit re-send path) --------------------
+    async deleteMessage(input) {
+      return callMethod(
+        'deleteMessage',
+        {
+          chat_id: input.chatId,
+          message_id: input.messageId,
         },
         (result) => (result === true ? true : null),
       );

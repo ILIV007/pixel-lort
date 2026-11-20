@@ -72,6 +72,7 @@ import {
 } from '../../adapters/db/admin-post-store';
 import { createEditorialReviewStore } from '../../adapters/db/editorial-review-store';
 import { consumeActionToken, issueActionToken } from '../../adapters/telegram/action-tokens';
+import type { InboundPipelineService } from '../inbound/inbound-pipeline-service';
 import {
   composeTelegramHtml,
   escapeTelegramHtml,
@@ -132,6 +133,15 @@ export type AdminPostExecutionResult =
       readonly kind: 'preview';
       /** R1.21: the complete stored version — media + text/caption envelope. */
       readonly content: PostContentDocument;
+      /**
+       * Slice 4: the classic-HTML rendering of the FIRST part, when the
+       * previewed content decided 'classic'. Present only for text posts
+       * with a classic presentation; the ingress renders it with
+       * `sendSafely` instead of the rich content document, so the preview
+       * shows the exact form that will be published. Media previews never
+       * carry it (media always travels on the rich transport).
+       */
+      readonly classicText?: TelegramSafeHtml;
       readonly control: TelegramSafeHtml;
       readonly buttons: AdminPostButtons;
     }
@@ -193,6 +203,17 @@ export interface AdminPostService {
     readonly updateId: number;
     /** R1.20-R1: the session gate distinguishes fresh messages from edits. */
     readonly kind: 'message' | 'edited_message';
+    /**
+     * Slice 4: the private-chat id — only the inbound delegation needs it
+     * (the published_posts row's source chat + the PV copy). Absent on
+     * legacy/test call sites, which keep the silent legacy behavior.
+     */
+    readonly chatId?: number;
+    /**
+     * Slice 4: the source message id — the inbound pipeline's edit anchor.
+     * Absent for updates without a message id.
+     */
+    readonly sourceMessageId?: number;
     readonly text: string | undefined;
     readonly hasText: boolean;
     readonly richText: ParsedRichTextExtraction | undefined;
@@ -409,8 +430,15 @@ export function createAdminPostService(deps: {
   readonly logger: Logger;
   readonly config: AdminPostServiceConfig;
   readonly transport?: AdminPostTransport;
+  /**
+   * Slice 4: the inbound AI-admin pipeline. When present, a message that
+   * arrives with NO open capture session is delegated to it instead of
+   * staying silent — the owner can send posts directly in the bot's PV.
+   * Absent = the legacy behavior (silent 'none').
+   */
+  readonly inbound?: InboundPipelineService;
 }): AdminPostService {
-  const { executor, clock, logger, config } = deps;
+  const { executor, clock, logger, config, inbound } = deps;
 
   function reply(
     ui: AdminUiLanguage,
@@ -834,6 +862,30 @@ export function createAdminPostService(deps: {
       // while the session is open; a closed session has nothing to change.)
       const session = await findOpenCaptureSession(executor, input.telegramUserId);
       if (session === null) {
+        // Slice 4 — INBOUND DELEGATION: no open capture session, so the
+        // message is an owner-sent inbound post, not a capture. The
+        // inbound pipeline owns the whole flow from here (clean ->
+        // classify -> rewrite -> route -> publish/edit). The session-open
+        // path below is unchanged. A call site without a chat id (legacy /
+        // tests) keeps the silent legacy behavior.
+        if (inbound !== undefined && input.chatId !== undefined) {
+          return inbound.processInbound({
+            chatId: input.chatId,
+            telegramUserId: input.telegramUserId,
+            role: input.role,
+            uiLanguage: input.uiLanguage,
+            updateId: input.updateId,
+            sourceMessageId: input.sourceMessageId,
+            kind: input.kind,
+            text: input.text,
+            hasText: input.hasText,
+            richText: input.richText,
+            media: input.media,
+            richCaption: input.richCaption,
+            inMediaGroup: input.inMediaGroup,
+            hasMediaAttachment: input.hasMediaAttachment,
+          });
+        }
         return { kind: 'none' };
       }
       // Slice 3 — paused mode rejects inbound posts: the bot is off, the
