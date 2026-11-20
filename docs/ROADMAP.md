@@ -205,9 +205,12 @@ Cloudflare secret configuration; the ingress flag ships `false` everywhere):
 - [x] Command routing contracts (ADR-0026): allowlist /start /help /status
       /version; typed actions (send_message / answer_callback / noop /
       denied) separate from HTTP routing; minimal Persian denial for
-      unauthorized senders; no role-mutation endpoints; bot-target safety —
+      unauthorized senders; bot-target safety —
       commands addressed to another bot ignored (`command_for_other_bot`,
       case-insensitive matching when an expected username is configured).
+      Role mutation exists ONLY as the owner-only `/admins` surface (issue #8,
+      `ADMIN_MANAGE_ENABLED` flag, single-use confirm tokens, audit events)
+      — never from any other command.
 - [x] Telegram Bot API client boundary (ADR-0026): getMe / sendMessage /
       editMessageText / answerCallbackQuery; injectable fetch; strict
       timeout; single attempt (no retry storm); `redirect: "error"`; bounded

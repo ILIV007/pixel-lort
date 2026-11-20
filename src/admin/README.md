@@ -18,7 +18,13 @@ Implemented in Phase 2A:
   (≤ 64 bytes, base64url token, no embedded payload).
 
 Still planned (later phases): command screens, multi-step admin sessions
-(`admin_sessions`), role-mutation flows, opaque action token issuance for
-real menus (Phase 9), editorial review workflows.
+(`admin_sessions`), opaque action token issuance for real menus (Phase 9),
+editorial review workflows.
+
+Owner-only admin management (issue #8) is IMPLEMENTED: `/admins`
+(list/add/remove/role) behind the fail-closed `ADMIN_MANAGE_ENABLED`
+flag — see `src/admin/admin-manage-command.ts`,
+`src/application/admin-manage/admin-manage-service.ts`, and the runbook
+in `docs/SECURITY_MODEL.md` §3 (Admin management row).
 
 Authorization NEVER uses usernames and NEVER mutates roles from chat input.
