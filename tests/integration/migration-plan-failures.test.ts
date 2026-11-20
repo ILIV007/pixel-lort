@@ -135,9 +135,9 @@ describe('applyMigrations — failure atomicity (proof 6)', () => {
 
     // Version-1 objects are intact and the database can still be upgraded by
     // a valid pending migration afterwards (recovery path) — here via the
-    // REAL pending migrations, landing at the shipped schema version 8
-    // (R1.20-R1 + R1.22 + slice 4 + slice 5: the LINEAR plan continues through the LOCAL-ONLY
-    // 0004 -> 4, 0005 -> 5, 0006 -> 6, 0007 -> 7 and 0008 -> 8).
+    // REAL pending migrations, landing at the shipped schema version 9
+    // (R1.20-R1 + R1.22 + slice 4 + slice 5 + slice 6: the LINEAR plan continues through the LOCAL-ONLY
+    // 0004 -> 4, 0005 -> 5, 0006 -> 6, 0007 -> 7, 0008 -> 8 and 0009 -> 9).
     const recovery = await applyMigrations(db);
     expect(recovery.observedVersion).toBe(1);
     expect(recovery.applied.map((migration) => migration.id)).toEqual([
@@ -148,8 +148,9 @@ describe('applyMigrations — failure atomicity (proof 6)', () => {
       '0006_admin_post_editorial_source',
       '0007_inbound_pipeline',
       '0008_live_watchlists',
+      '0009_post_management_near_dup',
     ]);
-    expect(await appliedSchemaVersion()).toBe(8);
-    expect(await appliedMigrationId()).toBe('0008_live_watchlists');
+    expect(await appliedSchemaVersion()).toBe(9);
+    expect(await appliedMigrationId()).toBe('0009_post_management_near_dup');
   });
 });

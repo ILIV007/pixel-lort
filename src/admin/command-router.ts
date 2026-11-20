@@ -485,7 +485,7 @@ export type TelegramAction =
       readonly telegramUserId: number;
       readonly role: AdminRole;
       readonly uiLanguage: AdminUiLanguage;
-      readonly screen: 'mode' | 'cap' | 'event';
+      readonly screen: 'mode' | 'cap' | 'event' | 'posts';
     };
 
 export interface CommandRouteContext {

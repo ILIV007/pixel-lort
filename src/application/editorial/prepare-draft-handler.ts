@@ -228,6 +228,26 @@ import {
   type ReuseCandidateVerification,
 } from '../../domain/editorial/exact-content';
 import { buildCandidateDiscoveryReport } from '../../domain/editorial/candidate-discovery';
+import {
+  NEAR_DUP_CANDIDATE_LIMIT,
+  NEAR_DUP_WINDOW_MS,
+  classifyNearDupScore,
+  scoreNearDup,
+  type NearDupScore,
+} from '../../domain/editorial/near-dup';
+import {
+  findLiveNegativeCacheEntry,
+  findRecentStories,
+  findStoryEntityIds,
+  findStoryMergeBySourceItem,
+  markCanonicalStoryUpdated,
+  markSourceItemNearDupStatus,
+  recordQualityRejection,
+  recordStoryMerge,
+  type QualityRejectionRow,
+  type RecentStoryRow,
+} from '../../adapters/db/near-dup-store';
+import { randomToken } from '../../domain/admin-post/fingerprint';
 import { buildCandidateAssessmentReport } from '../../domain/editorial/candidate-assessment';
 import { buildCandidateMatchingReport } from '../../domain/editorial/candidate-matching';
 import { buildCandidateAdjudicationReport } from '../../domain/editorial/candidate-adjudication';
@@ -308,6 +328,23 @@ export interface EditorialPrepareDraftHandlerOptions {
    * implies EDITORIAL_ENABLED or AI_ENABLED.
    */
   readonly factGuard?: {
+    readonly enabled: boolean;
+  };
+  /**
+   * Slice 6: the independent fail-closed gates for the near-dup check
+   * (DESIGN §10.1) and the negative cache (DESIGN §9.4). Absent OR
+   * disabled ⇒ the step never runs and the handler keeps its exact
+   * prior behavior (the accepted path stays intact). Enabled ⇒ the
+   * deterministic similarity adjudication runs BEFORE any provider work
+   * (a merge means no second post, ever) and quality-gate rejections
+   * are cached 30 days (a cached item is never re-fed to AI). Neither
+   * flag implies EDITORIAL_ENABLED or AI_ENABLED — both steps live
+   * strictly inside the already-gated editorial pipeline.
+   */
+  readonly nearDup?: {
+    readonly enabled: boolean;
+  };
+  readonly negativeCache?: {
     readonly enabled: boolean;
   };
   readonly nowMs: () => number;
@@ -442,6 +479,58 @@ export function createEditorialPrepareDraftHandler(
       return { kind: 'permanent', reasonCode: 'editorial_source_missing' };
     }
 
+    /**
+     * Slice 6 — best-effort negative-cache record for a quality-gate
+     * rejection. The cache write NEVER changes the outcome: a storage
+     * failure is logged and the rejection still stands.
+     */
+    const rejectedItemId = item.id;
+    const rejectedItemContentHash = item.content_hash;
+    async function noteQualityRejection(reason: string): Promise<void> {
+      if (options.negativeCache?.enabled !== true) {
+        return;
+      }
+      try {
+        await recordQualityRejection(executor, {
+          id: `qr:${randomToken()}`,
+          fingerprint: rejectedItemContentHash,
+          reason,
+          sourceItemId: rejectedItemId,
+          nowMs: nowMs(),
+        });
+      } catch (error) {
+        logger?.warn('editorial.prepare_draft.negative_cache_record_failed', {
+          error: error instanceof Error ? error.message : 'unknown',
+        });
+      }
+    }
+
+    // ---- 3b. Slice 6 — the negative cache (DESIGN §9.4): a fingerprint
+    //          rejected by the quality gate within the last 30 days is
+    //          NEVER re-fed to AI. A DB error is NEVER a fabricated
+    //          "not cached": typed, bounded retry with ZERO provider
+    //          calls and ZERO charges.
+    if (options.negativeCache?.enabled === true) {
+      let cached: QualityRejectionRow | null = null;
+      try {
+        cached = await findLiveNegativeCacheEntry(executor, {
+          fingerprint: item.content_hash,
+          nowMs: nowMs(),
+        });
+      } catch (error) {
+        logger?.warn('editorial.prepare_draft.negative_cache_check_failed', {
+          error: error instanceof Error ? error.message : 'unknown',
+        });
+        return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+      }
+      if (cached !== null) {
+        logger?.warn('editorial.prepare_draft.negative_cache_skip', {
+          reason: cached.reason,
+        });
+        return { kind: 'permanent', reasonCode: 'editorial_negative_cache_skip' };
+      }
+    }
+
     // ---- 4. Pre-AI stable-result reuse: retry after a successful commit
     //         finds the SAME story + ready draft and calls NO provider.
     const storyKey = await storyKeyForSnapshot(item.id, item.content_hash);
@@ -465,6 +554,7 @@ export function createEditorialPrepareDraftHandler(
     const fullEvidenceBytes = new TextEncoder().encode(fullEvidenceText).length;
     if (fullEvidenceBytes > AI_BOUNDS.maxInputUtf8Bytes || fullEvidenceText.length === 0) {
       logger?.warn('editorial.prepare_draft.input_oversized');
+      await noteQualityRejection('editorial_input_invalid');
       return { kind: 'permanent', reasonCode: 'editorial_input_invalid' };
     }
     const excerpt = buildTraceableExcerpt(item);
@@ -474,6 +564,7 @@ export function createEditorialPrepareDraftHandler(
       // Defensive second layer (unreachable while the full-input gate
       // above holds: an allowed input's excerpt is always smaller).
       logger?.warn('editorial.prepare_draft.input_oversized');
+      await noteQualityRejection('editorial_input_invalid');
       return { kind: 'permanent', reasonCode: 'editorial_input_invalid' };
     }
     const inputHash = await editorialAiInputHash([snippet]);
@@ -954,6 +1045,121 @@ export function createEditorialPrepareDraftHandler(
       ambiguous: entityMentions.counts.ambiguousAliasesObserved,
       overflow: entityMentions.scan.resultOverflow,
     });
+
+    // ---- 5.7b Slice 6 — NEAR-DUP adjudication (DESIGN §10.1): the same
+    //          story from several sources with similar title/entities is
+    //          ONE story — an update, never a second post. Runs BEFORE
+    //          any provider work (the event-relation step and the AI call
+    //          both come after): a bounded scan of recent stories, the
+    //          pure nd1 similarity over title tokens + resolved entities,
+    //          and the durable ledger decision. A DB error is NEVER a
+    //          fabricated "distinct": typed, bounded retry with ZERO
+    //          provider calls and ZERO charges. A `distinct` verdict
+    //          records NOTHING — absence is the honest record — and the
+    //          item takes its own normal path below.
+    if (options.nearDup?.enabled === true) {
+      let recent: readonly RecentStoryRow[];
+      try {
+        recent = await findRecentStories(executor, {
+          sinceMs: nowMs() - NEAR_DUP_WINDOW_MS,
+          limit: NEAR_DUP_CANDIDATE_LIMIT,
+        });
+      } catch (error) {
+        logger?.warn('editorial.prepare_draft.near_dup_scan_failed', {
+          error: error instanceof Error ? error.message : 'unknown',
+        });
+        return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+      }
+      const incomingEntityIds = [
+        ...new Set(entityMentions.matched.map((mention) => mention.entityId)),
+      ].sort();
+      let best: { readonly story: RecentStoryRow; readonly score: NearDupScore } | null = null;
+      for (const candidate of recent) {
+        if (candidate.workingHeadline === null) {
+          continue;
+        }
+        let candidateEntityIds: readonly string[];
+        try {
+          candidateEntityIds = await findStoryEntityIds(executor, candidate.id);
+        } catch (error) {
+          logger?.warn('editorial.prepare_draft.near_dup_entity_scan_failed', {
+            error: error instanceof Error ? error.message : 'unknown',
+          });
+          return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+        }
+        const score = scoreNearDup({
+          incomingTitle: item.title,
+          incomingEntityIds,
+          candidateTitle: candidate.workingHeadline,
+          candidateEntityIds,
+        });
+        if (best === null || score.combined > best.score.combined) {
+          best = { story: candidate, score };
+        }
+      }
+      if (best !== null) {
+        const disposition = classifyNearDupScore(best.score);
+        if (disposition !== 'distinct') {
+          try {
+            // Idempotent redelivery: a ledger row for this (item, story)
+            // pair means the verdict already landed — re-apply only the
+            // guarded effects (the item flip is guarded on new/queued;
+            // the story bump may count twice across a crash window, a
+            // cosmetic counter, never a second post).
+            const prior = await findStoryMergeBySourceItem(executor, {
+              sourceItemId: item.id,
+              canonicalStoryId: best.story.id,
+            });
+            if (prior === null) {
+              await recordStoryMerge(executor, {
+                id: `nm:${randomToken()}`,
+                canonicalStoryId: best.story.id,
+                mergedStoryId: null,
+                sourceItemId: item.id,
+                similarityScore: best.score.combined,
+                titleScore: best.score.title,
+                entityScore: best.score.entity,
+                method: 'deterministic',
+                disposition,
+                decidedBy: 'editorial.prepare_draft:near_dup_nd1',
+                reasonCode:
+                  disposition === 'merged_as_update'
+                    ? 'near_dup_merge_threshold'
+                    : 'near_dup_review_threshold',
+                nowMs: nowMs(),
+              });
+            }
+            if (disposition === 'merged_as_update') {
+              await markCanonicalStoryUpdated(executor, {
+                storyId: best.story.id,
+                nowMs: nowMs(),
+              });
+              await markSourceItemNearDupStatus(executor, {
+                sourceItemId: item.id,
+                status: 'duplicate',
+              });
+              logger?.info('editorial.prepare_draft.near_dup_merged', {
+                storyId: best.story.id,
+              });
+              return { kind: 'success' };
+            }
+            await markSourceItemNearDupStatus(executor, {
+              sourceItemId: item.id,
+              status: 'queued',
+            });
+            logger?.warn('editorial.prepare_draft.near_dup_review', {
+              storyId: best.story.id,
+            });
+            return { kind: 'permanent', reasonCode: 'editorial_near_dup_review' };
+          } catch (error) {
+            logger?.warn('editorial.prepare_draft.near_dup_commit_failed', {
+              error: error instanceof Error ? error.message : 'unknown',
+            });
+            return { kind: 'retry', reasonCode: 'job_handler_retryable_error' };
+          }
+        }
+      }
+    }
 
     // ---- 5.8 R1.17 (Phase 5E-1) BOUNDED event-relation step — strictly
     //          AFTER the mentions resolution (whose resolved entities feed
@@ -1581,6 +1787,9 @@ export function createEditorialPrepareDraftHandler(
         }
         await recordRealRelationRuns(executor, jobId, generation, relationRunRows, nowMs());
         logger?.warn('editorial.prepare_draft.ai_terminal', { reasonCode: step.reasonCode });
+        // Slice 6 — the quality gate rejected this item: cache the
+        // fingerprint 30 days so the NEXT cycle never re-feeds it to AI.
+        await noteQualityRejection(step.reasonCode);
         return { kind: 'permanent', reasonCode: step.reasonCode };
       }
 

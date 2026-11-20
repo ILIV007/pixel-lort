@@ -124,6 +124,15 @@ export const JOB_ERROR_CODES = [
   // unchanged). Terminal: retrying the identical input deterministically
   // repeats; the real run is recorded as `invalid`, never a ready draft.
   'editorial_no_traced_claim',
+  // Slice 6 — near-dup + negative cache (DESIGN §10.1/§9.4). The item
+  // is already adjudicated against a recent story (merged as an update
+  // or held for review) or its fingerprint sits in the 30-day negative
+  // cache — terminal either way: a retry would re-read the same ledger
+  // row and land on the same verdict, never a hot loop, never a second
+  // AI feed.
+  'editorial_near_dup_merged',
+  'editorial_near_dup_review',
+  'editorial_negative_cache_skip',
   // R1.15.1 (Posidon exact-content reuse correctness): the exact-content
   // GROUP anchor exists — one stable result for this full composed text is
   // already owned IN SQL — but NO candidate (including the anchor's own

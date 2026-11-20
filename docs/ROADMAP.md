@@ -1854,6 +1854,31 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       `chart_snapshots` + `chart_snapshot_rows` + `watchlist_signals` +
       `watchlist_aliases` + `watchlist_exclusions` (append-only, CHECKs +
       UNIQUEs enforced at the database level).
+- [x] Slice 6 — post management (pins + housekeeping) + near-dup
+      detection (app 1.44.0, schema 9 — DDL 0009): the admin panel posts
+      screen (`/menu posts`) — pin/unpin any published post from the
+      panel, P0 auto-pin with a panel toggle (unpins the previous pin,
+      max one active pin enforced at the database level), pin status
+      visible in stats; old-post housekeeping — list of old posts with
+      date/category/status filters, in-place edit (30-minute capture:
+      the admin's next text message completes the edit), delete with
+      confirmation, configurable retention rule (default 90 days,
+      free-game announcements 7 days); near-dup detection (DESIGN §10.1)
+      — the same story arriving from several sources with similar
+      title/entities is adjudicated as ONE story: a deterministic
+      similarity (title Jaccard 0.7 + entity overlap 0.3; merge >= 0.80
+      with a title floor of 0.60, review band 0.60–0.80 held for
+      adjudication, never posted twice) recorded in the story ledger,
+      merged as an update of the canonical story; the negative cache
+      (DESIGN §9.4) — a rejected item is cached 30 days and is never
+      re-fed to AI each cycle. The scheduler auto-pin seam pins a
+      terminally-sent P0's first message (toggle-gated, best-effort).
+      The bot's pin right was verified live (@Pixel_IVbot is a channel
+      administrator with post/edit/delete rights). No live flags flipped;
+      autonomous publishing stays off. Migration 0009 adds
+      `channel_pins` + `story_merges` + `quality_rejections` +
+      `channel_post_deletes` (append-only, CHECKs + UNIQUEs enforced at
+      the database level).
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ◒ (implemented on this branch, draft PR #11; PARTIAL — zod GHSA closed at runtime, dev advisories fixed by overrides)

@@ -354,7 +354,8 @@ describe('the /menu screens over the real ingress', () => {
     expect(main.text).toContain('auto');
     expect(main.text).toContain('0 of 15');
     expect(main.text).toContain('off');
-    expect(main.keyboardTokens).toHaveLength(3);
+    // Slice 6 added the Posts button to the main panel (4 buttons now).
+    expect(main.keyboardTokens).toHaveLength(4);
   });
 
   it('opens the mode screen with four modes and the current one marked', async () => {

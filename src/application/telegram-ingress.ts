@@ -115,7 +115,11 @@ import { TelegramApiError } from '../adapters/telegram/bot-api-client';
 import type { ParsedUpdate } from '../adapters/telegram/update-parser';
 import type { ActorResolution, AuthorizationService } from '../admin/authorization';
 import type { CommandRouter, TelegramAction } from '../admin/command-router';
-import { isSafeTelegramHtml, type TelegramSafeHtml } from '../admin/telegram-html';
+import {
+  escapeTelegramHtml,
+  isSafeTelegramHtml,
+  type TelegramSafeHtml,
+} from '../admin/telegram-html';
 import type { AdminUiLanguage } from '../admin/ui-language';
 import { createAdminUiLanguageStore } from '../adapters/db/admin-ui-language-store';
 import type {
@@ -134,6 +138,8 @@ import type { InboundPipelineService } from './inbound/inbound-pipeline-service'
 import type { AdminAlbumCaptureService } from './media/album-capture-service';
 import type { AdminManageService } from './admin-manage/admin-manage-service';
 import type { AdminPanelService } from './admin-panel/admin-panel-service';
+import type { PostManagementService } from './publishing/post-management-service';
+import { ADMIN_PANEL_STRINGS } from '../admin/panel-strings';
 import { QUEUE_CANCEL_TOKEN_ACTION } from '../domain/publishing/queue-disposition';
 import { ADMIN_QUEUE_STRINGS } from '../admin/queue-strings';
 import type { PostContentDocument } from '../domain/admin-post/post-content';
@@ -268,6 +274,14 @@ export interface TelegramIngressDeps {
    * silent skip. Settings only — it never sends a post.
    */
   readonly adminPanel?: AdminPanelService;
+  /**
+   * Slice 6: the injected post-management service that owns the
+   * `panel.*` posts callbacks and the in-place edit capture the
+   * dispatcher routes. Absent = the edit capture is never checked
+   * (a text message falls through to the admin-post capture as
+   * before) — never a silent skip of the panel itself.
+   */
+  readonly postManagement?: PostManagementService;
   readonly clock: Clock;
   readonly logger: Logger;
 }
@@ -299,6 +313,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     adminPost,
     adminManage,
     adminPanel,
+    postManagement,
     inbound,
     clock,
     logger,
@@ -411,6 +426,40 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
       | Extract<TelegramAction, { readonly type: 'admin_post_from_editorial' }>
       | Extract<TelegramAction, { readonly type: 'admin_post_callback' }>,
   ): Promise<void> {
+    if (
+      action.type === 'admin_post_capture' &&
+      action.kind === 'message' &&
+      action.hasText &&
+      postManagement !== undefined
+    ) {
+      // Slice 6 — an open in-place edit capture consumes the admin's next
+      // text message INSTEAD of the admin-post capture: the edit completes
+      // through the post-management service and the message never becomes
+      // a new post. No capture (or an expired one) falls through to the
+      // exact admin-post path below.
+      const capture = await postManagement.peekEditCapture({
+        telegramUserId: action.telegramUserId,
+      });
+      if (capture !== null) {
+        const outcome = await postManagement.completeEdit({
+          telegramUserId: action.telegramUserId,
+          role: action.role,
+          text: action.text ?? '',
+        });
+        const strings = ADMIN_PANEL_STRINGS[action.uiLanguage];
+        const reply =
+          outcome.kind === 'edited'
+            ? strings.callbackEditDone
+            : outcome.kind === 'invalid_text'
+              ? strings.callbackEditInvalidText
+              : outcome.kind === 'edit_failed_retryable'
+                ? strings.callbackEditFailedRetryable
+                : strings.callbackEditFailed;
+        await sendSafely(action.chatId, escapeTelegramHtml(reply), 'post_management_edit_reply');
+        return;
+      }
+    }
+
     if (adminPost === undefined) {
       logger.warn('telegram.action.admin_post_unavailable', { action: action.type });
       throw new AppError('service_unavailable');

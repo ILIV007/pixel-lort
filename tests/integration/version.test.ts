@@ -36,9 +36,9 @@ describe('GET /version via SELF', () => {
       'environment',
       'schemaVersion',
     ]);
-    expect(body['applicationVersion']).toBe('1.43.0');
+    expect(body['applicationVersion']).toBe('1.44.0');
     expect(body['commit']).toBe('local-dev');
-    expect(body['schemaVersion']).toBe(8);
+    expect(body['schemaVersion']).toBe(9);
     expect(body['environment']).toBe('development');
   });
 
@@ -131,14 +131,14 @@ describe('GET /health/ready — Phase 1A schema health (DB binding present)', ()
     expect(body['status']).toBe('not_ready');
     expect(Object.keys(body).sort()).toEqual(['ok', 'service', 'status']);
 
-    // Restore the application metadata (schema v8 — the slice-5 LINEAR
+    // Restore the application metadata (schema v9 — the slice-6 LINEAR
     // chain) so later tests in this file do not treat the migrations as
     // pending again (shared storage); re-applying a migration would fail on
     // its CREATE/ALTER statements.
     await env.DB.prepare(
       `INSERT INTO schema_metadata (key, value, updated_at_ms) VALUES
-         ('schema_version', '8', 1),
-         ('migration_id', '0008_live_watchlists', 1),
+         ('schema_version', '9', 1),
+         ('migration_id', '0009_post_management_near_dup', 1),
          ('applied_at', '1970-01-01T00:00:00.000Z', 1)`,
     ).run();
   });
@@ -156,10 +156,10 @@ describe('GET /health/ready — Phase 1A schema health (DB binding present)', ()
     expect(body['status']).toBe('not_ready');
 
     // Restore the recorded version so later storage in this file does not
-    // treat migrations as pending again (shared file storage). R1.20-R1: the
-    // applied LINEAR chain lands at version 5 (0004 -> 4, 0005 -> 5).
+    // treat migrations as pending again (shared file storage). Slice 6: the
+    // applied LINEAR chain lands at version 9 (0009 -> 9).
     await env.DB.prepare(
-      `UPDATE schema_metadata SET value = '6' WHERE key = 'schema_version'`,
+      `UPDATE schema_metadata SET value = '9' WHERE key = 'schema_version'`,
     ).run();
   });
 });
