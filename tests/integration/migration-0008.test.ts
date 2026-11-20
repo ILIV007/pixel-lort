@@ -44,22 +44,22 @@ beforeEach(async () => {
   // tests WITHIN this file, so on later tests the V7 plan is a no-op.
   await applyMigrations(db, V7_ONLY);
   // Upgrade to the real append-only plan — on the first run ONLY 0008 +
-  // 0009 are pending; on later tests this is an idempotent no-op. Either way the
-  // database ends at version 9.
+  // 0009 + 0010 are pending; on later tests this is an idempotent no-op. Either way the
+  // database ends at version 10.
   const upgrade = await applyMigrations(db);
-  expect(upgrade.finalVersion).toBe(9);
+  expect(upgrade.finalVersion).toBe(10);
 });
 
 describe('slice 5 — migration 0008: live-watchlist tables (schema 7 → 8)', () => {
-  it('applies 0008 + 0009 as the only pending steps on a fresh schema-v7 database', async () => {
+  it('applies 0008 + 0009 + 0010 as the only pending steps on a fresh schema-v7 database', async () => {
     const rerun = await applyMigrations(db);
     expect(rerun.applied).toEqual([]);
-    expect(rerun.finalVersion).toBe(9);
-    expect(await appliedSchemaVersion()).toBe(9);
+    expect(rerun.finalVersion).toBe(10);
+    expect(await appliedSchemaVersion()).toBe(10);
     const idRow = await executor.first<{ value: string }>({
       sql: `SELECT value FROM schema_metadata WHERE key = 'migration_id'`,
     });
-    expect(idRow?.value).toBe('0009_post_management_near_dup');
+    expect(idRow?.value).toBe('0010_soul_versioning');
   });
 
   it('admits one entry per kind+key and rejects a duplicate', async () => {

@@ -89,6 +89,16 @@ apply` with explicit owner approval (NONE requested or executed); in
   exclusively through `wrangler d1 migrations apply` with explicit owner
   approval (NONE requested or executed); in tests it reaches disposable
   workerd D1 databases as step 9 of the LINEAR default plan.
+- `0010_soul_versioning.sql` — **Slice 8 PRODUCT CANDIDATE (LOCAL ONLY —
+  proposed, NOT applied to any real database)**: the Soul v1 versioning
+  (`souls` — one row per Soul version: full text + SHA-256 + creator +
+  timestamp, append-only — `published_posts.soul_version` — the Soul
+  version each post was published under, NULL for legacy rows) +
+  `schema_metadata` 9 → 10. Stands ON TOP of
+  `0009_post_management_near_dup` in the linear chain. A real database
+  receives it exclusively through `wrangler d1 migrations apply` with
+  explicit owner approval (NONE requested or executed); in tests it reaches
+  disposable workerd D1 databases as step 10 of the LINEAR default plan.
 
 ## Rules (ADR-0019, AGENTS.md §6)
 
@@ -99,8 +109,9 @@ apply` with explicit owner approval (NONE requested or executed); in
    (Round 1.9 R09), `0005_admin_post_pipeline.sql` (R1.20-R admin post
    pipeline), `0006_admin_post_editorial_source.sql` (R1.22 editorial→post
    provenance), `0007_inbound_pipeline.sql` (slice 4 inbound pipeline),
-   `0008_live_watchlists.sql` (slice 5 live watchlists) and
+   `0008_live_watchlists.sql` (slice 5 live watchlists),
    `0009_post_management_near_dup.sql` (slice 6 post management + near-dup)
+   and `0010_soul_versioning.sql` (slice 8 Soul versioning)
    are LOCAL candidates with zero real-database applications.
 2. **Application metadata vs. Wrangler bookkeeping.** `schema_metadata`
    describes WHAT the running application expects (read by `/health/ready`

@@ -64,6 +64,16 @@ const V7_STOPPED_PLAN: readonly MigrationDescriptor[] = MIGRATIONS.filter(
   (migration) => migration.version <= 7,
 );
 
+/**
+ * Slice 8 TEST-ONLY plan: the linear chain stopped at the version-9
+ * intermediate state (0001–0009) — the honest "post management + near-dup
+ * present, Soul versioning absent" shape, still exactly resolvable by the
+ * capability detector.
+ */
+const V9_STOPPED_PLAN: readonly MigrationDescriptor[] = MIGRATIONS.filter(
+  (migration) => migration.version <= 9,
+);
+
 beforeAll(async () => {
   // Materialize the full schema once (fresh per-file workerd D1).
   await applyMigrations(db);
@@ -101,6 +111,9 @@ async function rebuildSchema3State(): Promise<void> {
   await db.exec('DROP TABLE IF EXISTS channel_post_deletes');
   await db.exec('DROP TABLE IF EXISTS quality_rejections');
   await db.exec('DROP TABLE IF EXISTS story_merges');
+  // Slice 8: the 0010 Soul table is likewise post-schema-3 state —
+  // without dropping it, re-applying 0010 collides on CREATE TABLE.
+  await db.exec('DROP TABLE IF EXISTS souls');
   await db.exec('DROP INDEX IF EXISTS idx_jobs_source_outstanding_poll');
   const columns = await db.prepare(`PRAGMA table_info('source_state')`).all<{ name: string }>();
   if (columns.results.some((row) => row['name'] === 'poll_owner_job_id')) {
@@ -137,8 +150,8 @@ async function hasColumn(table: string, column: string): Promise<boolean> {
   return rows.results.some((row) => row['name'] === column);
 }
 
-describe('migration 0004+0005+0006+0007+0008+0009 — the linear chain (schema 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9)', () => {
-  it('walks the WHOLE chain from honest schema 3: all capabilities present at version 9', async () => {
+describe('migration 0004+0005+0006+0007+0008+0009+0010 — the linear chain (schema 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10)', () => {
+  it('walks the WHOLE chain from honest schema 3: all capabilities present at version 10', async () => {
     // A genuinely 0004-less database: the ownership column is ABSENT right now.
     expect(await hasColumn('source_state', 'poll_owner_job_id')).toBe(false);
     expect(await tableNamesLike('admin_post_%')).toEqual([]);
@@ -152,14 +165,15 @@ describe('migration 0004+0005+0006+0007+0008+0009 — the linear chain (schema 3
       '0007_inbound_pipeline',
       '0008_live_watchlists',
       '0009_post_management_near_dup',
+      '0010_soul_versioning',
     ]);
-    expect(result.finalVersion).toBe(9);
+    expect(result.finalVersion).toBe(10);
 
     // The metadata records the FINAL step of the linear chain — and the
     // final step PROVES every earlier step ran (strict continuity).
     const metadata = await metadataByKey();
-    expect(metadata.get('schema_version')).toBe('9');
-    expect(metadata.get('migration_id')).toBe('0009_post_management_near_dup');
+    expect(metadata.get('schema_version')).toBe('10');
+    expect(metadata.get('migration_id')).toBe('0010_soul_versioning');
 
     // BOTH capabilities are now physically present — the sequential SQL
     // apply (the real Wrangler order) leaves 0004's changes visible:
@@ -171,6 +185,9 @@ describe('migration 0004+0005+0006+0007+0008+0009 — the linear chain (schema 3
       'admin_post_publications',
       'admin_post_versions',
     ]);
+    // Slice 8: the `souls` table arrives with the final step.
+    expect(await tableNamesLike('souls')).toEqual(['souls']);
+    expect(await hasColumn('published_posts', 'soul_version')).toBe(true);
     const indexRows = await db
       .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`)
       .bind('idx_jobs_source_outstanding_poll')
@@ -194,7 +211,7 @@ describe('migration 0004+0005+0006+0007+0008+0009 — the linear chain (schema 3
     expect(await tableNamesLike('admin_post_%')).toEqual([]);
   });
 
-  it('completes the chain from the schema-4 intermediate state by applying ONLY the 0005+0006+0007+0008 tail', async () => {
+  it('completes the chain from the schema-4 intermediate state by applying ONLY the 0005+0006+0007+0008+0009+0010 tail', async () => {
     await applyMigrations(db, ROUND19_MIGRATION_PLAN);
     const result = await applyMigrations(db);
     expect(result.observedVersion).toBe(4);
@@ -204,9 +221,10 @@ describe('migration 0004+0005+0006+0007+0008+0009 — the linear chain (schema 3
       '0007_inbound_pipeline',
       '0008_live_watchlists',
       '0009_post_management_near_dup',
+      '0010_soul_versioning',
     ]);
-    expect(result.finalVersion).toBe(9);
-    expect((await metadataByKey()).get('schema_version')).toBe('9');
+    expect(result.finalVersion).toBe(10);
+    expect((await metadataByKey()).get('schema_version')).toBe('10');
     expect(await hasColumn('source_state', 'poll_owner_job_id')).toBe(true);
     expect(await tableNamesLike('admin_post_%')).toHaveLength(5);
   });
@@ -215,7 +233,7 @@ describe('migration 0004+0005+0006+0007+0008+0009 — the linear chain (schema 3
     await applyMigrations(db);
     const second = await applyMigrations(db);
     expect(second.applied).toEqual([]);
-    expect(second.finalVersion).toBe(9);
+    expect(second.finalVersion).toBe(10);
   });
 
   it('creates the guarded indexes (ownership + partial UNIQUE primary publication per version)', async () => {
@@ -315,10 +333,19 @@ describe('migration 0004+0005 — schema capability detection at every linear st
     expect(capability).toEqual({ kind: 'known_v7_inbound', appliedSchemaVersion: 7 });
   });
 
-  it('resolves ALL capabilities at schema 9 (0009 id, linear final state)', async () => {
-    await applyMigrations(db);
+  it('resolves ALL capabilities at schema 9 (0009 id, V9-stopped plan)', async () => {
+    // Slice 8: schema 9 is no longer the LINEAR FINAL state (0010
+    // continues the chain), but the version-9 shape stays exactly
+    // resolvable under the plan that stops at 0009.
+    await applyMigrations(db, V9_STOPPED_PLAN);
     const capability = await resolveSchemaCapability(executor());
     expect(capability).toEqual({ kind: 'known_v9_post_management', appliedSchemaVersion: 9 });
+  });
+
+  it('resolves ALL capabilities at schema 10 (0010 id, linear final state)', async () => {
+    await applyMigrations(db);
+    const capability = await resolveSchemaCapability(executor());
+    expect(capability).toEqual({ kind: 'known_v10_soul', appliedSchemaVersion: 10 });
   });
 
   it('fails closed for the linear final version with an unknown migration_id', async () => {
@@ -434,10 +461,10 @@ describe('migration 0004+0005 — failure atomicity and rollback on real D1', ()
     expect(metadata.get('migration_id')).toBe('0004_source_poll_ownership');
     expect(await hasColumn('source_state', 'poll_owner_job_id')).toBe(true);
 
-    // Recovery: drop the colliding table and the chain completes to 9.
+    // Recovery: drop the colliding table and the chain completes to 10.
     await db.exec('DROP TABLE admin_post_drafts');
     const recovery = await applyMigrations(db);
-    expect(recovery.finalVersion).toBe(9);
-    expect((await metadataByKey()).get('schema_version')).toBe('9');
+    expect(recovery.finalVersion).toBe(10);
+    expect((await metadataByKey()).get('schema_version')).toBe('10');
   });
 });

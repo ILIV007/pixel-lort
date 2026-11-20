@@ -34,6 +34,11 @@ export interface PublishedPostRow {
   readonly category: string;
   readonly presentation: InboundPresentation;
   readonly createdByUserId: number;
+  /**
+   * Slice 8 — the Soul version this post was published under (DESIGN
+   * §9.3). NULL = legacy row published before Soul versioning.
+   */
+  readonly soulVersion: number | null;
   readonly createdAtMs: number;
   readonly updatedAtMs: number;
 }
@@ -66,6 +71,7 @@ interface PublishedPostDbRow {
   readonly category: string;
   readonly presentation: string;
   readonly created_by_user_id: number;
+  readonly soul_version: number | null;
   readonly created_at_ms: number;
   readonly updated_at_ms: number;
 }
@@ -126,6 +132,12 @@ function toPublishedPostRow(row: PublishedPostDbRow): PublishedPostRow | null {
     category: row.category,
     presentation: row.presentation,
     createdByUserId: row.created_by_user_id,
+    soulVersion:
+      typeof row.soul_version === 'number' &&
+      Number.isSafeInteger(row.soul_version) &&
+      row.soul_version >= 1
+        ? row.soul_version
+        : null,
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
   };
@@ -163,7 +175,7 @@ export async function findPublishedPostBySource(
   const row = await executor.first<PublishedPostDbRow>({
     sql: `SELECT id, source_chat_id, source_message_id, channel_message_ids,
                  kind, media_file_id, category, presentation,
-                 created_by_user_id, created_at_ms, updated_at_ms
+                 created_by_user_id, soul_version, created_at_ms, updated_at_ms
             FROM published_posts
            WHERE source_chat_id = ? AND source_message_id = ?`,
     params: [input.sourceChatId, input.sourceMessageId],
@@ -183,6 +195,11 @@ export async function recordPublishedPost(
     readonly category: GamingCategory;
     readonly presentation: InboundPresentation;
     readonly createdByUserId: number;
+    /**
+     * Slice 8 — the Soul version to stamp (DESIGN §9.3). NULL = no Soul
+     * recorded yet (legacy stamp).
+     */
+    readonly soulVersion: number | null;
     readonly nowMs: number;
   },
 ): Promise<void> {
@@ -190,8 +207,8 @@ export async function recordPublishedPost(
     sql: `INSERT INTO published_posts
                  (id, source_chat_id, source_message_id, channel_message_ids,
                   kind, media_file_id, category, presentation,
-                  created_by_user_id, created_at_ms, updated_at_ms)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  created_by_user_id, soul_version, created_at_ms, updated_at_ms)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     params: [
       input.id,
       input.sourceChatId,
@@ -202,6 +219,7 @@ export async function recordPublishedPost(
       input.category,
       input.presentation,
       input.createdByUserId,
+      input.soulVersion,
       input.nowMs,
       input.nowMs,
     ],

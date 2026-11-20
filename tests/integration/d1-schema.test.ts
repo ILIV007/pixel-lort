@@ -53,6 +53,7 @@ const EXPECTED_TABLES: readonly string[] = [
   'quality_rejections',
   'schema_metadata',
   'settings',
+  'souls',
   'source_items',
   'source_reputation_events',
   'source_state',
@@ -165,15 +166,15 @@ beforeEach(async () => {
 });
 
 describe('migration application', () => {
-  it('applies every migration as an atomic batch and reports metadata (schema v9, linear chain)', async () => {
+  it('applies every migration as an atomic batch and reports metadata (schema v10, linear chain)', async () => {
     expect(await namedTables()).toEqual([...EXPECTED_TABLES].sort());
 
     const metadata = await db
       .prepare(`SELECT key, value FROM schema_metadata ORDER BY key`)
       .all<{ key: string; value: string }>();
     const byKey = new Map(metadata.results.map((row) => [row.key, row.value]));
-    expect(byKey.get('schema_version')).toBe('9');
-    expect(byKey.get('migration_id')).toBe('0009_post_management_near_dup');
+    expect(byKey.get('schema_version')).toBe('10');
+    expect(byKey.get('migration_id')).toBe('0010_soul_versioning');
     expect(byKey.get('applied_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -199,9 +200,9 @@ describe('migration application', () => {
 });
 
 describe('schema contracts', () => {
-  it('creates exactly the 45 expected tables (27 approved + schema_metadata + 5 admin-post + 2 inbound + 6 live-watchlist + 4 post-management/near-dup)', async () => {
+  it('creates exactly the 46 expected tables (27 approved + schema_metadata + 5 admin-post + 2 inbound + 6 live-watchlist + 4 post-management/near-dup + 1 soul)', async () => {
     const tables = await namedTables();
-    expect(tables).toHaveLength(45);
+    expect(tables).toHaveLength(46);
     expect(tables).toEqual([...EXPECTED_TABLES].sort());
   });
 

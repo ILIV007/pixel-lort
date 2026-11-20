@@ -130,11 +130,14 @@ if (typeof appVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(appVersion)) {
 // ---------------------------------------------------------------------------
 // Schema version — the LINEAR migration candidate chain: the applied
 // 0001+0002+0003 base + the LOCAL-ONLY candidates 0004 (ownership) → 4 and
-// 0005 (admin post) → 5 (R1.20-R1). The real applied runtime stays 3 until
+// 0005 (admin post) → 5 (R1.20-R1), 0006 (editorial provenance) → 6 (R1.22),
+// 0007 (inbound pipeline) → 7 (slice 4), 0008 (live watchlists) → 8
+// (slice 5), 0009 (post management + near-dup) → 9 (slice 6), 0010 (Soul
+// versioning) → 10 (slice 8). The real applied runtime stays 3 until
 // the owner authorizes the remote migration.
 // ---------------------------------------------------------------------------
 
-const EXPECTED_SCHEMA_VERSION = '9';
+const EXPECTED_SCHEMA_VERSION = '10';
 
 expectEveryMatch(
   'src/shared/config/phase1a.ts',
