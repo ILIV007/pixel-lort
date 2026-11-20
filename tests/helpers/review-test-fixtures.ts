@@ -6,6 +6,7 @@ import { createEditorialReviewService } from '../../src/application/editorial/dr
 import { createAdminQueueViewService } from '../../src/application/publishing/queue-view-service';
 import { createAdminQueueDispositionService } from '../../src/application/publishing/queue-disposition-service';
 import { createAdminAlbumCaptureService } from '../../src/application/media/album-capture-service';
+import { createAdminManageService } from '../../src/application/admin-manage/admin-manage-service';
 import { createAdminStoryViewService } from '../../src/application/publishing/story-view-service';
 import { createAuthorizationService } from '../../src/admin/authorization';
 import { createCommandRouter } from '../../src/admin/command-router';
@@ -136,6 +137,11 @@ export interface ReviewHarnessOptions {
   readonly albumCaptureEnabled?: boolean;
   /** Omit the album capture service (Phase 9D wiring-failure tests). */
   readonly omitAlbumCaptureService?: boolean;
+  /** Issue #8: whether the owner-only admin management surface is enabled
+   *  (default: disabled — the flag-off legacy behavior). */
+  readonly adminManageEnabled?: boolean;
+  /** Omit the admin management service (issue #8 wiring-failure tests). */
+  readonly omitAdminManageService?: boolean;
   readonly botApi?: TelegramBotApiClient;
   readonly executor?: CountingExecutor;
 }
@@ -174,6 +180,7 @@ export function buildReviewHarness(options: ReviewHarnessOptions = {}): ReviewHa
       queueWriteEnabled: options.queueWriteEnabled ?? false,
       albumCaptureEnabled: options.albumCaptureEnabled ?? false,
       storyEnabled: options.storyEnabled ?? false,
+      adminManageEnabled: options.adminManageEnabled ?? false,
     }),
     ...(options.omitReviewService
       ? {}
@@ -198,6 +205,15 @@ export function buildReviewHarness(options: ReviewHarnessOptions = {}): ReviewHa
             executor,
             clock: fixedClock(NOW),
             logger,
+          }),
+        }
+      : {}),
+    ...(options.adminManageEnabled === true && !options.omitAdminManageService
+      ? {
+          adminManage: createAdminManageService({
+            executor,
+            clock: fixedClock(NOW),
+            ownerTelegramId: OWNER_ID,
           }),
         }
       : {}),
@@ -300,6 +316,10 @@ export async function freshDb(): Promise<void> {
   const executor = createDbExecutor(env.DB, { clock: fixedClock(NOW) });
   await executor.run({ sql: 'DELETE FROM telegram_updates' });
   await executor.run({ sql: 'DELETE FROM settings' });
+  // Issue #8: confirm tokens reference admins (FK) — clear them BEFORE
+  // the admins rows, and clear the audit trail they wrote.
+  await executor.run({ sql: 'DELETE FROM admin_action_tokens' });
+  await executor.run({ sql: 'DELETE FROM audit_events' });
   await executor.run({ sql: 'DELETE FROM admins' });
   await executor.run({ sql: 'DELETE FROM draft_revisions' });
   await executor.run({ sql: 'DELETE FROM publication_messages' });

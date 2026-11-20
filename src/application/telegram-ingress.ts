@@ -131,6 +131,7 @@ import type { AdminQueueDispositionService } from './publishing/queue-dispositio
 import type { AdminStoryViewService } from './publishing/story-view-service';
 import type { AdminPostButtons, AdminPostService } from './admin-post/admin-post-service';
 import type { AdminAlbumCaptureService } from './media/album-capture-service';
+import type { AdminManageService } from './admin-manage/admin-manage-service';
 import { QUEUE_CANCEL_TOKEN_ACTION } from '../domain/publishing/queue-disposition';
 import { ADMIN_QUEUE_STRINGS } from '../admin/queue-strings';
 import type { PostContentDocument } from '../domain/admin-post/post-content';
@@ -241,6 +242,14 @@ export interface TelegramIngressDeps {
    * never a silent skip.
    */
   readonly adminPost?: AdminPostService;
+  /**
+   * Issue #8: the injected owner-only admin management service that
+   * executes the typed `admin_manage_*` actions the router emits while
+   * the `ADMIN_MANAGE_ENABLED` gate is ON, and the `admins.*` token
+   * callbacks the dispatcher routes. Absent = retryable wiring failure,
+   * never a silent skip.
+   */
+  readonly adminManage?: AdminManageService;
   readonly clock: Clock;
   readonly logger: Logger;
 }
@@ -270,6 +279,7 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     adminStoryView,
     albumCapture,
     adminPost,
+    adminManage,
     clock,
     logger,
   } = deps;
@@ -481,6 +491,54 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
     }
   }
 
+  /** Execute one admin-manage service action and deliver its outbound result. */
+  async function executeAdminManage(
+    action:
+      | Extract<TelegramAction, { readonly type: 'admin_manage_list' }>
+      | Extract<TelegramAction, { readonly type: 'admin_manage_add' }>
+      | Extract<TelegramAction, { readonly type: 'admin_manage_remove' }>
+      | Extract<TelegramAction, { readonly type: 'admin_manage_role' }>,
+  ): Promise<void> {
+    if (adminManage === undefined) {
+      logger.warn('telegram.action.admin_manage_unavailable', { action: action.type });
+      throw new AppError('service_unavailable');
+    }
+    const result = await (async () => {
+      switch (action.type) {
+        case 'admin_manage_list':
+          return adminManage.list({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+          });
+        case 'admin_manage_add':
+          return adminManage.requestAdd({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+            targetUserId: action.targetUserId,
+            targetRole: action.targetRole,
+          });
+        case 'admin_manage_remove':
+          return adminManage.requestRemove({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+            targetUserId: action.targetUserId,
+          });
+        case 'admin_manage_role':
+          return adminManage.requestRole({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: action.uiLanguage,
+            targetUserId: action.targetUserId,
+            targetRole: action.targetRole,
+          });
+      }
+    })();
+    await sendSafely(action.chatId, result.text, 'admin_manage_reply', result.buttons);
+  }
+
   /** Execute a routed action against the injected Bot API client. */
   async function executeAction(action: TelegramAction): Promise<void> {
     switch (action.type) {
@@ -659,6 +717,29 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
           });
           return;
         }
+        if (tokenRow.action.startsWith('admins.')) {
+          // Issue #8: the admin-manage service owns these tokens; its
+          // own consume/validate flow applies (the token is NOT consumed
+          // through any other path). Absent service = the honest
+          // retryable wiring failure.
+          if (adminManage === undefined) {
+            logger.warn('telegram.action.admin_manage_unavailable', {
+              action: action.type,
+            });
+            throw new AppError('service_unavailable');
+          }
+          const result = await adminManage.handleCallback({
+            telegramUserId: action.telegramUserId,
+            role: action.role,
+            uiLanguage: ui,
+            token: action.token,
+          });
+          await requireBotApi('action_token_callback').answerCallbackQuery({
+            callbackQueryId: action.callbackQueryId,
+            text: result.callbackText,
+          });
+          return;
+        }
         // A foreign/future action: the honest invalid answer with NOTHING
         // consumed — a token can never be burned by the wrong service.
         await answerInvalid();
@@ -693,6 +774,12 @@ export function createTelegramIngress(deps: TelegramIngressDeps): TelegramIngres
       case 'admin_post_from_editorial':
       case 'admin_post_callback':
         await executeAdminPost(action);
+        return;
+      case 'admin_manage_list':
+      case 'admin_manage_add':
+      case 'admin_manage_remove':
+      case 'admin_manage_role':
+        await executeAdminManage(action);
         return;
     }
   }
