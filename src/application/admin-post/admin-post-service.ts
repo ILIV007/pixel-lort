@@ -79,6 +79,7 @@ import {
   type TelegramSafeHtml,
 } from '../../admin/telegram-html';
 import { ADMIN_POST_STRINGS } from '../../admin/admin-post-strings';
+import { readPublishingSettings } from '../../adapters/db/publishing-settings-store';
 import type { AdminRole } from '../../admin/roles';
 import { roleHasPermission } from '../../admin/roles';
 import type { AdminUiLanguage } from '../../admin/ui-language';
@@ -805,6 +806,13 @@ export function createAdminPostService(deps: {
         logger.warn('admin_post.session.denied', { reason: 'missing_permission' });
         return reply(ui, S.capturePermissionDenied);
       }
+      // Slice 3 — paused mode rejects inbound posts: the bot is off, the
+      // post is NOT queued, and no session is opened.
+      const settings = await readPublishingSettings(executor);
+      if (settings.mode === 'paused') {
+        logger.warn('admin_post.session.denied', { reason: 'paused' });
+        return reply(ui, S.pausedBotOff);
+      }
       const nowMs = clock.now();
       const existing = await findOpenCaptureSession(executor, input.telegramUserId);
       await openCaptureSession(executor, {
@@ -827,6 +835,14 @@ export function createAdminPostService(deps: {
       const session = await findOpenCaptureSession(executor, input.telegramUserId);
       if (session === null) {
         return { kind: 'none' };
+      }
+      // Slice 3 — paused mode rejects inbound posts: the bot is off, the
+      // message is NOT queued and NOT captured (the session stays open —
+      // the admin may unpause and send again).
+      const settings = await readPublishingSettings(executor);
+      if (settings.mode === 'paused') {
+        logger.warn('admin_post.capture.denied', { reason: 'paused' });
+        return reply(ui, S.pausedBotOff);
       }
       // Explicit rejections next — nothing is ever silently dropped WHILE a
       // session is open. An edited message NEVER enters the pipeline.

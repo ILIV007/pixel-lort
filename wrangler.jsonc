@@ -103,6 +103,13 @@
     // never routed; the ONLY mutations while "true" are admin rows in D1
     // plus their audit events. Ships "false" everywhere in this round.
     "ADMIN_MANAGE_ENABLED": "false",
+    // Slice 3 admin panel gate ships DISABLED everywhere in this round
+    // (independent, fail-closed): while off, /menu keeps its
+    // unknown-command noop semantics and panel callbacks keep the legacy
+    // routing; while on, the ONLY mutations are publishing settings rows
+    // in D1 plus their audit events and the daily budget counters — never
+    // a send, publish, or scheduler path.
+    "ADMIN_PANEL_ENABLED": "false",
     // Phase 9D album media-group capture surface gate (non-secret;
     // independent, fail-closed). With "false" the /album_capture command
     // keeps its unknown-command noop and media-group members keep the

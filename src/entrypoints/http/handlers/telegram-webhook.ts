@@ -63,6 +63,7 @@ import { createAdminQueueViewService } from '../../../application/publishing/que
 import { createAdminStoryViewService } from '../../../application/publishing/story-view-service';
 import { createAdminPostService } from '../../../application/admin-post/admin-post-service';
 import { createAdminManageService } from '../../../application/admin-manage/admin-manage-service';
+import { createAdminPanelService } from '../../../application/admin-panel/admin-panel-service';
 import { createAuthorizationService } from '../../../admin/authorization';
 import { createCommandRouter } from '../../../admin/command-router';
 import { createDbExecutor } from '../../../adapters/db/db-executor';
@@ -249,6 +250,9 @@ export async function handleTelegramWebhook(
   // Issue #8: the owner-only admin management gate is parsed by the SAME
   // fail-closed phase9 config (independent flag; default false).
   const adminManageEnabled = review.config.adminManageEnabled;
+  // Slice 3: the admin panel gate is parsed by the SAME fail-closed
+  // phase9 config (independent flag; default false).
+  const panelEnabled = review.config.panelEnabled;
   // Phase 9C: the write-capable queue disposition gate is parsed by the
   // SAME fail-closed phase9 config (INDEPENDENT flag; default false — the
   // disposition is a STOP, never a resend).
@@ -316,6 +320,10 @@ export async function handleTelegramWebhook(
       // false) — gates ONLY the admin management commands and their
       // single-use confirm/cancel callbacks.
       adminManageEnabled,
+      // Slice 3: the /menu admin panel gate (fail-closed, default false)
+      // — gates ONLY the main/mode/cap/event screens and their single-use
+      // panel callbacks; settings only, never a send path.
+      panelEnabled,
     }),
     // R1.18: the read-only review service is wired ONLY while the gate is
     // ON — the SAME production factory the offline demo shares.
@@ -370,6 +378,17 @@ export async function handleTelegramWebhook(
     // (the protected identity); the service never reads it from chat.
     adminManage: adminManageEnabled
       ? createAdminManageService({
+          executor,
+          clock: systemClock,
+          ownerTelegramId: phase2.config.ownerTelegramId,
+        })
+      : undefined,
+    // Slice 3: the admin panel service is wired ONLY while its gate is
+    // ON. Settings only — it never sends a post and never enables any
+    // publish or scheduler path. The bootstrap owner id comes from the
+    // parsed Phase 2 config (the protected identity).
+    adminPanel: panelEnabled
+      ? createAdminPanelService({
           executor,
           clock: systemClock,
           ownerTelegramId: phase2.config.ownerTelegramId,

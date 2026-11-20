@@ -22,6 +22,14 @@ export const ADMIN_POST_STRINGS = {
     en: 'REJECTED: your role does not hold the draft creation permission. Nothing was saved.',
     fa: 'رد شد: نقش شما مجوز ایجاد پیش‌نویس ندارد. چیزی ذخیره نشد.',
   } satisfies Localized,
+  /**
+   * Slice 3 — paused mode rejects inbound posts: the bot is off, the
+   * post is NOT queued, nothing is saved.
+   */
+  pausedBotOff: {
+    en: 'The bot is off (paused). Nothing was saved — send the post again after the bot is turned back on.',
+    fa: 'بات خاموش است (مکث کرده). چیزی ذخیره نشد — بعد از روشن‌شدن دوبارهٔ بات، پست را دوباره بفرستید.',
+  } satisfies Localized,
   previewInvalidUsage: {
     en: 'Invalid usage. Use /post_preview (your own open draft) or /post_preview <draftId>.',
     fa: 'استفادهٔ نامعتبر. از /post_preview (پیش‌نویس باز خودتان) یا /post_preview <شناسهٔ پیش‌نویس> استفاده کنید.',
