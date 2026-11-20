@@ -31,7 +31,7 @@ in `VERSION.json` + `package.json` (validated for consistency by
   "deliveryHead": "the version-alignment commit on top of sourceCommit; a commit cannot contain its own hash — the full delivery HEAD and tree SHAs, the artifact SHA-256, and the fresh gate counts are recorded in recovery/META_R1_10_6_1_B01.txt inside the package and in the delivery report",
   "reviewParentCommit": "2f923fe5dedfd751f53e7b045ce8be3fc2ff7e2e",
   "reviewBranch": "review/r1.10.3-sql-design",
-  "reviewPullRequest": "https://github.com/ILIV007/pixel-lort/pull/11",
+  "reviewPullRequest": "https://github.com/ILIV007/pixellores/pull/11",
   "publication": {
     "pushed": false,
     "blocker": "no stored GitHub credential in the sandbox (gh CLI absent, no env tokens, no credential helper); a device-flow code is issued ONLY when the owner signals real readiness; the old exposed token is NOT searched and NOT reused",
@@ -82,7 +82,7 @@ active field is `null` unless a package was actually produced.
   "sourceCommit": "512386be7916561e4faa18fa648ca0c16d6b585a",
   "sourceTree": "cde2c84102d0c9ea60b2385ae8882f31d2a27fe0",
   "sourceBranch": "review/r1.10.3-sql-design",
-  "reviewPullRequest": "https://github.com/ILIV007/pixel-lort/pull/11",
+  "reviewPullRequest": "https://github.com/ILIV007/pixellores/pull/11",
   "artifactFilename": null,
   "deliveryHead": "NOT RECORDABLE IN-REPO — a commit cannot contain its own hash; the delivery HEAD/tree SHAs are reported in the round delivery message and preserved by Posidon's independent review/backup, and sourceCommit/sourceTree stay the SEPARATE baseline identity this round was built on",
   "purpose": "R1.19.1 — close the three ORIGINAL Posidon R1.19 counterexamples with the smallest safe corrections, exactly as tasked: (M1) src/adapters/telegram/update-parser.ts now applies a bounded shallow wire→canonical projection of the documented minimal text_mention User fields (id/is_bot/first_name plus allowed optional last_name/username/language_code) on the REAL incoming parser path — consistent with the existing storage reader/wire writer; unrelated optional Telegram flags (e.g. is_premium) are DROPPED by the documented ignore policy and never reject an ordinary real User payload; a non-object user is forwarded unchanged so the envelope fails it typed; wrong-typed/oversized required fields keep failing EXPLICITLY at the envelope boundary; no arbitrary nested raw User data is retained. (N1) src/domain/telegram/rich-text-envelope.ts canContain now implements the official be-part-of direction for the five formatting styles (styles may be part of any entity except pre/code); the containing direction, crossing rejection, code/pre isolation, quote non-nesting, same-type duplicate rejection and non-container atomic leaves are unchanged; one pre-existing test assertion that encoded the incorrect matrix (a bold inside a mention rejected) was corrected coherently, and the module/ADR matrix text no longer claims other entity types can never contain a style. (P1) parseMessageLike preserves a non-empty in-cap caption whose caption_entities is OMITTED as richCaption {ok:true,kind:'caption',text:<exact>,entities:[]}; explicit null/primitive caption_entities is NOT treated as absence (entities_malformed); empty-string caption stays no-caption; captions never become commands; whitespace/Markdown-literal captions are preserved byte-exactly. The ORIGINAL proof file is kept permanently byte-identical at tests/unit/posidon-r119-original-proof.test.ts.",

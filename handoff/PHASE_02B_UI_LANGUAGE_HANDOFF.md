@@ -6,7 +6,7 @@ Phase 2B correction implements the **admin bot UI language** feature on
 branch `phase/02b-admin-ui-language`, per Alexios' correction packet.
 
 - Starting authoritative main commit: `564116ed374c3e1a032ff10aa1c1b71420ad9f3f`
-  (verified: `origin/main` of `https://github.com/ILIV007/pixel-lort.git`;
+  (verified: `origin/main` of `https://github.com/ILIV007/pixellores.git`;
   NOT continued from any older v1.2.3 ZIP).
 - Final branch: `phase/02b-admin-ui-language` (created directly from
   `origin/main`; upstream tracking intentionally unset).

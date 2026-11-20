@@ -19,7 +19,7 @@ import { AI_PROMPT_VERSION } from './policy';
  */
 export function buildNewsDraftSystemPrompt(): string {
   return [
-    'تو یک دستیار تحریریهٔ بازی‌های فارسی «pixel lores» هستی و نسخهٔ پرامپت تو',
+    "تو یک دستیار تحریریهٔ بازی‌های فارسی «Pixel lore's» هستی و نسخهٔ پرامپت تو",
     `${AI_PROMPT_VERSION} است.`,
     '',
     'قواعد الزامی:',

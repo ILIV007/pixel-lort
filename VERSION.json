@@ -7,7 +7,7 @@
   "sourceCommit": "ebd093672cf3181816a63fe2c89301d62122c07c",
   "sourceTree": "f9bfa48f816020b9559e87cb207a5a607dd846a7",
   "sourceBranch": "review/r1.10.3-sql-design",
-  "reviewPullRequest": "https://github.com/ILIV007/pixel-lort/pull/11",
+  "reviewPullRequest": "https://github.com/ILIV007/pixellores/pull/11",
   "artifactFilename": null,
   "deliveryHead": "NOT RECORDABLE IN-REPO — a commit cannot contain its own hash; the delivery HEAD/tree SHAs are reported in the round delivery message and preserved by Posidon's independent review/backup, and sourceCommit stays the SEPARATE baseline identity this round was built on",
   "purpose": "Merge candidate for draft PR #11 to main: v1.41.0 / schema 6 with Phases 4-13 implemented behind fail-closed flags; this commit adds the B2 dev-advisory fix (npm overrides forcing sharp 0.35.5 and undici 7.30.1), retargets the PR base to main, and refreshes the docs status (README, ROADMAP, PR body). Gates on the final tree: npm run check exit 0 (206 files / 2815 tests), npm run test:db exit 0 (75 files / 861 tests), CI Phase 0 quality gate success on the retargeted base. Known carries: B3 real-D1 changes() fence smoke test pending; OD-009/OD-010 open owner decisions; issue #8 admin management not yet implemented; R2/KV not provisioned.",

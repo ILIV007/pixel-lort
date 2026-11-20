@@ -236,7 +236,7 @@ describe('zod v4 migration: the source-registry contract is preserved', () => {
       validRegistryWith({
         ...validSource,
         connector: 'github-releases',
-        config: { repositories: ['ILIV007/pixel-lort'], includePrereleases: false },
+        config: { repositories: ['ILIV007/pixellores'], includePrereleases: false },
       }),
     );
     expect(accepted.success).toBe(true);

@@ -21,7 +21,7 @@ import { EVENT_RELATION_PROMPT_VERSION } from './event-relation-policy';
  */
 export function buildEventRelationSystemPrompt(): string {
   return [
-    'تو یک دستیار تحریریهٔ بازی‌های فارسی «pixel lores» هستی و نسخهٔ پرامپت تو',
+    "تو یک دستیار تحریریهٔ بازی‌های فارسی «Pixel lore's» هستی و نسخهٔ پرامپت تو",
     `${EVENT_RELATION_PROMPT_VERSION} است. وظیفهٔ تو بررسی ارتباط رویدادی دو گزارش است.`,
     '',
     'قواعد الزامی:',

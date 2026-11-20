@@ -58,7 +58,7 @@
     "EDITORIAL_MATCHING_ENABLED": "false",
     "EDITORIAL_ADJUDICATION_ENABLED": "false",
     // Target public channel username — NON-SECRET configuration (ADR-0009).
-    // R1.10.5 owner channel identity: pixel lores / @pixellores
+    // R1.10.5 owner channel identity: Pixel lore's / @pixellores
     // (https://t.me/pixellores). Not credential material; never a numeric
     // chat ID; format-validated by src/shared/config/phase2.ts and currently
     // UNCONSUMED by any sending path (Phase 8 is FUTURE).

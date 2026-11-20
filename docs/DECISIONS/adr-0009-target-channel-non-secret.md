@@ -29,7 +29,7 @@ it (phase 2) and is validated there as plain config.
 
 ## Owner amendment (Round 1.10.5, 2026-10-27) — channel identity update
 
-The owner renamed the CHANNEL: the public channel is now **pixel lores**
+The owner renamed the CHANNEL: the public channel is now **Pixel lore's**
 (`@pixellores`, https://t.me/pixellores). The verbatim "Context" quote above
 is preserved exactly as recorded (the Blueprint historically listed the old
 value); the _current_ intended non-secret value is `TARGET_CHANNEL=@pixellores`

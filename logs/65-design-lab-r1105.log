@@ -1,5 +1,5 @@
 
- RUN  v4.1.11 /home/z/my-project/pixel-lort-pub
+ RUN  v4.1.11 /home/z/my-project/pixellores-pub
 
 stdout | design-lab/lab-suite.test.ts > R1.10.3 design lab — schema 3 legacy candidate parity (real workerd D1) > L-10 legacy candidate parity at 100 fresh items (counts + durable rows + state)
 LAB[L-10] {"schema":3,"items":100,"accepted":{"inserted":100},"candidate":{"inserted":100},"durableParity":true}

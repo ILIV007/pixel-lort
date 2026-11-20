@@ -208,7 +208,7 @@ Key pipeline proofs (real workerd D1, scripted source HTTP):
 ## 7. Reproduction
 
 ```bash
-git clone https://github.com/ILIV007/pixel-lort.git   # main = e0cf7a5…
+git clone https://github.com/ILIV007/pixellores.git   # main = e0cf7a5…
 git checkout phase/04-source-ingestion                # HEAD recorded below
 npm ci && npm run check && npm run test:db
 ```

@@ -193,9 +193,9 @@ if (versionJson !== null) {
   }
   if (
     typeof versionJson.reviewPullRequest !== 'string' ||
-    !versionJson.reviewPullRequest.includes('github.com/ILIV007/pixel-lort/pull/')
+    !versionJson.reviewPullRequest.includes('github.com/ILIV007/pixellores/pull/')
   ) {
-    failures.push('VERSION.json: reviewPullRequest must reference the ILIV007/pixel-lort PR');
+    failures.push('VERSION.json: reviewPullRequest must reference the ILIV007/pixellores PR');
   }
   // An artifact filename that does not exist / was not built in THIS round
   // must never be recorded: null is the honest value. A recorded name must

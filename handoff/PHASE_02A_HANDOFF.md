@@ -6,7 +6,7 @@ Phase 2A implements the secure, **fully offline** Telegram ingress and the
 initial administration foundation on branch `phase/02a-telegram-ingress`.
 
 - Starting authoritative main commit: `446f3f14865a1ce57871f50d1979fbe5494a1e4a`
-  (verified: `origin/main` of `https://github.com/ILIV007/pixel-lort.git`).
+  (verified: `origin/main` of `https://github.com/ILIV007/pixellores.git`).
 - Final branch: `phase/02a-telegram-ingress` (created directly from
   `origin/main`).
 - Application version aligned to the approved **1.2.0** (package.json,
@@ -323,7 +323,7 @@ numbers, or run the command in the extracted artifact).
   injected fakes.
 - **No Phase 2B work started.**
 
-Single artifact: `pixel-lort-phase02a-v1.2.0.zip` (full working tree +
+Single artifact: `pixellores-phase02a-v1.2.0.zip` (full working tree +
 complete `.git` history at the ZIP root; excludes node_modules, dist,
 .wrangler, coverage, credentials, local env files, and temporary files).
 
@@ -661,7 +661,7 @@ claim_expires_at <= ?)`): exactly one concurrent winner; losers observe
 Ancestry: `446f3f1` (authoritative main) → `8f23b42` (v1.2.0 head) →
 `d49ba68` (v1.2.1 correction head) → this commit. No history rewritten.
 
-Single artifact: `pixel-lort-phase02a-v1.2.2.zip` (full working tree +
+Single artifact: `pixellores-phase02a-v1.2.2.zip` (full working tree +
 complete `.git` history at the ZIP root; excludes node_modules, dist,
 .wrangler, coverage, environment/secret files, credentials, logs, temporary
 files, and previous ZIP artifacts).
@@ -832,7 +832,7 @@ Ancestry: `446f3f1` (authoritative main) → `8f23b42` (v1.2.0 head) →
 `d49ba68` (v1.2.1 correction head) → `0db8fa3` (v1.2.2 correction head) →
 this commit. No history rewritten.
 
-Single artifact: `pixel-lort-phase02a-v1.2.3.zip` (full working tree +
+Single artifact: `pixellores-phase02a-v1.2.3.zip` (full working tree +
 complete `.git` history at the ZIP root; excludes node_modules, dist,
 .wrangler, coverage, environment/secret files, credentials, logs, temporary
 files, and previous ZIP artifacts).

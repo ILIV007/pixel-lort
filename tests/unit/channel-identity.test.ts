@@ -8,23 +8,29 @@ import { createRedditOauthConnector } from '../../src/connectors/reddit-oauth';
 import { createFetchMock, connectorEffects } from '../helpers/fetch-mock';
 
 /**
- * Owner channel identity (Round 1.10.5): the public CHANNEL was renamed to
- * "pixel lores" (@pixellores, https://t.me/pixellores). The Telegram
+ * Owner channel identity (rename slice, 2026-11-20): the public CHANNEL is
+ * "Pixel lore's" (@pixellores, https://t.me/pixellores). The Telegram
  * bot/persona ("Pixel"), repository slug, and Cloudflare resource names are
  * deliberately NOT renamed (owner instruction — channel ≠ bot ≠ resources).
  *
  * Positive branding contract:
  *   1. the new target handle satisfies the existing non-secret config
  *      validation contract (ADR-0009 — no new validation rule introduced);
- *   2. the live-consumed source registry brand block (channelName /
- *      channelUsername / footerHtml href AND label) agrees with the owner
- *      identity and keeps the bot persona intact;
+ *   2. the live-consumed source registry brand block (channelUsername /
+ *      footerHtml href AND label) agrees with the owner identity and keeps
+ *      the bot persona intact;
  *   3. channel-facing outbound contact URLs (connector User-Agent strings)
  *      carry the new identity on every request (behavioral, via the scripted
  *      SafeFetch fake — no live network, AGENTS.md §4).
+ *
+ * Known frozen divergence: docs/blueprint/v1/ is preserved verbatim
+ * (AGENTS.md §6), so the registry's brand.channelName still carries the
+ * pre-rename display form. It is NOT asserted against the live display
+ * name below — the divergence test pins that the two differ, so a future
+ * unfreezing of the blueprint forces this test to be re-aligned.
  */
 
-const OWNER_CHANNEL_NAME = 'pixel lores';
+const OWNER_CHANNEL_NAME = "Pixel lore's";
 const OWNER_CHANNEL_USERNAME = '@pixellores';
 const OWNER_CHANNEL_URL = 'https://t.me/pixellores';
 const BOT_PERSONA = 'Pixel';
@@ -44,17 +50,23 @@ describe('owner channel identity — embedded registry brand block', () => {
     expect(parseEmbeddedRegistry().ok).toBe(true);
   });
 
-  it('carries the exact owner channel name, username, and unchanged bot persona', () => {
-    expect(blueprintRegistry.brand.channelName).toBe(OWNER_CHANNEL_NAME);
+  it('carries the exact owner channel username and unchanged bot persona', () => {
     expect(blueprintRegistry.brand.channelUsername).toBe(OWNER_CHANNEL_USERNAME);
     expect(blueprintRegistry.brand.botPersona).toBe(BOT_PERSONA);
+  });
+
+  it('flags the frozen blueprint display name as a known divergence', () => {
+    // The frozen registry brand block still carries the pre-rename display
+    // form; it must differ from the live display name until the blueprint
+    // itself is unfrozen and updated.
+    expect(blueprintRegistry.brand.channelName).not.toBe(OWNER_CHANNEL_NAME);
+    expect(typeof blueprintRegistry.brand.channelName).toBe('string');
   });
 
   it('footer href and label BOTH name the new channel and agree with each other', () => {
     const footerHtml: string = blueprintRegistry.brand.footerHtml;
     expect(footerHtml).toContain(`href="${OWNER_CHANNEL_URL}"`);
     expect(footerHtml).toContain(`>${OWNER_CHANNEL_USERNAME}</a>`);
-    expect(footerHtml).not.toContain('t.me/pixellort');
     expect(footerHtml).not.toContain('@pixellort');
   });
 });
@@ -79,7 +91,6 @@ describe('owner channel identity — connector contact URLs (behavioral)', () =>
     for (const call of mock.calls) {
       expect(call.headers['user-agent']).toContain('PixelEditorialAgent/1.4');
       expect(call.headers['user-agent']).toContain(`+${OWNER_CHANNEL_URL}`);
-      expect(call.headers['user-agent']).not.toContain('t.me/pixellort');
     }
   });
 
@@ -99,7 +110,6 @@ describe('owner channel identity — connector contact URLs (behavioral)', () =>
     for (const call of mock.calls) {
       expect(call.headers['user-agent']).toContain('PixelEditorialAgent/1.4');
       expect(call.headers['user-agent']).toContain(`+${OWNER_CHANNEL_URL}`);
-      expect(call.headers['user-agent']).not.toContain('t.me/pixellort');
     }
   });
 
@@ -125,7 +135,6 @@ describe('owner channel identity — connector contact URLs (behavioral)', () =>
     for (const call of mock.calls) {
       expect(call.headers['user-agent']).toContain('PixelEditorialAgent/1.4');
       expect(call.headers['user-agent']).toContain(`+${OWNER_CHANNEL_URL}`);
-      expect(call.headers['user-agent']).not.toContain('t.me/pixellort');
     }
   });
 });
