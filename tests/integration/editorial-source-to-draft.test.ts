@@ -880,11 +880,11 @@ describe('scenario 6 — gates and typed failures stay offline', () => {
     const harness = createHarness();
     await seedSource(harness.rawExecutor);
     await seedItem(harness.rawExecutor, { id: 'item-6d', title: 'خبر شش‌د آزمایشی' });
-    // Exhaust the daily Workers-AI attempt cap BEFORE the run.
-    for (let i = 0; i < 40; i += 1) {
+    // Exhaust the daily Workers-AI attempt cap (120, ai-policy-v2.1) BEFORE the run.
+    for (let i = 0; i < 120; i += 1) {
       await authorizeAiRequestAttempt(harness.rawExecutor, {
         provider: 'workers-ai',
-        cap: 40,
+        cap: 120,
         nowMs: NOW,
       });
     }
@@ -897,7 +897,7 @@ describe('scenario 6 — gates and typed failures stay offline', () => {
     expect(outcomes).toEqual(['ack:retry_scheduled']);
     expect(harness.providerCalls).toHaveLength(0);
     expect(await readAiBudget(harness.rawExecutor, { provider: 'workers-ai', nowMs: NOW })).toBe(
-      40,
+      120,
     );
     expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(0);
   });

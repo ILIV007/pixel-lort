@@ -28,7 +28,7 @@
  * Documented limitation: if the remaining time exceeds the 32-bit timer
  * range (2_147_483_647 ms), no timer is scheduled and the wait is
  * effectively unbounded. Production callers pass the versioned
- * `AI_BOUNDS.totalWallDeadlineMs` (15 s), far below that range.
+ * `AI_BOUNDS.totalWallDeadlineMs` (60 s), far below that range.
  */
 
 /** Schedules the deadline callback; returns a canceller. Injectable for deterministic tests. */

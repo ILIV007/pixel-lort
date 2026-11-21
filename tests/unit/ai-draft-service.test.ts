@@ -374,7 +374,7 @@ describe('AI draft service — ladder, budget, and outcomes', () => {
     // lost, the attempt stays charged, and the SECOND candidate is skipped
     // BEFORE its authorization — no late grant may start a new call.
     cfPort.setOutcomes([{ kind: 'transient' }]);
-    cfPort.onCall(() => clock.setNow(1_700_000_000_000 + 20_000));
+    cfPort.onCall(() => clock.setNow(1_700_000_000_000 + 65_000));
     const outcome = await buildService().generateNewsDraft(VALID_REQUEST);
     expect(outcome.kind).toBe('deferred');
     if (outcome.kind === 'deferred') {
@@ -462,7 +462,7 @@ describe('AI draft service — ladder, budget, and outcomes', () => {
 // ---------------------------------------------------------------------------
 
 const CLOCK_START = 1_700_000_000_000;
-const WALL_DEADLINE_MS = 15_000; // = AI_BOUNDS.totalWallDeadlineMs (versioned policy)
+const WALL_DEADLINE_MS = 60_000; // = AI_BOUNDS.totalWallDeadlineMs (versioned policy)
 const DEADLINE_AT = CLOCK_START + WALL_DEADLINE_MS;
 const AUTHORIZED: AiBudgetAuthorization = { kind: 'authorized', bucketDate: '2023-11-14' };
 
