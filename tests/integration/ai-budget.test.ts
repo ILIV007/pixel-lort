@@ -7,6 +7,7 @@ import {
   authorizeAiRequestAttempt,
   readAiBudget,
   recordAiUsage,
+  refundAiRequestAttempt,
 } from '../../src/adapters/db/ai-budget-store';
 import { tehranBudgetDay } from '../../src/shared/time/tehran-day';
 
@@ -167,5 +168,63 @@ describe('recordAiUsage and scope isolation', () => {
       sql: `SELECT requests FROM budgets WHERE scope = '${AI_BUDGET_SCOPE}' AND budget_key = 'workers-ai' AND bucket_date = '2025-10-06'`,
     });
     expect(aiRow?.requests).toBe(2);
+  });
+});
+
+describe('refundAiRequestAttempt (charge-on-success)', () => {
+  it('decrements one charged unit and reports it', async () => {
+    await authorizeAiRequestAttempt(executor, { provider: 'workers-ai', cap: 5, nowMs: DAY1 });
+    await authorizeAiRequestAttempt(executor, { provider: 'workers-ai', cap: 5, nowMs: DAY1 });
+    expect(await readAiBudget(executor, { provider: 'workers-ai', nowMs: DAY1 })).toBe(2);
+
+    const refunded = await refundAiRequestAttempt(executor, {
+      provider: 'workers-ai',
+      nowMs: DAY1,
+    });
+    expect(refunded).toBe(true);
+    expect(await readAiBudget(executor, { provider: 'workers-ai', nowMs: DAY1 })).toBe(1);
+  });
+
+  it('floors at 0: a refund with no charge outstanding is a no-op, never negative', async () => {
+    const refunded = await refundAiRequestAttempt(executor, {
+      provider: 'workers-ai',
+      nowMs: DAY1,
+    });
+    expect(refunded).toBe(false);
+    expect(await readAiBudget(executor, { provider: 'workers-ai', nowMs: DAY1 })).toBe(0);
+
+    // Two charges, three refunds: the third is a no-op at the floor.
+    await authorizeAiRequestAttempt(executor, { provider: 'workers-ai', cap: 5, nowMs: DAY1 });
+    await authorizeAiRequestAttempt(executor, { provider: 'workers-ai', cap: 5, nowMs: DAY1 });
+    await refundAiRequestAttempt(executor, { provider: 'workers-ai', nowMs: DAY1 });
+    await refundAiRequestAttempt(executor, { provider: 'workers-ai', nowMs: DAY1 });
+    const third = await refundAiRequestAttempt(executor, {
+      provider: 'workers-ai',
+      nowMs: DAY1,
+    });
+    expect(third).toBe(false);
+    expect(await readAiBudget(executor, { provider: 'workers-ai', nowMs: DAY1 })).toBe(0);
+  });
+
+  it('a denied authorization leaves nothing to refund', async () => {
+    const denied = await authorizeAiRequestAttempt(executor, {
+      provider: 'workers-ai',
+      cap: 0,
+      nowMs: DAY1,
+    });
+    expect(denied.kind).toBe('denied');
+    const refunded = await refundAiRequestAttempt(executor, {
+      provider: 'workers-ai',
+      nowMs: DAY1,
+    });
+    expect(refunded).toBe(false);
+    expect(await readAiBudget(executor, { provider: 'workers-ai', nowMs: DAY1 })).toBe(0);
+  });
+
+  it('refunds only the current Tehran-day bucket', async () => {
+    await authorizeAiRequestAttempt(executor, { provider: 'workers-ai', cap: 5, nowMs: DAY1 });
+    await refundAiRequestAttempt(executor, { provider: 'workers-ai', nowMs: DAY2 });
+    expect(await readAiBudget(executor, { provider: 'workers-ai', nowMs: DAY1 })).toBe(1);
+    expect(await readAiBudget(executor, { provider: 'workers-ai', nowMs: DAY2 })).toBe(0);
   });
 });

@@ -301,6 +301,11 @@
             "max_retries": 3,
             "max_batch_size": 10,
             "max_batch_timeout": 5,
+            // ai-policy-v2.2: serialize the consumer — each ~12 s
+            // Workers AI binding call is non-cancellable, so concurrent
+            // invocations (Cloudflare auto-scales to 250) would burn the
+            // daily budget in parallel on the same stall.
+            "max_concurrency": 1,
           },
         ],
       },

@@ -647,8 +647,10 @@ describe('AI draft service — bounded authorization wait (round 1.10.6.1, findi
     const service = buildServiceWith(executor, scheduler);
 
     const pending = service.generateNewsDraft(VALID_REQUEST);
-    // The authorization started and the deadline timer is armed with the
-    // exact remaining wall time — deterministically, before any await.
+    // The breaker read precedes authorization, so the authorization
+    // starts only after a microtask drain — then the deadline timer is
+    // armed with the exact remaining wall time, deterministically.
+    await flushMicrotasks();
     expect(executor.batchCalls).toHaveLength(1);
     expect(scheduler.pendingCount()).toBe(1);
     expect(scheduler.delays()).toEqual([WALL_DEADLINE_MS]);
@@ -669,6 +671,7 @@ describe('AI draft service — bounded authorization wait (round 1.10.6.1, findi
     const service = buildServiceWith(executor, scheduler);
 
     const pending = service.generateNewsDraft(VALID_REQUEST);
+    await flushMicrotasks(); // let the service reach the authorization wait
     scheduler.fireAll(); // deadline wins while the authorization is pending
     const outcome = await pending;
 
@@ -686,6 +689,7 @@ describe('AI draft service — bounded authorization wait (round 1.10.6.1, findi
     const service = buildServiceWith(executor, scheduler);
 
     const pending = service.generateNewsDraft(VALID_REQUEST);
+    await flushMicrotasks(); // let the service reach the authorization wait
     scheduler.fireAll();
     const outcome = await pending;
 
@@ -704,6 +708,7 @@ describe('AI draft service — bounded authorization wait (round 1.10.6.1, findi
     const service = buildServiceWith(executor, scheduler);
 
     const pending = service.generateNewsDraft(VALID_REQUEST);
+    await flushMicrotasks(); // let the service reach the authorization wait first
     clock.setNow(DEADLINE_AT - 1); // granted JUST inside the deadline
     authorization.resolve(AUTHORIZED);
     clock.setNow(DEADLINE_AT + 5_000); // ...but the deadline passes before port entry
@@ -714,8 +719,11 @@ describe('AI draft service — bounded authorization wait (round 1.10.6.1, findi
     if (outcome.kind === 'deferred') {
       expect(outcome.attempts.map((attempt) => attempt.outcome)).toEqual(['skipped_deadline']);
     }
-    // Exactly ONE authorization charge happened and NO refund exists — the
-    // non-cancellable D1 charge stays recorded (conservative, documented).
+    // Exactly ONE authorization charge happened and it is REFUNDED
+    // (charge-on-success): the grant landed but no provider call
+    // started, so the compensating refund write returns the unit. The
+    // batch assertion below still holds — the refund is a separate run,
+    // not a second batch.
     expect(executor.batchCalls).toHaveLength(1);
   });
 
@@ -789,7 +797,7 @@ describe('AI draft service — bounded usage recording (round 1.10.6.1, section 
     }
   });
 
-  it('U2: a REJECTING usage recording never fails the draft and never refunds the authorization', async () => {
+  it('U2: a REJECTING usage recording never fails the draft and never refunds a successful authorization', async () => {
     const executor = createRejectingUsageExecutor();
     const scheduler = createManualScheduler();
     const service = buildServiceWith(executor, scheduler);
@@ -797,7 +805,7 @@ describe('AI draft service — bounded usage recording (round 1.10.6.1, section 
     const outcome = await service.generateNewsDraft(VALID_REQUEST);
 
     expect(outcome.kind).toBe('draft');
-    expect(executor.batchCalls).toHaveLength(1); // the durable charge stands; no refund path exists
+    expect(executor.batchCalls).toHaveLength(1); // the durable charge stands: a provider answer keeps its charge — the failed usage write is post-success bookkeeping, never a refund trigger
     expect(scheduler.pendingCount()).toBe(0); // the deadline timer was cancelled with the rejection
   });
 

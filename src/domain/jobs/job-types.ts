@@ -133,6 +133,14 @@ export const JOB_ERROR_CODES = [
   'editorial_near_dup_merged',
   'editorial_near_dup_review',
   'editorial_negative_cache_skip',
+  // ai-policy-v2.2: the daily AI attempt budget is exhausted. Terminal
+  // for THIS job generation — the budget resets at Tehran midnight, so
+  // no same-day retry can succeed and retrying only churns the engine's
+  // attempt budget. A later re-enqueue after the reset decides again
+  // honestly. Distinct from the quality-gate codes: the item itself is
+  // NOT rejected, so the handler must NOT write it into the 30-day
+  // negative cache (see prepare-draft-handler).
+  'editorial_budget_exhausted',
   // R1.15.1 (Posidon exact-content reuse correctness): the exact-content
   // GROUP anchor exists — one stable result for this full composed text is
   // already owned IN SQL — but NO candidate (including the anchor's own
