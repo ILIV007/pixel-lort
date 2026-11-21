@@ -21,7 +21,7 @@ import {
  * ADR-0041). These pin the fail-closed/free-only policy surface.
  */
 
-describe('AI model policy (ai-policy-v2)', () => {
+describe('AI model policy (ai-policy-v2.1)', () => {
   it('ships a small immutable allowlist: CF primary + CF alternate + conditional Gemini', () => {
     expect(AI_MODEL_ALLOWLIST_V2).toHaveLength(3);
     expect(listModelsForProvider('workers-ai').map((model) => model.role)).toEqual([
@@ -62,17 +62,21 @@ describe('AI model policy (ai-policy-v2)', () => {
 
   it('pins the validated application bounds', () => {
     expect(AI_BOUNDS.maxInputUtf8Bytes).toBe(16 * 1024);
-    expect(AI_BOUNDS.maxOutputTokens).toBe(768);
-    expect(AI_BOUNDS.totalWallDeadlineMs).toBe(15_000);
+    expect(AI_BOUNDS.maxOutputTokens).toBe(384);
+    expect(AI_BOUNDS.totalWallDeadlineMs).toBe(60_000);
     expect(AI_BOUNDS.maxProviderAttempts).toBe(3);
     expect(AI_BOUNDS.minEvidenceCount).toBe(1);
     expect(AI_BOUNDS.maxEvidenceCount).toBe(8);
   });
 
   it('defines per-provider app attempt caps in explicit attempt units', () => {
-    expect(AI_DAILY_REQUEST_ATTEMPT_CAPS['workers-ai']).toBeGreaterThan(0);
-    expect(AI_DAILY_REQUEST_ATTEMPT_CAPS.gemini).toBeGreaterThan(0);
-    expect(AI_POLICY_VERSION).toBe('ai-policy-v2');
+    // ai-policy-v2.1: workers-ai 40 → 120 — the v2 cap was exhausted by
+    // deadline failures (33/40 burned 2026-11-21 before any draft
+    // succeeded); 12–18 posts/day × up to 2 attempts + retries + test
+    // windows needs the headroom. Gemini stays 40 (fallback, unverified).
+    expect(AI_DAILY_REQUEST_ATTEMPT_CAPS['workers-ai']).toBe(120);
+    expect(AI_DAILY_REQUEST_ATTEMPT_CAPS.gemini).toBe(40);
+    expect(AI_POLICY_VERSION).toBe('ai-policy-v2.1');
   });
 });
 

@@ -28,12 +28,28 @@
  * lookup, Text Generation, no deprecation date, no paid-plan gate) AND a
  * live inference call each (HTTP 200, success true). glm-5.3 was
  * considered and NOT adopted: the catalog marks it require_workers_paid.
+ *
+ * ai-policy-v2.1 (2026-11-21) — deadline policy fix, models unchanged.
+ * Live evidence 2026-11-21: ALL 22 ai_runs for task news_draft failed
+ * with deadline_exceeded under the v2 15 s wall (gemma ~14.9 s each;
+ * qwen fallback attempts starved at 113 ms–2 s by the already-consumed
+ * wall). Live latency probe the same day (real draft workload via the
+ * Cloudflare AI API): gemma max_tokens=768 → 16.5 s; gemma
+ * max_tokens=384 → 11.6 s; qwen max_tokens=384 → 13.2 s. Both models
+ * max out whatever token budget they get, so the output bound drops
+ * 768 → 384 (Persian news drafts need ~150–250 words) and the wall
+ * deadline rises 15 s → 60 s: a typical invocation is one primary
+ * attempt (~12 s), worst case primary + fallback (~25 s) — 60 s covers
+ * it with headroom. The workers-ai daily attempt cap rises 40 → 120
+ * (12–18 posts/day × up to 2 attempts + retries + test windows); the
+ * v2 cap of 40 was exhausted by the deadline failures (33/40 burned
+ * before any draft succeeded).
  */
 
 import type { AiProvider } from './types';
 
 /** Version marker for the shipped allowlist/eligibility set. */
-export const AI_POLICY_VERSION = 'ai-policy-v2';
+export const AI_POLICY_VERSION = 'ai-policy-v2.1';
 
 /** Version marker for the shipped prompt contract (see ./prompt.ts). */
 export const AI_PROMPT_VERSION = 'pixel-news-draft-v1';
@@ -43,9 +59,9 @@ export const AI_BOUNDS = {
   /** Public input bound (evidence text total, UTF-8 bytes). */
   maxInputUtf8Bytes: 16 * 1024,
   /** Output token bound passed to providers. */
-  maxOutputTokens: 768,
+  maxOutputTokens: 384,
   /** TOTAL wall deadline for one service invocation (all attempts/fallbacks). */
-  totalWallDeadlineMs: 15_000,
+  totalWallDeadlineMs: 60_000,
   /** Maximum provider attempts per service invocation. */
   maxProviderAttempts: 3,
   /** Evidence snippet count bounds. */
@@ -122,7 +138,7 @@ export const AI_PROVIDER_ELIGIBILITY_V2: Readonly<
  * other CF model regardless of these app counters.
  */
 export const AI_DAILY_REQUEST_ATTEMPT_CAPS: Readonly<Record<AiProvider, number>> = {
-  'workers-ai': 40,
+  'workers-ai': 120,
   gemini: 40,
 };
 

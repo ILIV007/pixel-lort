@@ -429,17 +429,17 @@ describe('Phase 6.4 — failure paths along the REAL end-to-end chain', () => {
   });
 
   it('budget-first quota denial → ZERO provider calls, typed retry, no fabricated run', async () => {
-    // Pre-exhaust the workers-ai day bucket (cap 40) BEFORE the chain runs.
+    // Pre-exhaust the workers-ai day bucket (cap 120, ai-policy-v2.1) BEFORE the chain runs.
     const executor = createDbExecutor(env.DB);
-    for (let i = 0; i < 40; i += 1) {
+    for (let i = 0; i < 120; i += 1) {
       const authorization = await authorizeAiRequestAttempt(executor, {
         provider: 'workers-ai',
-        cap: 40,
+        cap: 120,
         nowMs: NOW,
       });
       expect(authorization.kind).toBe('authorized');
     }
-    expect(await readAiBudget(executor, { provider: 'workers-ai', nowMs: NOW })).toBe(40);
+    expect(await readAiBudget(executor, { provider: 'workers-ai', nowMs: NOW })).toBe(120);
 
     const h = await createChain({ script: () => okOutcome(undefined, 'هرگز') });
     const outcomes = await h.drain();
@@ -447,7 +447,7 @@ describe('Phase 6.4 — failure paths along the REAL end-to-end chain', () => {
 
     // Budget-first: the denial happened BEFORE any provider involvement.
     expect(h.portCalls).toHaveLength(0);
-    expect(await h.workersAiBudget()).toBe(40);
+    expect(await h.workersAiBudget()).toBe(120);
 
     const job = await h.jobRow();
     expect(job?.status).toBe('retry_wait');
