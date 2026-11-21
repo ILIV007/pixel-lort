@@ -125,22 +125,23 @@ describe('R1.22 — migration 0006: editorial→post provenance (schema 5 → 6)
     expect(idRow?.value).toBe('0006_admin_post_editorial_source');
 
     // The FULL plan continues the linear chain past 0006: exactly 0007
-    // + 0008 + 0009 + 0010 are pending (first run) and the database lands at version 10
-    // with the 0010 migration id. Later tests in this file observe the v10
-    // state; the 0006 provenance contracts below are unaffected by 0007/0008/0009/0010.
+    // + 0008 + 0009 + 0010 + 0011 are pending (first run) and the database lands at version 11
+    // with the 0011 migration id. Later tests in this file observe the v11
+    // state; the 0006 provenance contracts below are unaffected by 0007/0008/0009/0010/0011.
     const full = await applyMigrations(db);
     expect(full.applied.map((migration) => migration.id)).toEqual([
       '0007_inbound_pipeline',
       '0008_live_watchlists',
       '0009_post_management_near_dup',
       '0010_soul_versioning',
+      '0011_autonomous_soul_stamp',
     ]);
-    expect(full.finalVersion).toBe(10);
-    expect(await appliedSchemaVersion()).toBe(10);
+    expect(full.finalVersion).toBe(11);
+    expect(await appliedSchemaVersion()).toBe(11);
     const fullIdRow = await executor.first<{ value: string }>({
       sql: `SELECT value FROM schema_metadata WHERE key = 'migration_id'`,
     });
-    expect(fullIdRow?.value).toBe('0010_soul_versioning');
+    expect(fullIdRow?.value).toBe('0011_autonomous_soul_stamp');
   });
 
   it('preserves every legacy captured row byte-identically with NULL editorial provenance', async () => {
@@ -239,6 +240,6 @@ describe('R1.22 — migration 0006: editorial→post provenance (schema 5 → 6)
     await applyMigrations(db);
     const rerun = await applyMigrations(db);
     expect(rerun.applied).toEqual([]);
-    expect(rerun.finalVersion).toBe(10);
+    expect(rerun.finalVersion).toBe(11);
   });
 });

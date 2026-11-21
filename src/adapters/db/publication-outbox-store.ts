@@ -218,6 +218,7 @@ export type EnqueueOutcome =
         | 'invalid_draft_id'
         | 'invalid_destination'
         | 'invalid_score'
+        | 'invalid_soul_version'
         | 'draft_not_found'
         | 'draft_not_sendable'
         | 'mode_status_mismatch';
@@ -247,6 +248,13 @@ export async function enqueuePublication(
     readonly priorityScore: number;
     readonly approvalMode: 'auto' | 'safe_auto' | 'approval';
     readonly nowMs: number;
+    /**
+     * Slice 9 (migration 0011) — the Soul version the draft is published
+     * under. Absent = a legacy pre-stamp row (NULL); present it MUST be a
+     * positive integer, else the enqueue refuses (a publication without a
+     * valid Soul stamp is never created quietly).
+     */
+    readonly soulVersion?: number | null;
   },
 ): Promise<EnqueueOutcome> {
   if (
@@ -262,6 +270,13 @@ export async function enqueuePublication(
     input.destination.length > MAX_DESTINATION_LENGTH
   ) {
     return { kind: 'rejected', reason: 'invalid_destination' };
+  }
+  if (
+    input.soulVersion !== undefined &&
+    input.soulVersion !== null &&
+    (!Number.isSafeInteger(input.soulVersion) || input.soulVersion < 1)
+  ) {
+    return { kind: 'rejected', reason: 'invalid_soul_version' };
   }
   const budget = publicationMaxAttempts(input.priorityScore);
   if (!budget.ok) {
@@ -301,8 +316,8 @@ export async function enqueuePublication(
     await executor.run({
       sql: `INSERT INTO publications (id, story_id, draft_id, status, priority, approval_mode,
               scheduled_at, run_after, claimed_at, lease_until, published_at, attempts,
-              max_attempts, idempotency_key, last_error, created_at, updated_at)
-            VALUES (?, ?, ?, 'pending', ?, ?, NULL, ?, NULL, NULL, NULL, 0, ?, ?, NULL, ?, ?)`,
+              max_attempts, idempotency_key, last_error, created_at, updated_at, soul_version)
+            VALUES (?, ?, ?, 'pending', ?, ?, NULL, ?, NULL, NULL, NULL, 0, ?, ?, NULL, ?, ?, ?)`,
       params: [
         input.publicationId,
         draft.story_id,
@@ -314,6 +329,7 @@ export async function enqueuePublication(
         key.key,
         input.nowMs,
         input.nowMs,
+        input.soulVersion ?? null,
       ],
     });
     return { kind: 'created', publicationId: input.publicationId, idempotencyKey: key.key };

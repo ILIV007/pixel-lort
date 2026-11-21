@@ -216,6 +216,12 @@ export const SCHEMA_POST_MANAGEMENT_MIGRATION_ID = '0009_post_management_near_du
  */
 export const SOUL_SCHEMA_VERSION = 10;
 export const SCHEMA_SOUL_MIGRATION_ID = '0010_soul_versioning';
+/**
+ * Slice 9 — identifies the version-11 linear shape (the autonomous Soul
+ * stamp: `publications.soul_version` on top of the Soul versioning).
+ */
+export const AUTONOMOUS_SOUL_STAMP_SCHEMA_VERSION = 11;
+export const SCHEMA_AUTONOMOUS_SOUL_STAMP_MIGRATION_ID = '0011_autonomous_soul_stamp';
 
 /** The distinct, typed capability states (R19-01 — no boolean merge). */
 export type SchemaCapability =
@@ -308,6 +314,16 @@ export type SchemaCapability =
       readonly appliedSchemaVersion: 10;
     }
   | {
+      /**
+       * Slice 9: the LINEAR final candidate state — 0011 applied on top
+       * of 0010. ALL capabilities are present, plus the autonomous Soul
+       * stamp (`publications.soul_version`, 0011). Every ingestion path
+       * treats this state exactly like the ownership mode.
+       */
+      readonly kind: 'known_v11_autonomous_soul';
+      readonly appliedSchemaVersion: 11;
+    }
+  | {
       readonly kind: 'unresolved';
       readonly reason: SchemaCapabilityUnresolvedReason;
     };
@@ -344,7 +360,8 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
     parsed === 7 ||
     parsed === 8 ||
     parsed === 9 ||
-    parsed === 10
+    parsed === 10 ||
+    parsed === 11
   ) {
     // The migration_id distinguishes the shapes a version number alone can
     // never prove: at version 4 the ownership column exists ONLY under the
@@ -356,7 +373,8 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
     // 0004..0007's changes); at version 9 the linear chain requires the
     // 0009 id (and implies 0004..0008's changes); at version 10 the
     // linear chain requires the 0010 id (and implies 0004..0009's
-    // changes).
+    // changes); at version 11 the linear chain requires the 0011 id (and
+    // implies 0004..0010's changes).
     // Anything else is UNRESOLVED — no invented valid shapes.
     let idRow: { value: string } | null;
     try {
@@ -402,6 +420,9 @@ export async function resolveSchemaCapability(executor: DbExecutor): Promise<Sch
     }
     if (parsed === 10 && idRow.value === SCHEMA_SOUL_MIGRATION_ID) {
       return { kind: 'known_v10_soul', appliedSchemaVersion: 10 };
+    }
+    if (parsed === 11 && idRow.value === SCHEMA_AUTONOMOUS_SOUL_STAMP_MIGRATION_ID) {
+      return { kind: 'known_v11_autonomous_soul', appliedSchemaVersion: 11 };
     }
     return { kind: 'unresolved', reason: 'schema_capability_migration_id_unknown' };
   }

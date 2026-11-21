@@ -220,6 +220,10 @@ export function createSourcePollHandler(
       // ownership state plus the inbound pipeline tables.
       // Slice 5: version 8 (0008 on top of 0007) likewise — the
       // live-watchlist tables change nothing about poll ownership.
+      // Slice 9: versions 9 (0009), 10 (0010) and 11 (0011) likewise —
+      // the capability lists lagged behind schema-health (v9/v10 were
+      // never added here); the documented contract is that every newer
+      // linear state takes the ownership path exactly like v4.
       const capability = await resolveSchemaCapability(options.executor);
       if (capability.kind === 'unresolved') {
         options.logger?.warn('ingestion.poll.capability_unresolved', {
@@ -232,7 +236,10 @@ export function createSourcePollHandler(
         capability.kind === 'known_v5_admin_post' ||
         capability.kind === 'known_v6_editorial_post' ||
         capability.kind === 'known_v7_inbound' ||
-        capability.kind === 'known_v8_live_watchlists';
+        capability.kind === 'known_v8_live_watchlists' ||
+        capability.kind === 'known_v9_post_management' ||
+        capability.kind === 'known_v10_soul' ||
+        capability.kind === 'known_v11_autonomous_soul';
       let ownedHoldUntilMs: number | null = null;
       if (ownershipEnabled) {
         const acquisition = await acquirePollOwnership(options.executor, {

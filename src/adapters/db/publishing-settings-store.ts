@@ -227,6 +227,29 @@ export async function readPublishingSettings(
   };
 }
 
+/**
+ * Slice 9 — the STRICT mode read for the autonomous cron chain. Unlike
+ * `readPublishingSettings` (whose panel default is `auto` — the DESIGN
+ * default), an ABSENT or corrupt mode row resolves to NULL here, and the
+ * caller treats NULL as `paused`: a database that never had its mode set
+ * explicitly must NEVER auto-publish through the bridge or the scheduler
+ * scan. The live preview carries an explicit owner-set `paused` row, so
+ * this only bites on a fresh/partial database — exactly the case where
+ * failing closed matters.
+ */
+export async function readExplicitPublishMode(executor: DbExecutor): Promise<PublishMode | null> {
+  const byKey = await readSettingsRows(executor);
+  const raw = byKey[PUBLISHING_MODE_SETTINGS_KEY] ?? null;
+  if (raw === null) {
+    return null;
+  }
+  const stored = parseStoredJson<StoredMode>(raw);
+  if (stored === null || !isPublishMode(stored.mode)) {
+    return null;
+  }
+  return stored.mode;
+}
+
 function recordAudit(input: {
   readonly actorType: 'admin' | 'system';
   readonly actorId: string | null;

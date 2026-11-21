@@ -36,9 +36,9 @@ describe('GET /version via SELF', () => {
       'environment',
       'schemaVersion',
     ]);
-    expect(body['applicationVersion']).toBe('1.46.0');
+    expect(body['applicationVersion']).toBe('1.47.0');
     expect(body['commit']).toBe('local-dev');
-    expect(body['schemaVersion']).toBe(10);
+    expect(body['schemaVersion']).toBe(11);
     expect(body['environment']).toBe('development');
   });
 
@@ -131,14 +131,14 @@ describe('GET /health/ready — Phase 1A schema health (DB binding present)', ()
     expect(body['status']).toBe('not_ready');
     expect(Object.keys(body).sort()).toEqual(['ok', 'service', 'status']);
 
-    // Restore the application metadata (schema v10 — the slice-8 LINEAR
+    // Restore the application metadata (schema v11 — the slice-9 LINEAR
     // chain) so later tests in this file do not treat the migrations as
     // pending again (shared storage); re-applying a migration would fail on
     // its CREATE/ALTER statements.
     await env.DB.prepare(
       `INSERT INTO schema_metadata (key, value, updated_at_ms) VALUES
-         ('schema_version', '10', 1),
-         ('migration_id', '0010_soul_versioning', 1),
+         ('schema_version', '11', 1),
+         ('migration_id', '0011_autonomous_soul_stamp', 1),
          ('applied_at', '1970-01-01T00:00:00.000Z', 1)`,
     ).run();
   });
@@ -156,10 +156,10 @@ describe('GET /health/ready — Phase 1A schema health (DB binding present)', ()
     expect(body['status']).toBe('not_ready');
 
     // Restore the recorded version so later storage in this file does not
-    // treat migrations as pending again (shared file storage). Slice 6: the
-    // applied LINEAR chain lands at version 10 (0010 -> 10).
+    // treat migrations as pending again (shared file storage). Slice 9: the
+    // applied LINEAR chain lands at version 11 (0011 -> 11).
     await env.DB.prepare(
-      `UPDATE schema_metadata SET value = '10' WHERE key = 'schema_version'`,
+      `UPDATE schema_metadata SET value = '11' WHERE key = 'schema_version'`,
     ).run();
   });
 });

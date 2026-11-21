@@ -44,22 +44,22 @@ beforeEach(async () => {
   // tests WITHIN this file, so on later tests the V7 plan is a no-op.
   await applyMigrations(db, V7_ONLY);
   // Upgrade to the real append-only plan — on the first run ONLY 0008 +
-  // 0009 + 0010 are pending; on later tests this is an idempotent no-op. Either way the
-  // database ends at version 10.
+  // 0009 + 0010 + 0011 are pending; on later tests this is an idempotent no-op. Either way the
+  // database ends at version 11.
   const upgrade = await applyMigrations(db);
-  expect(upgrade.finalVersion).toBe(10);
+  expect(upgrade.finalVersion).toBe(11);
 });
 
 describe('slice 5 — migration 0008: live-watchlist tables (schema 7 → 8)', () => {
-  it('applies 0008 + 0009 + 0010 as the only pending steps on a fresh schema-v7 database', async () => {
+  it('applies 0008 + 0009 + 0010 + 0011 as the only pending steps on a fresh schema-v7 database', async () => {
     const rerun = await applyMigrations(db);
     expect(rerun.applied).toEqual([]);
-    expect(rerun.finalVersion).toBe(10);
-    expect(await appliedSchemaVersion()).toBe(10);
+    expect(rerun.finalVersion).toBe(11);
+    expect(await appliedSchemaVersion()).toBe(11);
     const idRow = await executor.first<{ value: string }>({
       sql: `SELECT value FROM schema_metadata WHERE key = 'migration_id'`,
     });
-    expect(idRow?.value).toBe('0010_soul_versioning');
+    expect(idRow?.value).toBe('0011_autonomous_soul_stamp');
   });
 
   it('admits one entry per kind+key and rejects a duplicate', async () => {

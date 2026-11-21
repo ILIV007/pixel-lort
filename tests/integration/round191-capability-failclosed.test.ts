@@ -40,6 +40,8 @@ import {
   type DbStatement,
 } from '../../src/adapters/db/db-executor';
 import { parseEmbeddedRegistry } from '../../src/domain/source/source-registry';
+import { effectiveRegistry } from '../../src/domain/source/dead-sources';
+import { withAdditionalSources } from '../../src/domain/source/additional-sources';
 import { seedSourcesFromRegistry } from '../../src/adapters/db/source-registry-store';
 import { scheduleDueSources } from '../../src/application/ingestion/scheduler';
 import { createSourcePollHandler } from '../../src/application/ingestion/poll-handler';
@@ -57,7 +59,13 @@ const db = createDbExecutor(env.DB);
 const registry = () => {
   const r = parseEmbeddedRegistry();
   if (!r.ok) throw new Error('fixture registry');
-  return r.registry;
+  // The scheduler's catalog is the EFFECTIVE registry (embedded 14 +
+  // slice-9 additions = 17); seeding the embedded catalog alone leaves
+  // the completeness probe seeing an incomplete catalog, so the pass
+  // re-seeds (seeded: true) where the control expects none.
+  const merged = withAdditionalSources(effectiveRegistry(r.registry));
+  if (!merged.ok) throw new Error('merged registry invalid');
+  return merged.registry;
 };
 
 const seedAndEnable = async () => {

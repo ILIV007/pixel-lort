@@ -3,6 +3,8 @@ import { env } from 'cloudflare:test';
 import { applyMigrations, LEGACY_APPLIED_MIGRATION_PLAN } from '../helpers/migrations';
 import { createDbExecutor, type DbExecutor } from '../../src/adapters/db/db-executor';
 import { parseEmbeddedRegistry } from '../../src/domain/source/source-registry';
+import { effectiveRegistry } from '../../src/domain/source/dead-sources';
+import { withAdditionalSources } from '../../src/domain/source/additional-sources';
 import { seedSourcesFromRegistry } from '../../src/adapters/db/source-registry-store';
 import { createSteamNewsConnector } from '../../src/connectors/steam-news';
 import {
@@ -214,7 +216,14 @@ async function provisionSteam(
 ): Promise<void> {
   const registry = parseEmbeddedRegistry();
   if (!registry.ok) throw new Error('registry invalid');
-  await seedSourcesFromRegistry(executor, registry.registry, NOW);
+  // Seed the EFFECTIVE registry (embedded 14 + slice-9 additions = 17):
+  // the scheduler's completeness probe compares against it, and an
+  // incomplete catalog makes the scheduler re-seed on the first pass —
+  // which refreshes registry-owned config keys (steam appsPerBatch 10)
+  // over the test's owner-set value (2) and breaks the rotation proof.
+  const merged = withAdditionalSources(effectiveRegistry(registry.registry));
+  if (!merged.ok) throw new Error('merged registry invalid');
+  await seedSourcesFromRegistry(executor, merged.registry, NOW);
   await executor.run({ sql: 'UPDATE sources SET enabled = 1 WHERE id = ?', params: [SOURCE_ID] });
   await executor.run({
     sql: `UPDATE sources SET config_json = json_set(config_json,

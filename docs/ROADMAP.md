@@ -1930,6 +1930,29 @@ status = 'ready'` (the rowcount the authority; the post-fence re-read
       `published_posts` 0. No cron/schedule wired; no replies to own
       posts (deferred — no discussion group). 7 new tests
       (migration-0010 + soul-stamp, registered in `test:db`).
+- [ ] Slice 9 — autonomous wiring (app 1.47.0, schema 11): the five
+      missing links from `docs/reviews/SLICE_08B_AUTONOMOUS_BLOCKED.md`
+      wired in production — VGC / Gematsu / GameSpot RSS added to the
+      source registry as code-level additions (blueprint untouched,
+      14 + 3 = 17); a cron drain enqueues `editorial.prepare_draft` for
+      fresh source items (bounded 10/tick); a draft → publication bridge
+      (ag1 auto-gate → fenced `auto_approved` → idempotent
+      `enqueuePublication`, P1 priority 80, Soul-stamped) runs only in
+      `auto`/`safe-auto` with a strict mode read (missing mode row =
+      `paused`, never the panel default `auto`); cron calls
+      `scanDuePublications` with the real Bot API transport and the
+      mode-derived send gate. Migration 0011 adds
+      `publications.soul_version` (CHECK ≥ 1) so autonomous posts carry
+      the Soul stamp. Fixed en route: the P1 latency defect — the scan
+      re-anchored the 5–20 min latency to every scan instant, so a P1
+      row could never become due (now anchored to the fixed enqueue
+      instant, backward-compatible optional `latencyAnchorMs`). First
+      test posts through the wired chain in a controlled window (mode
+      `auto` + AI on only while posting, then `paused` + flags off);
+      no-AI draft path still missing (DESIGN §6) — recorded as a
+      follow-up in the PR body, not built here. No daily schedule; no
+      replies to own posts (deferred — no discussion group). Evidence in
+      `docs/reviews/SLICE_09_AUTONOMOUS_WIRING.md`.
 - [ ] Command map, screens, opaque action tokens, multi-step sessions.
 
 ## Phase 10 — security hardening and budget controls ◒ (implemented on this branch, draft PR #11; PARTIAL — zod GHSA closed at runtime, dev advisories fixed by overrides)

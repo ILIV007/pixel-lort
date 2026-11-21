@@ -3,6 +3,8 @@ import { env } from 'cloudflare:test';
 import { applyMigrations } from '../helpers/migrations';
 import { createDbExecutor, type DbExecutor } from '../../src/adapters/db/db-executor';
 import { parseEmbeddedRegistry, type Registry } from '../../src/domain/source/source-registry';
+import { effectiveRegistry } from '../../src/domain/source/dead-sources';
+import { withAdditionalSources } from '../../src/domain/source/additional-sources';
 import { seedSourcesFromRegistry } from '../../src/adapters/db/source-registry-store';
 import { createSteamNewsConnector } from '../../src/connectors/steam-news';
 import { createYoutubePlaylistsConnector } from '../../src/connectors/youtube-playlists';
@@ -58,7 +60,9 @@ const db: DbExecutor = createDbExecutor(env.DB);
 const registry = (): Registry => {
   const r = parseEmbeddedRegistry();
   if (!r.ok) throw new Error('registry invalid');
-  return r.registry;
+  const merged = withAdditionalSources(effectiveRegistry(r.registry));
+  if (!merged.ok) throw new Error('merged registry invalid');
+  return merged.registry;
 };
 const seed = (reg: Registry = registry(), at = NOW): Promise<unknown> =>
   seedSourcesFromRegistry(db, reg, at);
@@ -571,12 +575,12 @@ describe('R07: field ownership and safe re-import', () => {
 });
 
 describe('R08: repair partial catalogs (bounded atomic reconciliation)', () => {
-  it('empty catalog: one pass seeds all 14 sources + 14 state rows, every row disabled', async () => {
+  it('empty catalog: one pass seeds all 17 sources + 17 state rows, every row disabled', async () => {
     const outcome = await schedule();
     expect(outcome.kind).toBe('scheduled');
     if (outcome.kind !== 'scheduled') return;
     expect(outcome.seeded).toBe(true);
-    expect(await counts()).toEqual({ sources: 14, states: 14 });
+    expect(await counts()).toEqual({ sources: 17, states: 17 });
     const enabled = await db.first<{ n: number }>({
       sql: 'SELECT COUNT(*) AS n FROM sources WHERE enabled = 1',
     });
@@ -590,7 +594,7 @@ describe('R08: repair partial catalogs (bounded atomic reconciliation)', () => {
     const outcome = await schedule();
     if (outcome.kind !== 'scheduled') throw new Error('expected scheduled');
     expect(outcome.seeded).toBe(true);
-    expect(await counts()).toEqual({ sources: 14, states: 14 });
+    expect(await counts()).toEqual({ sources: 17, states: 17 });
 
     // Owner settings fully intact after the repair.
     const steam = await db.first<{
@@ -662,7 +666,7 @@ describe('R08: repair partial catalogs (bounded atomic reconciliation)', () => {
 
     // Recovery on a later pass completes the catalog.
     await schedule();
-    expect(await counts()).toEqual({ sources: 14, states: 14 });
+    expect(await counts()).toEqual({ sources: 17, states: 17 });
   });
 
   it('repeated passes and overlapping reconciliations converge without duplication', async () => {
@@ -675,7 +679,7 @@ describe('R08: repair partial catalogs (bounded atomic reconciliation)', () => {
     const pass3 = await schedule();
     if (pass3.kind !== 'scheduled') throw new Error('expected scheduled');
     expect(pass3.seeded).toBe(false);
-    expect(await counts()).toEqual({ sources: 14, states: 14 });
+    expect(await counts()).toEqual({ sources: 17, states: 17 });
     expect((await configOf('steam_news_watchlist'))['apps']).toEqual([570]);
 
     // Overlapping reconciliation from a legacy partial state again: two
@@ -685,7 +689,7 @@ describe('R08: repair partial catalogs (bounded atomic reconciliation)', () => {
     await db.run({ sql: 'DELETE FROM sources' });
     await seedLegacyPartialCatalog();
     await Promise.all([schedule(), schedule()]);
-    expect(await counts()).toEqual({ sources: 14, states: 14 });
+    expect(await counts()).toEqual({ sources: 17, states: 17 });
     expect((await configOf('steam_news_watchlist'))['apps']).toEqual([570]);
   });
 

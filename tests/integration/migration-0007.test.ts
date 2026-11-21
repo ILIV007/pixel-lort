@@ -51,9 +51,9 @@ async function appliedSchemaVersion(): Promise<number> {
   return row === null ? 0 : Number.parseInt(row.value, 10);
 }
 
-// Slice 8: the first test below advances the shared per-file database to
-// version 10 (the full plan continues past 0007 with exactly 0008 + 0009 +
-// 0010). Later tests' beforeEach therefore sees finalVersion 10, not 7 — the
+// Slice 9: the first test below advances the shared per-file database to
+// version 11 (the full plan continues past 0007 with exactly 0008 + 0009 +
+// 0010 + 0011). Later tests' beforeEach therefore sees finalVersion 11, not 7 — the
 // flag keeps the version assertion honest about which state the file is in.
 let fullPlanApplied = false;
 
@@ -63,12 +63,12 @@ beforeEach(async () => {
   await applyMigrations(db, V6_ONLY);
   // Upgrade to the V7-capped plan — on the first run ONLY 0007 is
   // pending; on later tests this is an idempotent no-op. Either way the
-  // database ends at version 7 (the full default plan continues to 10;
+  // database ends at version 7 (the full default plan continues to 11;
   // see the first test below) — unless the first test already advanced
-  // the shared database to 10, in which case the capped plan is a no-op
-  // at version 10.
+  // the shared database to 11, in which case the capped plan is a no-op
+  // at version 11.
   const upgrade = await applyMigrations(db, V7_ONLY);
-  expect(upgrade.finalVersion).toBe(fullPlanApplied ? 10 : 7);
+  expect(upgrade.finalVersion).toBe(fullPlanApplied ? 11 : 7);
 });
 
 describe('slice 4 — migration 0007: inbound pipeline tables (schema 6 → 7)', () => {
@@ -82,17 +82,18 @@ describe('slice 4 — migration 0007: inbound pipeline tables (schema 6 → 7)',
     });
     expect(idRow?.value).toBe('0007_inbound_pipeline');
     // The full default plan continues the linear chain past 0007: exactly
-    // 0008 + 0009 + 0010 are pending and the database lands at version 10.
+    // 0008 + 0009 + 0010 + 0011 are pending and the database lands at version 11.
     const full = await applyMigrations(db);
     expect(full.applied.map((migration) => migration.id)).toEqual([
       '0008_live_watchlists',
       '0009_post_management_near_dup',
       '0010_soul_versioning',
+      '0011_autonomous_soul_stamp',
     ]);
-    expect(full.finalVersion).toBe(10);
-    expect(await appliedSchemaVersion()).toBe(10);
-    // The shared per-file database is now at version 10; later tests'
-    // beforeEach must expect 10, not 7.
+    expect(full.finalVersion).toBe(11);
+    expect(await appliedSchemaVersion()).toBe(11);
+    // The shared per-file database is now at version 11; later tests'
+    // beforeEach must expect 11, not 7.
     fullPlanApplied = true;
   });
 

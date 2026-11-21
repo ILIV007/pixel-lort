@@ -75,16 +75,16 @@ beforeEach(async () => {
 });
 
 describe('migration 0003 (jobs DLQ-delivery reconciliation)', () => {
-  it('upgrades a populated schema-v2 database through 0003 (and the appended 0004+0005+0006+0007+0008+0009+0010 candidates)', async () => {
-    // R1.20-R1 + R1.22 + slices 4-8: the DEFAULT plan is the LINEAR chain to version 10
-    // (0004 -> 4, 0005 -> 5, 0006 -> 6, 0007 -> 7, 0008 -> 8, 0009 -> 9, 0010 -> 10), so the populated v2
-    // database lands at 10 with the LAST applied id recorded. The 0003 column and index
+  it('upgrades a populated schema-v2 database through 0003 (and the appended 0004+0005+0006+0007+0008+0009+0010+0011 candidates)', async () => {
+    // R1.20-R1 + R1.22 + slices 4-9: the DEFAULT plan is the LINEAR chain to version 11
+    // (0004 -> 4, 0005 -> 5, 0006 -> 6, 0007 -> 7, 0008 -> 8, 0009 -> 9, 0010 -> 10, 0011 -> 11), so the populated v2
+    // database lands at 11 with the LAST applied id recorded. The 0003 column and index
     // contracts below are unchanged.
-    expect(await appliedSchemaVersion()).toBe(10);
+    expect(await appliedSchemaVersion()).toBe(11);
     const id = await executor.first<{ value: string }>({
       sql: `SELECT value FROM schema_metadata WHERE key = 'migration_id'`,
     });
-    expect(id?.value).toBe('0010_soul_versioning');
+    expect(id?.value).toBe('0011_autonomous_soul_stamp');
   });
 
   it('keeps legacy job rows valid; dlq_delivered_at reads NULL (reconcilable)', async () => {
@@ -119,8 +119,8 @@ describe('migration 0003 (jobs DLQ-delivery reconciliation)', () => {
 
   it('is idempotent (re-applying the full plan is a no-op)', async () => {
     await applyMigrations(db);
-    // R1.20-R1 + R1.22 + slices 4-8: the full LINEAR default plan lands at version 10.
-    expect(await appliedSchemaVersion()).toBe(10);
+    // R1.20-R1 + R1.22 + slices 4-9: the full LINEAR default plan lands at version 11.
+    expect(await appliedSchemaVersion()).toBe(11);
     const rows = await executor.first<{ n: number }>({
       sql: `SELECT COUNT(*) AS n FROM jobs`,
     });
