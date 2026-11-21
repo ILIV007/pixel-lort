@@ -428,8 +428,8 @@ describe('Phase 6.4 — failure paths along the REAL end-to-end chain', () => {
     expect(await h.workersAiBudget()).toBe(2);
   });
 
-  it('budget-first quota denial → ZERO provider calls, typed retry, no fabricated run', async () => {
-    // Pre-exhaust the workers-ai day bucket (cap 120, ai-policy-v2.1) BEFORE the chain runs.
+  it('budget-first quota denial → ZERO provider calls, TERMINAL editorial_budget_exhausted, no fabricated run', async () => {
+    // Pre-exhaust the workers-ai day bucket (cap 120, ai-policy-v2.2) BEFORE the chain runs.
     const executor = createDbExecutor(env.DB);
     for (let i = 0; i < 120; i += 1) {
       const authorization = await authorizeAiRequestAttempt(executor, {
@@ -443,14 +443,18 @@ describe('Phase 6.4 — failure paths along the REAL end-to-end chain', () => {
 
     const h = await createChain({ script: () => okOutcome(undefined, 'هرگز') });
     const outcomes = await h.drain();
-    expect(outcomes).toEqual(['ack:retry_scheduled']);
+    // ai-policy-v2.2: the daily budget resets at Tehran midnight, so no
+    // same-day retry can succeed — terminal dead_letter, not retry_wait.
+    expect(outcomes).toEqual(['ack:job_dead_lettered']);
 
     // Budget-first: the denial happened BEFORE any provider involvement.
     expect(h.portCalls).toHaveLength(0);
     expect(await h.workersAiBudget()).toBe(120);
 
     const job = await h.jobRow();
-    expect(job?.status).toBe('retry_wait');
+    expect(job?.status).toBe('dead_letter');
+    expect(job?.attempts).toBe(1);
+    expect(job?.last_error).toBe('editorial_budget_exhausted');
     expect(await h.draftRows()).toHaveLength(0);
 
     // The ledger observed the denial honestly (no usage, no success row).

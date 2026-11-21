@@ -504,7 +504,6 @@ describe('AI outcome mapping (ADR-0042 §5)', () => {
     for (const reason of [
       'ai_disabled',
       'binding_missing',
-      'budget_denied',
       'budget_store_error',
       'deadline_exceeded',
       'provider_unavailable',
@@ -518,6 +517,18 @@ describe('AI outcome mapping (ADR-0042 §5)', () => {
         kind: 'retry',
       });
     }
+  });
+
+  it('maps budget_denied onto the TERMINAL path (ai-policy-v2.2, no same-day retry can succeed)', () => {
+    // The daily budget resets at Tehran midnight; retrying only churns
+    // the engine's attempt budget. budget_denied is NOT in the retryable
+    // set AND has an explicit branch — the fallback below the set still
+    // maps unlisted reasons onto 'retry', so the set alone cannot make
+    // it terminal.
+    expect(classifyAiOutcome({ kind: 'deferred', reason: 'budget_denied', attempts: [] })).toEqual({
+      kind: 'permanent',
+      reasonCode: 'editorial_budget_exhausted',
+    });
   });
 
   it('records the real run for a successful draft (usage only when reported)', () => {

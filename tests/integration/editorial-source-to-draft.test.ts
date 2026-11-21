@@ -876,11 +876,11 @@ describe('scenario 6 — gates and typed failures stay offline', () => {
     expect(await readAiBudget(harness.rawExecutor, { provider: 'workers-ai', nowMs: NOW })).toBe(0);
   });
 
-  it('budget denied: typed retry with zero provider calls and no new charge', async () => {
+  it('budget denied: TERMINAL editorial_budget_exhausted with zero provider calls and no new charge', async () => {
     const harness = createHarness();
     await seedSource(harness.rawExecutor);
     await seedItem(harness.rawExecutor, { id: 'item-6d', title: 'خبر شش‌د آزمایشی' });
-    // Exhaust the daily Workers-AI attempt cap (120, ai-policy-v2.1) BEFORE the run.
+    // Exhaust the daily Workers-AI attempt cap (120, ai-policy-v2.2) BEFORE the run.
     for (let i = 0; i < 120; i += 1) {
       await authorizeAiRequestAttempt(harness.rawExecutor, {
         provider: 'workers-ai',
@@ -894,12 +894,19 @@ describe('scenario 6 — gates and typed failures stay offline', () => {
       sourceItemId: 'item-6d',
     });
     const outcomes = await runPipeline(harness);
-    expect(outcomes).toEqual(['ack:retry_scheduled']);
+    // ai-policy-v2.2: the daily budget resets at Tehran midnight, so no
+    // same-day retry can succeed — terminal dead_letter, not a retry.
+    expect(outcomes).toEqual(['ack:job_dead_lettered']);
     expect(harness.providerCalls).toHaveLength(0);
     expect(await readAiBudget(harness.rawExecutor, { provider: 'workers-ai', nowMs: NOW })).toBe(
       120,
     );
     expect(await rowCount(harness.rawExecutor, 'drafts')).toBe(0);
+    const job = await harness.rawExecutor.first<{ status: string; last_error: string }>({
+      sql: "SELECT status, last_error FROM jobs WHERE type = 'editorial.prepare_draft'",
+    });
+    expect(job!.status).toBe('dead_letter');
+    expect(job!.last_error).toBe('editorial_budget_exhausted');
   });
 
   it('budget store failure: distinct typed retry, zero provider calls', async () => {

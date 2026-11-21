@@ -22,7 +22,8 @@
  *    if its independent eligibility/budget/key are valid. A provider
  *    content/safety refusal is a TERMINAL typed refusal — no model or
  *    provider hopping to bypass safety.
- * 5. Bounds: ≤3 provider calls, ≤768 output tokens, and a TOTAL wall
+ * 5. Bounds: ≤3 provider calls, ≤2048 output tokens
+ *    (AI_BOUNDS.maxOutputTokens, ai-policy-v2.2), and a TOTAL wall
  *    deadline (injected clock) bounding EVERY await in this service path
  *    (round 1.10.6.1): the durable budget-authorization wait, the provider
  *    call itself, and the post-success usage recording. Authorization that

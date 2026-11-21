@@ -251,6 +251,67 @@ describe('Workers AI adapter — binding boundary', () => {
     expect(interpretRunResult({ response: 'x' })).toEqual({ kind: 'ok', rawText: 'x' });
   });
 
+  it('parses the chat.completion shape gemma/qwen actually return (ai-policy-v2.2)', () => {
+    // Fixture mirrors the REAL live probe of gemma-4-26b
+    // (@cf/google/gemma-4-26b-a4b-it, { messages, max_tokens: 384 },
+    // HTTP 200): choices[0].message.content is the complete Persian
+    // JSON answer, reasoning_content is the model's thinking (NOT the
+    // answer), usage carries neurons + completion_tokens.
+    const probeResponse = {
+      choices: [
+        {
+          message: {
+            content:
+              '{"headlineFa":"تیتر خبر","summaryFa":"خلاصهٔ خبر.","claims":[{"text":"ادعای اول","evidenceIds":["src-1:item-42"]}]}',
+            reasoning_content: 'The user wants a Persian news draft… thinking…',
+          },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: { prompt_tokens: 120, completion_tokens: 375, neurons: 10.77 },
+    };
+    const outcome = interpretRunResult(probeResponse);
+    expect(outcome).toEqual({
+      kind: 'ok',
+      rawText:
+        '{"headlineFa":"تیتر خبر","summaryFa":"خلاصهٔ خبر.","claims":[{"text":"ادعای اول","evidenceIds":["src-1:item-42"]}]}',
+      usage: { inputTokens: 120, outputTokens: 375 },
+    });
+    // reasoning_content is never mistaken for the answer.
+    expect(JSON.stringify(outcome)).not.toContain('thinking');
+  });
+
+  it('takes the first choice with non-empty content; empty content + reasoning is NOT ok', () => {
+    expect(
+      interpretRunResult({
+        choices: [
+          { message: { content: '   ', reasoning_content: 'thinking…' }, finish_reason: 'length' },
+          { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 384 },
+      }),
+    ).toEqual({
+      kind: 'ok',
+      rawText: '{"ok":true}',
+      usage: { inputTokens: 10, outputTokens: 384 },
+    });
+    // The model spent the whole budget thinking and produced no answer
+    // text: transient, never the thinking as the answer.
+    expect(
+      interpretRunResult({
+        choices: [
+          {
+            message: { content: '', reasoning_content: 'thinking only, no answer' },
+            finish_reason: 'length',
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 384 },
+      }).kind,
+    ).toBe('transient');
+    expect(interpretRunResult({ choices: [] }).kind).toBe('transient');
+    expect(interpretRunResult({ choices: [{ message: {} }] }).kind).toBe('transient');
+  });
+
   it('classifies binding errors conservatively without leaking message text', async () => {
     const quota = classifyBindingError(new Error('account has no remaining Neurons quota'));
     expect(quota.kind).toBe('quota_denied');

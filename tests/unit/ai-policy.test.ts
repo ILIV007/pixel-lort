@@ -21,7 +21,7 @@ import {
  * ADR-0041). These pin the fail-closed/free-only policy surface.
  */
 
-describe('AI model policy (ai-policy-v2.1)', () => {
+describe('AI model policy (ai-policy-v2.2)', () => {
   it('ships a small immutable allowlist: CF primary + CF alternate + conditional Gemini', () => {
     expect(AI_MODEL_ALLOWLIST_V2).toHaveLength(3);
     expect(listModelsForProvider('workers-ai').map((model) => model.role)).toEqual([
@@ -62,7 +62,11 @@ describe('AI model policy (ai-policy-v2.1)', () => {
 
   it('pins the validated application bounds', () => {
     expect(AI_BOUNDS.maxInputUtf8Bytes).toBe(16 * 1024);
-    expect(AI_BOUNDS.maxOutputTokens).toBe(384);
+    // ai-policy-v2.2: 384 → 2048 — the live gemma probe spent 375/384
+    // tokens on thinking for a one-sentence title; real drafts need
+    // ~300–600 content tokens plus thinking headroom, so 384 risks
+    // truncated JSON → invalid_output after the parse fix.
+    expect(AI_BOUNDS.maxOutputTokens).toBe(2048);
     expect(AI_BOUNDS.totalWallDeadlineMs).toBe(60_000);
     expect(AI_BOUNDS.maxProviderAttempts).toBe(3);
     expect(AI_BOUNDS.minEvidenceCount).toBe(1);
@@ -76,7 +80,7 @@ describe('AI model policy (ai-policy-v2.1)', () => {
     // windows needs the headroom. Gemini stays 40 (fallback, unverified).
     expect(AI_DAILY_REQUEST_ATTEMPT_CAPS['workers-ai']).toBe(120);
     expect(AI_DAILY_REQUEST_ATTEMPT_CAPS.gemini).toBe(40);
-    expect(AI_POLICY_VERSION).toBe('ai-policy-v2.1');
+    expect(AI_POLICY_VERSION).toBe('ai-policy-v2.2');
   });
 });
 

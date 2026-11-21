@@ -19,8 +19,9 @@
  *    independent eligibility is verified (default false — unverified Free
  *    tier stays OFF, zero network). A provider content/safety refusal is a
  *    TERMINAL typed refusal — no model or provider hopping to bypass it.
- * 5. Bounds: ≤3 provider calls, ≤768 output tokens, a TOTAL wall deadline
- *    of 15 s bounding the whole invocation. Output must be non-empty plain
+ * 5. Bounds: ≤3 provider calls, ≤2048 output tokens
+ *    (AI_BOUNDS.maxOutputTokens, ai-policy-v2.2), a TOTAL wall deadline
+ *    of 60 s bounding the whole invocation. Output must be non-empty plain
  *    text (≤8192 chars); a fenced code block wrapper is stripped.
  * 6. No free path remains ⇒ typed deferred with a stable reason. The
  *    pipeline caller falls back to the cleaned text — NEVER fabricates.

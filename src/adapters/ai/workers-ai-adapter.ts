@@ -103,10 +103,25 @@ export function classifyBindingError(error: unknown): AiCallOutcome {
 }
 
 /**
- * Defensive extraction of the binding's post-processed output. The known
- * instruct-model shape is `{ response: string, usage?: { prompt_tokens,
- * completion_tokens } }`; anything else is uninterpretable at this
- * boundary. Usage is reported ONLY when actually present (never invented).
+ * Defensive extraction of the binding's post-processed output. Known
+ * shapes, in order:
+ *
+ * 1. OpenAI-compatible `chat.completion` (what gemma-4-26b / qwen3.8-27b
+ *    actually return through the binding): `{ choices: [{ message:
+ *    { content, reasoning_content }, finish_reason }], usage }`. The
+ *    answer is the FIRST choice whose `message.content` is a non-empty
+ *    string. `reasoning_content` is the model's thinking — NEVER the
+ *    answer: empty `content` with `reasoning_content` present is NOT ok
+ *    (transient), because the model spent the token budget thinking and
+ *    produced no answer text.
+ * 2. The instruct-model shape `{ response: string, usage?: {
+ *    prompt_tokens, completion_tokens } }`.
+ * 3. A raw non-empty string.
+ *
+ * Anything else is uninterpretable at this boundary. Usage is reported
+ * ONLY when actually present (never invented); the chat.completion
+ * `usage` object carries the same `prompt_tokens` / `completion_tokens`
+ * fields (plus provider extras such as `neurons`, which are ignored).
  */
 export function interpretRunResult(result: unknown): AiCallOutcome {
   if (typeof result === 'string') {
@@ -114,8 +129,14 @@ export function interpretRunResult(result: unknown): AiCallOutcome {
   }
   if (result !== null && typeof result === 'object') {
     const record = result as Record<string, unknown>;
-    const response = record['response'];
     const usage = readUsageRecord(record['usage']);
+    const chatContent = readChatCompletionContent(record['choices']);
+    if (chatContent !== undefined) {
+      return usage === undefined
+        ? { kind: 'ok', rawText: chatContent }
+        : { kind: 'ok', rawText: chatContent, usage };
+    }
+    const response = record['response'];
     if (typeof response === 'string' && response.trim().length > 0) {
       return usage === undefined
         ? { kind: 'ok', rawText: response }
@@ -123,6 +144,31 @@ export function interpretRunResult(result: unknown): AiCallOutcome {
     }
   }
   return { kind: 'transient' };
+}
+
+/**
+ * First non-empty `choices[i].message.content` of a chat.completion
+ * result, or undefined when no choice carries answer text.
+ * `reasoning_content` is deliberately never read here.
+ */
+function readChatCompletionContent(choices: unknown): string | undefined {
+  if (!Array.isArray(choices)) {
+    return undefined;
+  }
+  for (const choice of choices) {
+    if (choice === null || typeof choice !== 'object') {
+      continue;
+    }
+    const message = (choice as Record<string, unknown>)['message'];
+    if (message === null || typeof message !== 'object') {
+      continue;
+    }
+    const content = (message as Record<string, unknown>)['content'];
+    if (typeof content === 'string' && content.trim().length > 0) {
+      return content;
+    }
+  }
+  return undefined;
 }
 
 function readUsageRecord(

@@ -33,12 +33,17 @@
  *   zero editorial rows, zero processed flip. DISTINCT from a lost job
  *   fence; the consumed provider budget is NOT refunded; terminal because
  *   a retry would re-read the same stale identity (never a hot loop).
- * - typed AI deferrals (gate off, binding missing, budget denied, budget
- *   store failure, deadline, provider unavailable/auth, eligibility
- *   unverified, no free path, config invalid) → RECOVERABLE retry with the
- *   stable `job_handler_retryable_error` code; the engine's own bounded
- *   attempt budget and backoff own the schedule. Zero network happens
- *   behind the AI service's fail-closed gates.
+ * - typed AI deferrals (gate off, binding missing, budget store
+ *   failure, deadline, provider unavailable/auth, eligibility
+ *   unverified, no free path, config invalid) → RECOVERABLE retry with
+ *   the stable `job_handler_retryable_error` code; the engine's own
+ *   bounded attempt budget and backoff own the schedule. Zero network
+ *   happens behind the AI service's fail-closed gates. EXCEPTION
+ *   (ai-policy-v2.2): `budget_denied` is TERMINAL
+ *   (`editorial_budget_exhausted`) — the daily budget resets at Tehran
+ *   midnight, so no same-day retry can succeed; the item is NOT a
+ *   quality rejection and is never written into the 30-day negative
+ *   cache.
  * - mid-commit storage failure → propagates: the engine classifies it as
  *   transient (`job_internal_error`) and reschedules; the atomic batch
  *   guarantees NO partial editorial state and NO fake processed.
@@ -266,7 +271,6 @@ const RETRYABLE_DEFERRED_REASONS: ReadonlySet<AiDeferredReason> = new Set([
   'binding_missing',
   'key_missing',
   'eligibility_unverified',
-  'budget_denied',
   'budget_store_error',
   'deadline_exceeded',
   'provider_unavailable',
@@ -362,7 +366,8 @@ export type EditorialAiStep =
   | { readonly kind: 'retry' }
   | {
       readonly kind: 'permanent';
-      readonly reasonCode: 'editorial_input_invalid' | 'editorial_ai_refused';
+      readonly reasonCode:
+        'editorial_input_invalid' | 'editorial_ai_refused' | 'editorial_budget_exhausted';
     };
 
 export function classifyAiOutcome(outcome: AiOutcome): EditorialAiStep {
@@ -374,6 +379,15 @@ export function classifyAiOutcome(outcome: AiOutcome): EditorialAiStep {
     case 'deferred':
       if (outcome.reason === 'input_invalid') {
         return { kind: 'permanent', reasonCode: 'editorial_input_invalid' };
+      }
+      if (outcome.reason === 'budget_denied') {
+        // ai-policy-v2.2: the daily budget is exhausted (resets at
+        // Tehran midnight), so no same-day retry can succeed — terminal,
+        // NOT recoverable. This explicit branch is REQUIRED: merely
+        // removing 'budget_denied' from RETRYABLE_DEFERRED_REASONS
+        // would change nothing, because the fallback below still maps
+        // any unlisted reason onto 'retry'.
+        return { kind: 'permanent', reasonCode: 'editorial_budget_exhausted' };
       }
       if (RETRYABLE_DEFERRED_REASONS.has(outcome.reason)) {
         return { kind: 'retry' };
@@ -1789,7 +1803,12 @@ export function createEditorialPrepareDraftHandler(
         logger?.warn('editorial.prepare_draft.ai_terminal', { reasonCode: step.reasonCode });
         // Slice 6 — the quality gate rejected this item: cache the
         // fingerprint 30 days so the NEXT cycle never re-feeds it to AI.
-        await noteQualityRejection(step.reasonCode);
+        // EXCEPT budget exhaustion (ai-policy-v2.2): the item itself is
+        // fine and the budget resets at Tehran midnight — caching its
+        // fingerprint would wrongly suppress a good item for 30 days.
+        if (step.reasonCode !== 'editorial_budget_exhausted') {
+          await noteQualityRejection(step.reasonCode);
+        }
         return { kind: 'permanent', reasonCode: step.reasonCode };
       }
 

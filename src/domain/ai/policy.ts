@@ -44,12 +44,33 @@
  * (12–18 posts/day × up to 2 attempts + retries + test windows); the
  * v2 cap of 40 was exhausted by the deadline failures (33/40 burned
  * before any draft succeeded).
+ *
+ * ai-policy-v2.2 (2026-11-21) — output-parse root-cause fix, models
+ * unchanged. Live evidence 2026-11-21: the v2.1 15 s wall was a
+ * SYMPTOM, not the cause. A live REST probe of gemma-4-26b (same input
+ * shape `{ messages, max_tokens: 384 }`, HTTP 200 in ~8 s) returned an
+ * OpenAI-compatible `chat.completion` — `result.choices[0].message
+ * .content` held a valid complete Persian JSON answer while
+ * `reasoning_content` held the model's thinking — but the adapter only
+ * understood a raw string or `{ response }`, so EVERY successful model
+ * answer became `transient`, the ladder fell through to qwen, the run
+ * ended `provider_unavailable`, and the endless retry burned the
+ * 120/120 daily budget. The probe also shows why 384 tokens is too
+ * small: for a one-sentence title the model spent 375/384 tokens
+ * (usage: neurons 10.77, completion_tokens 375 of 384) — mostly
+ * thinking — so with the real (longer) draft prompt it spends the whole
+ * budget on thinking and `content` comes back empty/truncated, which
+ * after the parse fix would surface as `invalid_output`. The output
+ * bound therefore rises 384 → 2048: real drafts need ~300–600 content
+ * tokens plus thinking headroom. The 60 s wall still covers worst-case
+ * primary + fallback, and neuron cost stays well under the 10,000/day
+ * free cap (~11 neurons/call at 384 tokens).
  */
 
 import type { AiProvider } from './types';
 
 /** Version marker for the shipped allowlist/eligibility set. */
-export const AI_POLICY_VERSION = 'ai-policy-v2.1';
+export const AI_POLICY_VERSION = 'ai-policy-v2.2';
 
 /** Version marker for the shipped prompt contract (see ./prompt.ts). */
 export const AI_PROMPT_VERSION = 'pixel-news-draft-v1';
@@ -59,7 +80,7 @@ export const AI_BOUNDS = {
   /** Public input bound (evidence text total, UTF-8 bytes). */
   maxInputUtf8Bytes: 16 * 1024,
   /** Output token bound passed to providers. */
-  maxOutputTokens: 384,
+  maxOutputTokens: 2048,
   /** TOTAL wall deadline for one service invocation (all attempts/fallbacks). */
   totalWallDeadlineMs: 60_000,
   /** Maximum provider attempts per service invocation. */
