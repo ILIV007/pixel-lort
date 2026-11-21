@@ -34,11 +34,14 @@
  *   fence; the consumed provider budget is NOT refunded; terminal because
  *   a retry would re-read the same stale identity (never a hot loop).
  * - typed AI deferrals (gate off, binding missing, budget store
- *   failure, deadline, provider unavailable/auth, eligibility
- *   unverified, no free path, config invalid) → RECOVERABLE retry with
- *   the stable `job_handler_retryable_error` code; the engine's own
- *   bounded attempt budget and backoff own the schedule. Zero network
- *   happens behind the AI service's fail-closed gates. EXCEPTION
+ *   failure, deadline, provider unavailable/auth, circuit open,
+ *   eligibility unverified, no free path, config invalid) → RECOVERABLE
+ *   retry with the stable `job_handler_retryable_error` code; the
+ *   engine's own bounded attempt budget and backoff own the schedule.
+ *   Zero network happens behind the AI service's fail-closed gates.
+ *   A `circuit_open` deferral means the breaker is holding provider
+ *   calls AND charges, so the retry costs nothing until the cooldown
+ *   passes. EXCEPTION
  *   (ai-policy-v2.2): `budget_denied` is TERMINAL
  *   (`editorial_budget_exhausted`) — the daily budget resets at Tehran
  *   midnight, so no same-day retry can succeed; the item is NOT a
@@ -275,6 +278,7 @@ const RETRYABLE_DEFERRED_REASONS: ReadonlySet<AiDeferredReason> = new Set([
   'deadline_exceeded',
   'provider_unavailable',
   'provider_auth_failed',
+  'circuit_open',
   'no_free_path',
 ]);
 

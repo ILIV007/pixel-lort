@@ -8,9 +8,9 @@
  * NO guaranteed native cancellation (AiOptions has no abort mechanism), so
  * this adapter races the call against the wall deadline and returns
  * `deadline_exceeded` on timeout while the in-flight call MAY still be
- * computing server-side. The service accounts for that conservatively:
- * a timed-out attempt stays charged (no refunds) and can never start new
- * work after the deadline.
+ * computing server-side. The service accounts for that: a timed-out
+ * attempt is refunded best-effort (charge-on-success) and can never start
+ * new work after the deadline.
  *
  * Error mapping is deliberately conservative and code-only: thrown
  * binding errors are classified by bounded message-name patterns into the

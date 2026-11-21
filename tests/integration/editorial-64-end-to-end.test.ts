@@ -390,8 +390,10 @@ describe('Phase 6.4 — failure paths along the REAL end-to-end chain', () => {
     const job1 = await h.jobRow();
     expect(job1?.status).toBe('retry_wait');
     expect(await h.draftRows()).toHaveLength(0);
-    // The attempt was charged conservatively (the authorization landed).
-    expect(await h.workersAiBudget()).toBe(1);
+    // The attempt was charged, then REFUNDED (charge-on-success): the
+    // wall deadline fired with no provider completion, so the unit
+    // returns to the budget — the late response is absorbed, not charged.
+    expect(await h.workersAiBudget()).toBe(0);
 
     // The LATE response arrives AFTER the outcome was decided: it must be
     // absorbed — no commit, no resurrection, no extra draft, ever. (The
@@ -425,7 +427,10 @@ describe('Phase 6.4 — failure paths along the REAL end-to-end chain', () => {
     expect(runs[1]?.status).toBe('succeeded');
     expect(runs[1]?.input_tokens).toBe(300);
     expect(runs[1]?.output_tokens).toBe(90);
-    expect(await h.workersAiBudget()).toBe(2);
+    // Charge-on-success: the absorbed deadline attempt was refunded (0),
+    // the legitimate retry succeeded and keeps its charge (1) — total 1,
+    // not 2. Both runs stay honestly recorded above.
+    expect(await h.workersAiBudget()).toBe(1);
   });
 
   it('budget-first quota denial → ZERO provider calls, TERMINAL editorial_budget_exhausted, no fabricated run', async () => {
@@ -521,7 +526,11 @@ describe('Phase 6.4 — failure paths along the REAL end-to-end chain', () => {
       expect(run.status).toBe('failed');
       expect(run.error_code).toBe('deadline_exceeded');
     }
-    expect(await h.workersAiBudget()).toBe(3);
+    // All three deadline attempts were REFUNDED (charge-on-success):
+    // each ended without a provider completion, so none consumes budget
+    // — the audit rows above stay (failed runs are honestly recorded),
+    // but the budget is untouched.
+    expect(await h.workersAiBudget()).toBe(0);
   });
 
   it('terminal provider safety refusal → permanent dead_letter editorial_ai_refused, honest failed run, NO draft', async () => {

@@ -508,6 +508,7 @@ describe('AI outcome mapping (ADR-0042 §5)', () => {
       'deadline_exceeded',
       'provider_unavailable',
       'provider_auth_failed',
+      'circuit_open',
       'eligibility_unverified',
       'no_free_path',
       'config_invalid',

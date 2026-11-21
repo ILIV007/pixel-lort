@@ -20,8 +20,20 @@
  *   They are NOT Cloudflare Neurons and NOT a Google quota meter; provider
  *   reset boundaries are the providers' own — the app bucket is Tehran day
  *   by explicit policy, kept separate from both.
- * - No refunds: failed/timeout attempts stay charged (conservative), and a
- *   late finishing call that lost the deadline race is still charged.
+ * - Charge-on-success (ai-policy-v2.2 follow-up — owner-ordered guard):
+ *   an attempt that ends WITHOUT a provider completion is REFUNDED
+ *   best-effort through `refundAiRequestAttempt` (one unit, floored at
+ *   0): deadline_exceeded, provider unavailable/transient, and auth
+ *   failures. A provider ANSWER keeps the charge — success AND
+ *   invalid_output (the provider did the work). A denied authorization
+ *   never charged, so there is nothing to refund. A refund failure must
+ *   never fail the run (callers swallow it); a late-finishing call that
+ *   lost the deadline race is still refunded by the service, because
+ *   the attempt produced no usable completion.
+ * - The one charge that is NEVER refunded: an authorization whose wait
+ *   timed out — whether its D1 batch landed is unknown, so refunding
+ *   could eat an unrelated earlier charge. It stays recorded
+ *   (conservative, honest).
  * - Storage failures propagate as mapped AppError — the CALLER classifies
  *   them as budget-store infrastructure errors (typed deferred
  *   budget_store_error), never as quota exhaustion.
@@ -89,6 +101,36 @@ export async function authorizeAiRequestAttempt(
     return { kind: 'authorized', bucketDate };
   }
   return { kind: 'denied', bucketDate };
+}
+
+/**
+ * Best-effort refund of ONE previously authorized attempt for
+ * `provider` on the Tehran budget day resolved from `nowMs`: decrements
+ * `requests` by 1, floored at 0 by the guarded UPDATE (a refund with no
+ * charge outstanding is a no-op, never a negative count). Returns true
+ * when a unit was actually refunded.
+ *
+ * Callers invoke this ONLY for attempts that ended WITHOUT a provider
+ * completion (deadline / provider unavailable / transient / auth
+ * failure, or a charge that landed but started no provider call);
+ * success and invalid_output keep the charge. Throws on a D1 error —
+ * callers swallow it: a failed refund must never fail the run.
+ */
+export async function refundAiRequestAttempt(
+  executor: DbExecutor,
+  input: {
+    readonly provider: AiProvider;
+    readonly nowMs: number;
+  },
+): Promise<boolean> {
+  const meta = await executor.run({
+    sql: `UPDATE budgets
+             SET requests = requests - 1, updated_at = ?
+           WHERE scope = '${AI_BUDGET_SCOPE}' AND budget_key = ? AND bucket_date = ?
+             AND requests > 0`,
+    params: [input.nowMs, input.provider, tehranBudgetDay(input.nowMs)],
+  });
+  return meta.changes > 0;
 }
 
 /**

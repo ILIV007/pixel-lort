@@ -92,6 +92,7 @@ export type AiDeferredReason =
   | 'deadline_exceeded'
   | 'provider_unavailable'
   | 'provider_auth_failed'
+  | 'circuit_open'
   | 'no_free_path';
 
 /** Sanitized attempt record — safe for logs and caller inspection. */
